@@ -215,5 +215,19 @@
         }
       ]
     }
-  ]
+  ],
+  "arafah": {
+    "enabled": true,
+    "title": "خطبة يوم عرفة",
+    "englishTitle": "Arafah Day Sermon",
+    "streams": [
+      {
+        "id": "arafah-en",
+        "code": "en",
+        "arabicName": "الإنجليزية",
+        "englishName": "English",
+        "embedURL": "https://www.youtube.com/embed/jugYvCSGGyE"
+      }
+    ]
+  }
 }
