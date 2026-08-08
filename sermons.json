@@ -1,0 +1,79 @@
+{
+  "makkah": {
+    "enabled": true,
+    "title": "ترجمة خطبة المسجد الحرام",
+    "url": ""
+  },
+  "madinah": {
+    "enabled": true,
+    "title": "ترجمة خطبة المسجد النبوي",
+    "url": ""
+  },
+  "arafah": {
+    "enabled": false,
+    "title": "ترجمة خطبة يوم عرفة",
+    "url": ""
+  },
+  "languages": [
+    {
+      "name": "العربية",
+      "englishName": "Arabic",
+      "url": ""
+    },
+    {
+      "name": "English",
+      "englishName": "English",
+      "url": ""
+    },
+    {
+      "name": "Français",
+      "englishName": "French",
+      "url": ""
+    },
+    {
+      "name": "اردو",
+      "englishName": "Urdu",
+      "url": ""
+    },
+    {
+      "name": "فارسی",
+      "englishName": "Persian",
+      "url": ""
+    },
+    {
+      "name": "Bahasa Melayu",
+      "englishName": "Malay",
+      "url": ""
+    },
+    {
+      "name": "Русский",
+      "englishName": "Russian",
+      "url": ""
+    },
+    {
+      "name": "Bahasa Indonesia",
+      "englishName": "Indonesian",
+      "url": ""
+    },
+    {
+      "name": "中文",
+      "englishName": "Chinese",
+      "url": ""
+    },
+    {
+      "name": "Türkçe",
+      "englishName": "Turkish",
+      "url": ""
+    },
+    {
+      "name": "Hausa",
+      "englishName": "Hausa",
+      "url": ""
+    },
+    {
+      "name": "বাংলা",
+      "englishName": "Bengali",
+      "url": ""
+    }
+  ]
+}
