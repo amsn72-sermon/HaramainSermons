@@ -1,79 +1,219 @@
 {
-  "makkah": {
-    "enabled": true,
-    "title": "ترجمة خطبة المسجد الحرام",
-    "url": ""
-  },
-  "madinah": {
-    "enabled": true,
-    "title": "ترجمة خطبة المسجد النبوي",
-    "url": ""
-  },
-  "arafah": {
-    "enabled": false,
-    "title": "ترجمة خطبة يوم عرفة",
-    "url": ""
-  },
-  "languages": [
+  "version": "1.0.0",
+  "updatedAt": "2026-08-09T00:00:00Z",
+  "remoteConfigURL": "https://amsn72-sermon.github.io/HaramainSermons/sermons.json",
+  "mosques": [
     {
-      "name": "العربية",
-      "englishName": "Arabic",
-      "url": ""
+      "id": "haram",
+      "arabicName": "المسجد الحرام",
+      "cityName": "مكة المكرمة",
+      "backgroundURL": null,
+      "streams": [
+        {
+          "id": "makkah-ar",
+          "code": "ar",
+          "arabicName": "العربية",
+          "englishName": "Arabic",
+          "embedURL": "https://www.youtube.com/embed/k48IqI2HY3g?si=ryiosUqhf3uEsPMk"
+        },
+        {
+          "id": "makkah-en",
+          "code": "en",
+          "arabicName": "الإنجليزية",
+          "englishName": "English",
+          "embedURL": "https://www.youtube.com/embed/qGMerTXPSaY?si=BsvazfWea0o_zoE5"
+        },
+        {
+          "id": "makkah-ur",
+          "code": "ur",
+          "arabicName": "الأردية",
+          "englishName": "Urdu",
+          "embedURL": "https://www.youtube.com/embed/_7j4_09kq-k?si=FjwXzx187fWI54DQ"
+        },
+        {
+          "id": "makkah-fr",
+          "code": "fr",
+          "arabicName": "الفرنسية",
+          "englishName": "Français",
+          "embedURL": "https://www.youtube.com/embed/imf3gcTlbjk?si=nbtjYWmaM394j3-w"
+        },
+        {
+          "id": "makkah-fa",
+          "code": "fa",
+          "arabicName": "الفارسية",
+          "englishName": "Persian",
+          "embedURL": "https://www.youtube.com/embed/y8LDlG_AAj0?si=6PkN8WDrq_iludLl"
+        },
+        {
+          "id": "makkah-ms",
+          "code": "ms",
+          "arabicName": "الملايو",
+          "englishName": "Bahasa Melayu",
+          "embedURL": "https://www.youtube.com/embed/7vCyt6K725E?si=P5KXwXpB7nYbcL5u"
+        },
+        {
+          "id": "makkah-id",
+          "code": "id",
+          "arabicName": "الإندونيسية",
+          "englishName": "Bahasa Indonesia",
+          "embedURL": "https://www.youtube.com/embed/1VbR8sNP4yU?si=1LJMejJQoRSk4bCt"
+        },
+        {
+          "id": "makkah-ru",
+          "code": "ru",
+          "arabicName": "الروسية",
+          "englishName": "Русский",
+          "embedURL": "https://www.youtube.com/embed/83TwmL8gsc4?si=uhlMdcDbKPyoyIoi"
+        },
+        {
+          "id": "makkah-tr",
+          "code": "tr",
+          "arabicName": "التركية",
+          "englishName": "Türkçe",
+          "embedURL": "https://www.youtube.com/embed/byO_b-IwqYw?si=UMSD5zM7esyQv0B5"
+        },
+        {
+          "id": "makkah-zh",
+          "code": "zh",
+          "arabicName": "الصينية",
+          "englishName": "中文",
+          "embedURL": "https://www.youtube.com/embed/iXfLUfmOrW4?si=2sg_gSdOFayUKz90"
+        },
+        {
+          "id": "makkah-bn",
+          "code": "bn",
+          "arabicName": "البنغالية",
+          "englishName": "বাংলা",
+          "embedURL": "https://www.youtube.com/embed/ahYf2835ZHE?si=I4Cziu9rKEm3vA4X"
+        },
+        {
+          "id": "makkah-ha",
+          "code": "ha",
+          "arabicName": "الهوسا",
+          "englishName": "Hausa",
+          "embedURL": "https://www.youtube.com/embed/Fjbxk66jT4I?si=VLiGFEOg90T-YEMj"
+        },
+        {
+          "id": "makkah-es",
+          "code": "es",
+          "arabicName": "الإسبانية",
+          "englishName": "Español",
+          "embedURL": "https://www.youtube.com/embed/R_hjmpJHLW0?si=0RmPfUaZq4uwxoYe"
+        },
+        {
+          "id": "makkah-pt",
+          "code": "pt",
+          "arabicName": "البرتغالية",
+          "englishName": "Português",
+          "embedURL": "https://www.youtube.com/embed/DYZqdUMyOUk?si=fEA6XVEXivGAgl4p"
+        }
+      ]
     },
     {
-      "name": "English",
-      "englishName": "English",
-      "url": ""
-    },
-    {
-      "name": "Français",
-      "englishName": "French",
-      "url": ""
-    },
-    {
-      "name": "اردو",
-      "englishName": "Urdu",
-      "url": ""
-    },
-    {
-      "name": "فارسی",
-      "englishName": "Persian",
-      "url": ""
-    },
-    {
-      "name": "Bahasa Melayu",
-      "englishName": "Malay",
-      "url": ""
-    },
-    {
-      "name": "Русский",
-      "englishName": "Russian",
-      "url": ""
-    },
-    {
-      "name": "Bahasa Indonesia",
-      "englishName": "Indonesian",
-      "url": ""
-    },
-    {
-      "name": "中文",
-      "englishName": "Chinese",
-      "url": ""
-    },
-    {
-      "name": "Türkçe",
-      "englishName": "Turkish",
-      "url": ""
-    },
-    {
-      "name": "Hausa",
-      "englishName": "Hausa",
-      "url": ""
-    },
-    {
-      "name": "বাংলা",
-      "englishName": "Bengali",
-      "url": ""
+      "id": "nabawi",
+      "arabicName": "المسجد النبوي",
+      "cityName": "المدينة المنورة",
+      "backgroundURL": null,
+      "streams": [
+        {
+          "id": "madinah-ar",
+          "code": "ar",
+          "arabicName": "العربية",
+          "englishName": "Arabic",
+          "embedURL": "https://www.youtube.com/embed/FBFfv-L6UgI?si=WA2FkZmdipbvO7AG"
+        },
+        {
+          "id": "madinah-en",
+          "code": "en",
+          "arabicName": "الإنجليزية",
+          "englishName": "English",
+          "embedURL": "https://www.youtube.com/embed/VmElmCxAc2Q?si=cQLuGdm_9W8qKtmA"
+        },
+        {
+          "id": "madinah-ur",
+          "code": "ur",
+          "arabicName": "الأردية",
+          "englishName": "Urdu",
+          "embedURL": "https://www.youtube.com/embed/wmm3HCqpyAQ?si=rcpoe-Ez90KV4PQi"
+        },
+        {
+          "id": "madinah-fr",
+          "code": "fr",
+          "arabicName": "الفرنسية",
+          "englishName": "Français",
+          "embedURL": "https://www.youtube.com/embed/TUL5PozXrPw?si=TjHXIn2tOqw7u3JR"
+        },
+        {
+          "id": "madinah-fa",
+          "code": "fa",
+          "arabicName": "الفارسية",
+          "englishName": "Persian",
+          "embedURL": "https://www.youtube.com/embed/IH5kzv_tgjM?si=lJTmUClq-6O8eOdW"
+        },
+        {
+          "id": "madinah-ms",
+          "code": "ms",
+          "arabicName": "الملايو",
+          "englishName": "Bahasa Melayu",
+          "embedURL": "https://www.youtube.com/embed/1Nr2gb22qh0?si=ZVuyD0nrpOROP-EJ"
+        },
+        {
+          "id": "madinah-id",
+          "code": "id",
+          "arabicName": "الإندونيسية",
+          "englishName": "Bahasa Indonesia",
+          "embedURL": "https://www.youtube.com/embed/z6IHaNkhkYA?si=l6Vl8fbc38r2yrwv"
+        },
+        {
+          "id": "madinah-ru",
+          "code": "ru",
+          "arabicName": "الروسية",
+          "englishName": "Русский",
+          "embedURL": "https://www.youtube.com/embed/k7PbHpwwGY4?si=abjuT6SK4NGNJELE"
+        },
+        {
+          "id": "madinah-tr",
+          "code": "tr",
+          "arabicName": "التركية",
+          "englishName": "Türkçe",
+          "embedURL": "https://www.youtube.com/embed/K3S-zjq-jC4?si=A35dtlZMWsLOXFXe"
+        },
+        {
+          "id": "madinah-zh",
+          "code": "zh",
+          "arabicName": "الصينية",
+          "englishName": "中文",
+          "embedURL": "https://www.youtube.com/embed/-GYvPjrQmIw?si=DFVA01oI13Euj2wU"
+        },
+        {
+          "id": "madinah-bn",
+          "code": "bn",
+          "arabicName": "البنغالية",
+          "englishName": "বাংলা",
+          "embedURL": "https://www.youtube.com/embed/SFxfZtMHLe4?si=w2wdUcxJwgskPtan"
+        },
+        {
+          "id": "madinah-ha",
+          "code": "ha",
+          "arabicName": "الهوسا",
+          "englishName": "Hausa",
+          "embedURL": "https://www.youtube.com/embed/nWi_La0DWk0?si=mVOXYYTVe_oycNc6"
+        },
+        {
+          "id": "madinah-es",
+          "code": "es",
+          "arabicName": "الإسبانية",
+          "englishName": "Español",
+          "embedURL": "https://www.youtube.com/embed/vqPmZJvA2Og?si=Z_ghVYhxzTo4-jaY"
+        },
+        {
+          "id": "madinah-pt",
+          "code": "pt",
+          "arabicName": "البرتغالية",
+          "englishName": "Português",
+          "embedURL": "https://www.youtube.com/embed/MimHYaSB3SQ?si=veFeMzY7rZeiAqa3"
+        }
+      ]
     }
   ]
 }
