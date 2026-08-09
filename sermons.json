@@ -217,17 +217,369 @@
     }
   ],
   "arafah": {
-    "enabled": true,
-    "title": "خطبة يوم عرفة",
-    "englishTitle": "Arafah Day Sermon",
-    "streams": [
-      {
-        "id": "arafah-en",
-        "code": "en",
-        "arabicName": "الإنجليزية",
-        "englishName": "English",
-        "embedURL": "https://www.youtube.com/embed/jugYvCSGGyE"
-      }
+  "enabled": true,
+  "title": "خطبة يوم عرفة",
+  "englishTitle": "Arafah Day Sermon",
+  "streams": [
+    {
+      "id": "arafah-ar",
+      "code": "ar",
+      "arabicName": "العربية — البث الأصلي",
+      "englishName": "Original Arabic",
+      "embedURL": ""
+    },
+    {
+      "id": "arafah-en",
+      "code": "en",
+      "arabicName": "الإنجليزية",
+      "englishName": "English",
+      "embedURL": "https://www.youtube.com/embed/jugYvCSGGyE"
+    },
+    {
+      "id": "arafah-ur",
+      "code": "ur",
+      "arabicName": "الأردية",
+      "englishName": "Urdu",
+      "embedURL": "https://www.youtube.com/embed/oyjHjK8_V5s"
+    },
+    {
+      "id": "arafah-fr",
+      "code": "fr",
+      "arabicName": "الفرنسية",
+      "englishName": "Français",
+      "embedURL": "https://www.youtube.com/embed/Ao_XzDNoEc0"
+    },
+    {
+      "id": "arafah-fa",
+      "code": "fa",
+      "arabicName": "الفارسية",
+      "englishName": "Persian",
+      "embedURL": "https://www.youtube.com/embed/8dCWaM4pN24"
+    },
+    {
+      "id": "arafah-ms",
+      "code": "ms",
+      "arabicName": "الملايوية",
+      "englishName": "Bahasa Melayu",
+      "embedURL": "https://www.youtube.com/embed/5ZldrSQG9og"
+    },
+    {
+      "id": "arafah-id",
+      "code": "id",
+      "arabicName": "الإندونيسية",
+      "englishName": "Bahasa Indonesia",
+      "embedURL": "https://www.youtube.com/embed/i8xG7Xrfu48"
+    },
+    {
+      "id": "arafah-ru",
+      "code": "ru",
+      "arabicName": "الروسية",
+      "englishName": "Русский",
+      "embedURL": "https://www.youtube.com/embed/fAMsga7qFGI"
+    },
+    {
+      "id": "arafah-tr",
+      "code": "tr",
+      "arabicName": "التركية",
+      "englishName": "Türkçe",
+      "embedURL": "https://www.youtube.com/embed/SQI5PgtCLMQ"
+    },
+    {
+      "id": "arafah-zh",
+      "code": "zh",
+      "arabicName": "الصينية",
+      "englishName": "中文",
+      "embedURL": "https://www.youtube.com/embed/fwC66skRvP0"
+    },
+    {
+      "id": "arafah-bn",
+      "code": "bn",
+      "arabicName": "البنغالية",
+      "englishName": "বাংলা",
+      "embedURL": "https://www.youtube.com/embed/WcAb0SyEMjg"
+    },
+    {
+      "id": "arafah-ha",
+      "code": "ha",
+      "arabicName": "الهوسا",
+      "englishName": "Hausa",
+      "embedURL": "https://www.youtube.com/embed/m07UPcNYyR0"
+    },
+    {
+      "id": "arafah-fil",
+      "code": "fil",
+      "arabicName": "الفلبينية",
+      "englishName": "Filipino",
+      "embedURL": "https://www.youtube.com/embed/EJMV6w5RA4I"
+    },
+    {
+      "id": "arafah-hi",
+      "code": "hi",
+      "arabicName": "الهندية",
+      "englishName": "Hindi",
+      "embedURL": "https://www.youtube.com/embed/UzNb3svEtfY"
+    },
+    {
+      "id": "arafah-th",
+      "code": "th",
+      "arabicName": "التايلندية",
+      "englishName": "Thai",
+      "embedURL": "https://www.youtube.com/embed/WW1ABquI41E"
+    },
+    {
+      "id": "arafah-ps",
+      "code": "ps",
+      "arabicName": "البشتوية",
+      "englishName": "Pashto",
+      "embedURL": "https://www.youtube.com/embed/tLyaPaP1yUQ"
+    },
+    {
+      "id": "arafah-ta",
+      "code": "ta",
+      "arabicName": "التاميلية",
+      "englishName": "Tamil",
+      "embedURL": "https://www.youtube.com/embed/4rsw-YGGz-0"
+    },
+    {
+      "id": "arafah-az",
+      "code": "az",
+      "arabicName": "الأذربيجانية",
+      "englishName": "Azerbaijani",
+      "embedURL": "https://www.youtube.com/embed/BUsZQ32NLcw"
+    },
+    {
+      "id": "arafah-uz",
+      "code": "uz",
+      "arabicName": "الأوزبكية",
+      "englishName": "Uzbek",
+      "embedURL": "https://www.youtube.com/embed/5Z8ch8jvvr0"
+    },
+    {
+      "id": "arafah-bal",
+      "code": "bal",
+      "arabicName": "البلوشية",
+      "englishName": "Balochi",
+      "embedURL": "https://www.youtube.com/embed/OTK1qxWMLXs"
+    },
+    {
+      "id": "arafah-es",
+      "code": "es",
+      "arabicName": "الإسبانية",
+      "englishName": "Español",
+      "embedURL": "https://www.youtube.com/embed/VqGt5qlIo9k"
+    },
+    {
+      "id": "arafah-pt",
+      "code": "pt",
+      "arabicName": "البرتغالية",
+      "englishName": "Português",
+      "embedURL": "https://www.youtube.com/embed/eVAoHdo4oEc"
+    },
+    {
+      "id": "arafah-sw",
+      "code": "sw",
+      "arabicName": "السواحلية",
+      "englishName": "Swahili",
+      "embedURL": "https://www.youtube.com/embed/HmHyyYFI8Ks"
+    },
+    {
+      "id": "arafah-am",
+      "code": "am",
+      "arabicName": "الأمهرية",
+      "englishName": "Amharic",
+      "embedURL": "https://www.youtube.com/embed/3kwOCCxhNRE"
+    },
+    {
+      "id": "arafah-so",
+      "code": "so",
+      "arabicName": "الصومالية",
+      "englishName": "Somali",
+      "embedURL": "https://www.youtube.com/embed/hxhkgS0eTSg"
+    },
+    {
+      "id": "arafah-yo",
+      "code": "yo",
+      "arabicName": "اليورباوية",
+      "englishName": "Yoruba",
+      "embedURL": "https://www.youtube.com/embed/GhCberEwkIc"
+    },
+    {
+      "id": "arafah-krn",
+      "code": "krn",
+      "arabicName": "الكانورية",
+      "englishName": "Kanuri",
+      "embedURL": "https://www.youtube.com/embed/RpVn6ws7xhk"
+    },
+    {
+      "id": "arafah-it",
+      "code": "it",
+      "arabicName": "الإيطالية",
+      "englishName": "Italiano",
+      "embedURL": "https://www.youtube.com/embed/NXdaZZTqwrw"
+    },
+    {
+      "id": "arafah-de",
+      "code": "de",
+      "arabicName": "الألمانية",
+      "englishName": "Deutsch",
+      "embedURL": "https://www.youtube.com/embed/NMtkDkLMZmM"
+    },
+    {
+      "id": "arafah-bs",
+      "code": "bs",
+      "arabicName": "البوسنية",
+      "englishName": "Bosanski",
+      "embedURL": "https://www.youtube.com/embed/NUBNnrpxOec"
+    },
+    {
+      "id": "arafah-nl",
+      "code": "nl",
+      "arabicName": "الهولندية",
+      "englishName": "Nederlands",
+      "embedURL": "https://www.youtube.com/embed/FdMNCQhkjn0"
+    },
+    {
+      "id": "arafah-sv",
+      "code": "sv",
+      "arabicName": "السويدية",
+      "englishName": "Svenska",
+      "embedURL": "https://www.youtube.com/embed/QD5IE5Z1iu8"
+    },
+    {
+      "id": "arafah-sq",
+      "code": "sq",
+      "arabicName": "الألبانية",
+      "englishName": "Shqip",
+      "embedURL": "https://www.youtube.com/embed/02EBYazYpxM"
+    },
+    {
+      "id": "arafah-ja",
+      "code": "ja",
+      "arabicName": "اليابانية",
+      "englishName": "日本語",
+      "embedURL": "https://www.youtube.com/embed/-fek2supFew"
+    },
+    {
+      "id": "arafah-ko",
+      "code": "ko",
+      "arabicName": "الكورية",
+      "englishName": "한국어",
+      "embedURL": "https://www.youtube.com/embed/YIXPUooNssw"
+    },
+    {
+      "id": "arafah-km",
+      "code": "km",
+      "arabicName": "الخميرية",
+      "englishName": "Khmer",
+      "embedURL": "https://www.youtube.com/embed/AobULka4IkA"
+    },
+    {
+      "id": "arafah-wo",
+      "code": "wo",
+      "arabicName": "الولوفية",
+      "englishName": "Wolof",
+      "embedURL": "https://www.youtube.com/embed/DCAlSd47JJk"
+    },
+    {
+      "id": "arafah-bm",
+      "code": "bm",
+      "arabicName": "البامبارية",
+      "englishName": "Bambara",
+      "embedURL": "https://www.youtube.com/embed/iN7sZL2ZPrA"
+    },
+    {
+      "id": "arafah-ne",
+      "code": "ne",
+      "arabicName": "النيبالية",
+      "englishName": "Nepali",
+      "embedURL": "https://www.youtube.com/embed/HjJHxQ0lRLk"
+    },
+    {
+      "id": "arafah-tg",
+      "code": "tg",
+      "arabicName": "الطاجيكية",
+      "englishName": "Tajik",
+      "embedURL": "https://www.youtube.com/embed/HSiP-d3I2wQ"
+    },
+    {
+      "id": "arafah-ky",
+      "code": "ky",
+      "arabicName": "القيرغيزية",
+      "englishName": "Kyrgyz",
+      "embedURL": "https://www.youtube.com/embed/2HRzK-idst4"
+    },
+    {
+      "id": "arafah-ig",
+      "code": "ig",
+      "arabicName": "الإيبو",
+      "englishName": "Igbo",
+      "embedURL": "https://www.youtube.com/embed/3rVb4yvDuaU"
+    },
+    {
+      "id": "arafah-igala",
+      "code": "igala",
+      "arabicName": "إيغالا",
+      "englishName": "Igala",
+      "embedURL": "https://www.youtube.com/embed/rHHYeUto5AU"
+    },
+    {
+      "id": "arafah-zarma",
+      "code": "zarma",
+      "arabicName": "الزبرماوية",
+      "englishName": "Zarma",
+      "embedURL": "https://www.youtube.com/embed/ueCAigT0kKs"
+    },
+    {
+      "id": "arafah-vi",
+      "code": "vi",
+      "arabicName": "الفيتنامية",
+      "englishName": "Tiếng Việt",
+      "embedURL": "https://www.youtube.com/embed/1MPO_hMTaD0"
+    },
+    {
+      "id": "arafah-my",
+      "code": "my",
+      "arabicName": "البورمية",
+      "englishName": "Burmese",
+      "embedURL": "https://www.youtube.com/embed/_mTh6JUKPqs"
+    },
+    {
+      "id": "arafah-jula",
+      "code": "jula",
+      "arabicName": "الجولا",
+      "englishName": "Jula",
+      "embedURL": "https://www.youtube.com/embed/CUwZ4T8vDFA"
+    },
+    {
+      "id": "arafah-ful",
+      "code": "ful",
+      "arabicName": "الفلاتية",
+      "englishName": "Fulani",
+      "embedURL": "https://www.youtube.com/embed/5PpUFYzvnho"
+    },
+    {
+      "id": "arafah-ml",
+      "code": "ml",
+      "arabicName": "المليبارية",
+      "englishName": "Malayalam",
+      "embedURL": "https://www.youtube.com/embed/_rzrSfu7TUs"
+    },
+    {
+      "id": "arafah-ku",
+      "code": "ku",
+      "arabicName": "الكردية (كرمانجي)",
+      "englishName": "Kurdish (Kurmanji)",
+      "embedURL": "https://www.youtube.com/embed/V9LD5j0jsPM"
+    },
+    {
+      "id": "arafah-pa",
+      "code": "pa",
+      "arabicName": "البنجابية",
+      "englishName": "Punjabi",
+      "embedURL": "https://www.youtube.com/embed/usx3z9QHZ8c"
+    }
+  ]
+}
     ]
   }
 }
