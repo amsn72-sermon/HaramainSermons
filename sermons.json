@@ -53,7 +53,7 @@
     "title": "خطبة يوم عرفة",
     "englishTitle": "Arafah Day Sermon",
     "streams": [
-      {"id":"arafah-ar","code":"ar","arabicName":"العربية — البث الأصلي","englishName":"Original Arabic","embedURL":"https://www.youtube.com/watch?v=Ea664JHx2rY"},
+      {"id":"arafah-ar","code":"ar","arabicName":"العربية","englishName":"Original Arabic","embedURL":"https://www.youtube.com/watch?v=Ea664JHx2rY"},
       {"id":"arafah-en","code":"en","arabicName":"الإنجليزية","englishName":"English","embedURL":"https://www.youtube.com/embed/jugYvCSGGyE"},
       {"id":"arafah-ur","code":"ur","arabicName":"الأردية","englishName":"Urdu","embedURL":"https://www.youtube.com/embed/oyjHjK8_V5s"},
       {"id":"arafah-fr","code":"fr","arabicName":"الفرنسية","englishName":"Français","embedURL":"https://www.youtube.com/embed/Ao_XzDNoEc0"},
