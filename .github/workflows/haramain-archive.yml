@@ -1,0 +1,41 @@
+name: Refresh Haramain sermon archive
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .haramain-sync/server/**
+      - .haramain-sync/sync.mjs
+      - .haramain-sync/youtube-sync.py
+      - .github/workflows/haramain-archive.yml
+permissions:
+  contents: write
+concurrency:
+  group: haramain-archive
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Read official YouTube playlists and scheduled broadcasts
+        run: |
+          python3 -m pip install --disable-pip-version-check yt-dlp==2025.10.14
+          python3 .haramain-sync/youtube-sync.py
+          node .haramain-sync/sync.mjs
+      - name: Preserve the archive in the repository
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .haramain-sync/youtube-catalogue.json archive/feed.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Refresh public sermon archive'
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
