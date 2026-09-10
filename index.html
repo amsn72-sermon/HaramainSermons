@@ -1410,7 +1410,7 @@ const inboxBeforePortals=renderMyTasks;renderMyTasks=function(){inboxBeforePorta
 const catalogueBeforePortals=openCatalogue;openCatalogue=function(){portals.hidden=true;workspaceBanner.hidden=true;accountTools.hidden=true;catalogueBeforePortals();q('#hp-person').textContent='شاشة المستفيدين';};
 catalogue.classList.add('public-library');catalogue.querySelector('h2').classList.add('public-intro');catalogue.querySelector('p').textContent='اعثر على الخطبة بلغتك. لا تظهر هنا سوى المواد التي اكتملت موافقاتها ونشرها المسؤول. هذه معاينة خاصة وليست مكتبة عامة منشورة بعد.';
 const publicBack=[...catalogue.querySelectorAll('button')].find(b=>b.textContent==='العودة');publicBack.textContent='العودة إلى الشاشة الرئيسية';publicBack.onclick=()=>{catalogue.hidden=true;accountTools.hidden=!sessionAccount;if(sessionAccount)page(canAdmin()?'dashboard':'mytasks');else{history.replaceState(null,'',location.pathname);showLogin();}};
-showLogin=function(){defaultLogin();workspaceBanner.hidden=true;catalogue.hidden=true;registration.hidden=true;const hash=location.hash||'#public';if(hash==='#public'||hash.startsWith('#sermon=')){portals.hidden=true;openCatalogue();return;}if(hash==='#admin'||hash==='#translator'){openLogin(hash.slice(1));return;}login.hidden=true;portals.hidden=false;q('#hp-person').textContent='الشاشات الرئيسية';};
+istory.replaceState(null,'',location.pathname);};const hash=location.hash||'';
 loginBack.onclick=()=>{sessionAccount=null;history.replaceState(null,'',location.pathname);showLogin();};
 
 // Keep embedded recommendations and outbound links out of the interaction flow.
