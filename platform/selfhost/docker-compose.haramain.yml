@@ -1,0 +1,14 @@
+# طبقة إعدادات خاصة بمنصة الحرمين فوق docker-compose.yml و docker-compose.caddy.yml
+services:
+  caddy:
+    ports: !override
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+      - "127.0.0.1:3001:3001"   # Studio — من الخادم نفسه فقط
+
+  # منفذ قاعدة البيانات لا يُفتح للإنترنت
+  supavisor:
+    ports: !override
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
+      - "127.0.0.1:${POOLER_PROXY_PORT_TRANSACTION}:6543"

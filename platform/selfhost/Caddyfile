@@ -1,0 +1,27 @@
+# واجهة API العامة فقط — لا شيء آخر يُخدَم على الدومين
+{$PROXY_DOMAIN} {
+    @supabase_api path /auth/v1/* /rest/v1/* /storage/v1/*
+
+    handle @supabase_api {
+        reverse_proxy api-gw:8000
+    }
+
+    # Studio وبقية المسارات غير متاحة من الإنترنت
+    handle {
+        respond 404
+    }
+
+    header {
+        -server
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options nosniff
+    }
+}
+
+# لوحة Studio: على منفذ داخلي مربوط بـ 127.0.0.1 فقط، ويُفتح عبر نفق SSH
+:3001 {
+    basic_auth {
+        {$PROXY_AUTH_USERNAME} {$PROXY_AUTH_PASSWORD}
+    }
+    reverse_proxy studio:3000
+}
