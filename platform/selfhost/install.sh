@@ -16,7 +16,7 @@
 set -e
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-MIGRATION="$HERE/../supabase/migrations/0001_init.sql"
+MIGRATION="$HERE/../supabase/migrations/0001_init.sql"  # للتحقق من تشغيل السكربت من المستودع
 BASE="${BASE:-/opt/haramain}"
 PROJECT="$BASE/supabase"
 SETUP_URL="https://raw.githubusercontent.com/supabase/supabase/master/docker/setup.sh"
@@ -105,15 +105,9 @@ fi
 log "تشغيل الخدمات (قد يستغرق عدة دقائق أول مرة)"
 sh run.sh start
 
-# --- ٧. مخطط المنصة
-PGPASS=$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)
-psql_db() { docker exec -i -e PGPASSWORD="$PGPASS" supabase-db psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 "$@"; }
-if psql_db -tAc "select to_regclass('public.tracks') is not null" | grep -q t; then
-    log "مخطط المنصة مطبّق مسبقًا — تخطٍّ"
-else
-    log "تطبيق مخطط المنصة 0001_init.sql"
-    psql_db -q < "$MIGRATION"
-fi
+# --- ٧. مخطط المنصة وتحديثاته (كل ملفات supabase/migrations بالترتيب)
+log "تطبيق مخطط المنصة"
+PROJECT="$PROJECT" sh "$HERE/migrate.sh"
 
 # --- ٨. النتيجة
 ANON=$(grep '^ANON_KEY=' .env | cut -d= -f2-)

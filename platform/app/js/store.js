@@ -25,7 +25,8 @@ export const SERMON_TYPES = ['خطبة جمعة', 'خطبة عرفة', 'خطبة
 export const EVENT_LABEL = {
   assigned: 'إسناد المراحل وإرسال المادة', accepted: 'استلام المهمة وقبولها', edited: 'حفظ تعديل على الترجمة',
   audio_uploaded: 'رفع التسجيل الصوتي', completed: 'إتمام المرحلة', returned: 'إعادة للتعديل',
-  published: 'النشر على الموقع العام', unpublished: 'إخفاء من الموقع العام'
+  published: 'النشر على الموقع العام', unpublished: 'إخفاء من الموقع العام',
+  reassigned: 'تغيير المسؤول'
 };
 
 export const isAdmin = () => ['manager', 'coordinator'].includes(state.profile?.role) && state.profile?.status === 'active';

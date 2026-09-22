@@ -1,5 +1,5 @@
 // لوحة المتابعة (المنسق والمدير)، والمترجم يُحوَّل إلى مهامه
-import { h, fill, emptyState, fmtSermonDate } from '../ui.js';
+import { h, fill, emptyState, fmtSermonDate, toast, busy, dialog, confirm } from '../ui.js';
 import { db } from '../sb.js';
 import { state, isAdmin, MATERIAL_SELECT, MOSQUE, CITY, PRIORITY, sortStages, currentStage, trackProgress,
   isLateNow, hadLateness, langName, stageName } from '../store.js';
@@ -103,13 +103,52 @@ export async function render(ctx) {
   }
 
   const details = h('div', { style: { marginTop: '16px' } });
+  let members = null;
+  const loadMembers = async () => members || (members = await db.select('profiles', {
+    select: 'id,full_name,role,member_languages(language_code)', status: 'eq.active', order: 'full_name.asc' }));
+  const reload = () => ctx.navigate(location.pathname + location.search, { replace: true });
+
+  // تغيير مسؤول مرحلة لم تكتمل (ومنها المترجم قبل الاستلام أو أثناءه)
+  async function reassign(t, s) {
+    const def = state.stages.find(x => x.key === s.stage_key);
+    const all = await loadMembers();
+    const ok = all.filter(p => p.id !== s.assignee_id && (
+      def.assignee_role === 'translator' ? (p.member_languages || []).some(l => l.language_code === t.language_code)
+        : def.assignee_role === 'coordinator' ? ['coordinator', 'manager'].includes(p.role) : p.role === 'manager'));
+    if (!ok.length) return toast('لا يوجد عضو مفعّل آخر مؤهل لهذه المرحلة في هذه اللغة.', 'bad');
+    const pick = h('select', ok.map(p => h('option', { value: p.id }, p.full_name)));
+    const chosen = await dialog({
+      title: `تغيير المسؤول — ${stageName(s.stage_key)} (${langName(t.language_code)})`,
+      body: h('div.stack', h('p.small', 'المسؤول الحالي: ', h('b', s.assignee?.full_name || '—')), h('label.field', 'المسؤول الجديد', pick),
+        s.status === 'active' || t.status === 'awaiting_receipt' ? h('p.small.muted', 'تنتقل المهمة فورًا إلى المسؤول الجديد وتُغلق عن السابق، ويُحفظ ما كُتب من الترجمة.') : null),
+      buttons: [{ label: 'تغيير المسؤول', kind: 'primary', value: () => pick.value }, { label: 'إلغاء', value: null }]
+    });
+    if (!chosen) return;
+    try { await db.rpc('reassign_stage', { p_track: t.id, p_stage: s.stage_key, p_assignee: chosen }); toast('تم تغيير المسؤول.', 'ok'); reload(); }
+    catch (err) { toast(err.message, 'bad'); }
+  }
+  async function cancelTrack(m, t) {
+    const last = m.tracks.length === 1;
+    const ok = await confirm('إلغاء إسناد اللغة',
+      `سيُلغى مسار «${langName(t.language_code)}» لهذه المادة بكل مراحله وما كُتب فيه${last ? '، ولأنه المسار الوحيد ستُحذف المادة كلها' : ''}. لا يمكن التراجع.`,
+      'إلغاء الإسناد', 'danger');
+    if (!ok) return;
+    try { await db.rpc('cancel_track', { p_track: t.id }); toast('أُلغي الإسناد.', 'ok'); reload(); }
+    catch (err) { toast(err.message, 'bad'); }
+  }
+
   function showDetails(m) {
     details.replaceChildren(h('div.card',
       h('div.row', h('h3', { style: { flex: 1 } }, `تفاصيل: ${m.title}`), h('button.btn.sm', { onclick: () => details.replaceChildren() }, 'إغلاق')),
       h('p.muted.small', [MOSQUE[m.mosque], m.khateeb?.name, m.sermon_date && fmtSermonDate(m.sermon_date), PRIORITY[m.priority]].filter(Boolean).join(' · ')),
       h('div.stack', m.tracks.map(t => h('div.stack', { style: { gap: '8px' } },
-        h('div.row', h('b', langName(t.language_code)), statusBadge(t), lateSummary(t)),
-        stageStrip(t), timelineTable(t))))));
+        h('div.row', h('b', langName(t.language_code)), statusBadge(t), lateSummary(t), h('span', { style: { flex: 1 } }),
+          t.status !== 'completed' && h('button.btn.sm.danger', { type: 'button', onclick: e => busy(e.currentTarget, () => cancelTrack(m, t)) }, 'إلغاء إسناد اللغة')),
+        stageStrip(t),
+        t.status !== 'completed' && h('div.row', { style: { gap: '6px' } }, h('span.small.muted', 'تغيير المسؤول:'),
+          t.stages.filter(s => s.status !== 'done').map(s => h('button.btn.sm', { type: 'button', onclick: e => busy(e.currentTarget, () => reassign(t, s)) },
+            `${stageName(s.stage_key)} — ${s.assignee?.full_name || '—'}`))),
+        timelineTable(t))))));
     details.scrollIntoView({ behavior: 'smooth' });
   }
 

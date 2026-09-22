@@ -168,22 +168,48 @@ exception when others then
   raise notice 'PASS: ترجمة من مسافات ووسوم فقط مرفوضة';
 end $$;
 select public.save_translation(:'en_track', '<p>Excellence (Ihsan) is the highest level of faith.</p>');
+select public._assert((select 'التسجيل الصوتي مطلوب في هذه المرحلة ولم يُرفع بعد' = any(public.stage_blockers(:'en_track'))),
+  'التسجيل الصوتي إلزامي في مرحلته (ملاحظة ١٢)');
+do $$ begin
+  perform public.complete_stage((select id from public.tracks where language_code = 'en'), true);
+  raise exception 'NO_ERROR';
+exception when others then
+  if sqlerrm = 'NO_ERROR' then raise exception 'FAIL: أُتمّت الترجمة بلا تسجيل صوتي'; end if;
+  raise notice 'PASS: لا إتمام بلا التسجيل الصوتي المطلوب';
+end $$;
 select public.set_track_audio(:'en_track', 'en-track/audio.mp3');
+do $$ begin
+  perform public.complete_stage((select id from public.tracks where language_code = 'en'), false);
+  raise exception 'NO_ERROR';
+exception when others then
+  if sqlerrm = 'NO_ERROR' then raise exception 'FAIL: إتمام بلا تأكيد المراجعة'; end if;
+  raise notice 'PASS: الإتمام يتطلب تأكيد المراجعة (ملاحظة ٨)';
+end $$;
 commit;
 
--- نحاكي تأخرًا: الموعد مضى قبل عشر دقائق
+-- نحاكي تأخرًا: موعد الترجمة مضى قبل عشر دقائق، ولم يبقَ للمسار كله إلا ٣٥ دقيقة
 update public.track_stages set due_at = now() - interval '10 minutes'
 where track_id = :'en_track' and stage_key = 'translation';
+update public.tracks set deadline_at = now() + interval '35 minutes' where id = :'en_track';
 
 begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'yusuf', true);
-select public.complete_stage(:'en_track');
+select public.complete_stage(:'en_track', true);
+select public._assert((select count(*) = 0 from public.tracks), 'بعد الإتمام لا يعود المترجم يرى المهمة (ملاحظة ١١)');
+select public._assert((select count(*) = 0 from public.materials), 'ولا يرى بيانات المادة');
+select public._assert((select score between 80 and 90 and not is_open from public.my_history() where stage_key = 'translation'),
+  'سجله يحفظ الإنجاز مع تقييم ينقص بقدر التأخير');
 commit;
 
 select public._assert((select late_seconds between 590 and 700 from public.track_stages
   where track_id = :'en_track' and stage_key = 'translation'), 'تأخر الترجمة (١٠ دقائق) سُجّل');
-select public._assert((select status = 'active' and due_at > now() + interval '19 minutes' from public.track_stages
+select public._assert((select status = 'active' and planned_minutes = 10 from public.track_stages
   where track_id = :'en_track' and stage_key = 'sharia_review'),
-  'المراجعة الشرعية تبدأ الآن بمدتها كاملة — تأخر السابق لا يأكل وقتها');
+  'تأخر الترجمة يقلّص ما بعدها: المراجعة الشرعية ٢٠/٧٠ من ٣٥ دقيقة متبقية = ١٠ (ملاحظة ٣)');
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'khalid', true);
+select public._assert((select count(*) = 1 from public.tracks where language_code = 'en'), 'المراجع الشرعي يرى المهمة ما دامت لديه');
+select public.set_track_audio(:'en_track', 'en-track/audio-v2.mp3');
+select public._assert((select audio_path = 'en-track/audio-v2.mp3' from public.tracks where language_code = 'en'), 'المراجع يستبدل التسجيل الصوتي (ملاحظة ٧)');
+commit;
 
 -- 8) الإعادة: السبب إلزامي، والتأخير المسجل لا يُمحى
 begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'khalid', true);
@@ -200,13 +226,18 @@ select public._assert((select status = 'active' and rounds = 2 and late_seconds 
   from public.track_stages where track_id = :'en_track' and stage_key = 'translation'),
   'الترجمة عادت نشطة (الجولة ٢) مع بقاء سجل التأخير');
 
+-- الوقت انتهى: المرحلة التالية تأخذ الحد الأدنى (ربع نصيبها) لا صفرًا
+update public.tracks set deadline_at = now() - interval '1 minute' where id = :'en_track';
 -- 9) إكمال المسار
 begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'yusuf', true);
-select public.complete_stage(:'en_track'); commit;
+select public.complete_stage(:'en_track', true); commit;
+select public._assert((select planned_minutes = 5 from public.track_stages where track_id = :'en_track' and stage_key = 'sharia_review'),
+  'بعد انقضاء الموعد النهائي تأخذ المرحلة حدها الأدنى (٥ من ٢٠)');
+update public.tracks set deadline_at = now() + interval '2 hours' where id = :'en_track';
 begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'khalid', true);
-select public.complete_stage(:'en_track'); commit;
+select public.complete_stage(:'en_track', true); commit;
 begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'sara', true);
-select public.complete_stage(:'en_track'); select public.complete_stage(:'en_track'); commit;
+select public.complete_stage(:'en_track', true); select public.complete_stage(:'en_track', true); commit;
 
 begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'coord', true);
 do $$ begin
@@ -214,7 +245,7 @@ do $$ begin
   raise exception 'NO_ERROR';
 exception when others then
   if sqlerrm = 'NO_ERROR' then raise exception 'FAIL: قبول المنسق بلا تأكيد التحقق'; end if;
-  raise notice 'PASS: قبول المنسق يتطلب تأكيد التحقق';
+  raise notice 'PASS: قبول المنسق يتطلب تأكيد التحقق من الترجمة والتسجيل';
 end $$;
 select public.complete_stage(:'en_track', true);
 commit;
@@ -233,7 +264,7 @@ end $$;
 commit;
 
 begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'mgr', true);
-select public.complete_stage(:'en_track');
+select public.complete_stage(:'en_track', true);
 commit;
 
 -- 10) النشر والموقع العام
@@ -253,13 +284,81 @@ exception when others then
 end $$;
 -- السجل غير قابل للتلاعب
 delete from public.track_events;
+commit;
 select public._assert((select count(*) > 0 from public.track_events), 'حذف سجل الإجراءات من الواجهة لا أثر له');
+
+-- 11) تغيير المسؤول (ملاحظة ١): ترجمة الأردية من خالد إلى سارة قبل الاستلام
+update public.tracks set receipt_due_at = now() - interval '1 hour' where id = :'ur_track';
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'yusuf', true);
+do $$ begin
+  perform public.reassign_stage((select id from public.tracks where language_code = 'ur'), 'translation', '00000000-0000-0000-0000-00000000000e');
+  raise exception 'NO_ERROR';
+exception when others then
+  if sqlerrm = 'NO_ERROR' then raise exception 'FAIL: مترجم غيّر الإسناد'; end if;
+  raise notice 'PASS: تغيير المسؤول للإدارة فقط';
+end $$;
+commit;
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'coord', true);
+do $$ begin
+  perform public.reassign_stage((select id from public.tracks where language_code = 'ur'), 'translation', '00000000-0000-0000-0000-00000000000c');
+  raise exception 'NO_ERROR';
+exception when others then
+  if sqlerrm = 'NO_ERROR' then raise exception 'FAIL: أُسند لغير مؤهل'; end if;
+  raise notice 'PASS: لا يُعاد الإسناد لغير المؤهل في اللغة';
+end $$;
+select public.reassign_stage(:'ur_track', 'translation', :'sara');
+do $$ begin
+  perform public.reassign_stage((select id from public.tracks where language_code = 'en'), 'translation', '00000000-0000-0000-0000-00000000000d');
+  raise exception 'NO_ERROR';
+exception when others then
+  if sqlerrm = 'NO_ERROR' then raise exception 'FAIL: غُيّر مسؤول مرحلة منجزة'; end if;
+  raise notice 'PASS: لا يتغير مسؤول مرحلة أُنجزت';
+end $$;
+commit;
+select public._assert((select s.assignee_id = :'sara' and t.receipt_due_at > now() from public.track_stages s join public.tracks t on t.id = s.track_id
+  where s.track_id = :'ur_track' and s.stage_key = 'translation'), 'الإسناد انتقل لسارة ومهلة الاستلام بدأت من جديد');
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'khalid', true);
+select public._assert((select count(*) = 0 from public.tracks where language_code = 'ur'), 'خالد لم يعد يرى مسار الأردية بعد نقله');
 commit;
 
--- 11) لا يُعطَّل عضو لديه إسناد قائم (مسار الأردية لم يُستلم)
+-- مرحلة التسجيل مسندة للمراجع اللغوي: المترجم لا يُطالب به ولا يرفعه (ملاحظة ١٢)
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'mgr', true);
+select public.create_material(jsonb_build_object(
+  'material', jsonb_build_object('material_type','خطب','title','تسجيل عند المراجع','mosque','madinah','source_html','<p>نص</p>','deliverable','text_audio'),
+  'stage_minutes', '{"translation":60,"sharia_review":20,"linguistic_review":20,"editing":20,"coordinator_receipt":10}'::jsonb,
+  'languages', jsonb_build_array(jsonb_build_object('code','en','audio_stage','linguistic_review','stages', jsonb_build_array(
+    jsonb_build_object('key','translation','assignee','00000000-0000-0000-0000-00000000000c'),
+    jsonb_build_object('key','linguistic_review','assignee','00000000-0000-0000-0000-00000000000e'),
+    jsonb_build_object('key','coordinator_receipt','assignee','00000000-0000-0000-0000-00000000000b'))))
+)) as m2 \gset
+commit;
+select id as t2 from public.tracks where material_id = :'m2' \gset
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'yusuf', true);
+select public.accept_track(:'t2');
+select public.save_translation(:'t2', '<p>text</p>');
+select public._assert((select coalesce(array_length(public.stage_blockers(:'t2'), 1), 0) = 0), 'المترجم يُتم بلا تسجيل حين يكون التسجيل على المراجع');
+do $$ begin
+  perform public.set_track_audio((select t.id from public.tracks t join public.materials m on m.id = t.material_id where m.title = 'تسجيل عند المراجع'), 'x.mp3');
+  raise exception 'NO_ERROR';
+exception when others then
+  if sqlerrm = 'NO_ERROR' then raise exception 'FAIL: المترجم رفع تسجيلًا مسندًا للمراجع'; end if;
+  raise notice 'PASS: المترجم لا يرفع تسجيلًا مسندًا لمرحلة لاحقة';
+end $$;
+select public.complete_stage(:'t2', true);
+commit;
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'sara', true);
+select public._assert((select 'التسجيل الصوتي مطلوب في هذه المرحلة ولم يُرفع بعد' = any(public.stage_blockers(:'t2'))), 'المراجع اللغوي مطالب بالتسجيل');
+commit;
+-- إلغاء لغة من مادة (ملاحظة ١): المادة تُحذف حين لا تبقى لها لغات
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'coord', true);
+select public.cancel_track(:'t2');
+commit;
+select public._assert((select count(*) = 0 from public.materials where id = :'m2'), 'إلغاء آخر لغة يحذف المادة');
+
+-- 12) لا يُعطَّل عضو لديه إسناد قائم (مسار الأردية لم يُستلم)
 begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'mgr', true);
 do $$ begin
-  perform public.admin_update_member('00000000-0000-0000-0000-00000000000d', 'disabled', null, null);
+  perform public.admin_update_member('00000000-0000-0000-0000-00000000000e', 'disabled', null, null);
   raise exception 'NO_ERROR';
 exception when others then
   if sqlerrm = 'NO_ERROR' then raise exception 'FAIL: عُطّل عضو لديه إسناد'; end if;
@@ -267,7 +366,7 @@ exception when others then
 end $$;
 commit;
 
--- 12) السجل الكامل
+-- 13) السجل الكامل
 \echo '--- سجل الإجراءات ---'
 select to_char(e.created_at, 'HH24:MI:SS') || ' · ' || p.full_name || ' · ' || e.action
        || coalesce(' · ' || e.stage_key, '') || coalesce(' → ' || e.target_stage_key, '') || coalesce(' · ' || e.note, '')

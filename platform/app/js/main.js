@@ -3,6 +3,8 @@ import { h, toast } from './ui.js';
 import { state, loadProfile, loadReference, isAdmin, isActive } from './store.js';
 import { staffShell } from './views/shell.js';
 
+const DEFAULT_TITLE = document.title;
+
 const routes = [
   // [النمط، الاستيراد، يتطلب دخولًا، للإدارة فقط]
   ['/', () => import('./views/public.js'), false],
@@ -70,6 +72,7 @@ async function render() {
       if (route.adminOnly && !isAdmin()) return navigate('/app', { replace: true });
     }
     const mod = await route.load();
+    document.title = DEFAULT_TITLE;
     const ctx = { params: route.params, query: new URLSearchParams(location.search), navigate };
     const view = await mod.render(ctx);
     if (seq !== renderSeq) return;

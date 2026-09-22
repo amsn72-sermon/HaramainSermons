@@ -6,6 +6,8 @@ import { createEditor } from '../editor.js';
 import { plainText } from '../sanitize.js';
 
 const DRAFT = 'hs.material-draft';
+// ٣. المدة الكلية تُحدَّد تلقائيًا حسب الأهمية (بالأيام)، وتبقى قابلة للتعديل
+const PRIORITY_DAYS = { emergency: 1, urgent: 2, normal: 3 };
 
 export async function render(ctx) {
   const members = await db.select('profiles', {
@@ -27,21 +29,20 @@ export async function render(ctx) {
     mosque: h('select', Object.entries(MOSQUE).map(([k, v]) => h('option', { value: k }, v))),
     khateeb_id: h('select'),
     sermon_date: h('input', { type: 'date' }),
-    author: h('input'), audience: h('input', { placeholder: 'مثال: زوار الحرمين' }),
-    channel: h('input'), purpose: h('input', { placeholder: 'مثال: توعية الزوار' }),
+    author: h('input'),
     instructions: h('textarea', { placeholder: 'السياق، متطلبات الصياغة، وطريقة الاستخدام' }),
     source_mode: h('select', h('option', { value: 'text' }, 'إدخال النص مباشرة'), h('option', { value: 'pdf' }, 'إرفاق ملف PDF عربي')),
     pdf: h('input', { type: 'file', accept: 'application/pdf' }),
     deliverable: h('select', h('option', { value: 'text_audio' }, 'ترجمة كتابية مع تسجيل صوتي'), h('option', { value: 'text' }, 'ترجمة كتابية فقط')),
     priority: h('select', Object.entries(PRIORITY).map(([k, v]) => h('option', { value: k }, v))),
-    total: h('input', { type: 'number', min: 1, value: 3 }),
+    total: h('input', { type: 'number', min: 1, value: PRIORITY_DAYS.normal }),
     unit: h('select', h('option', { value: '60' }, 'ساعات'), h('option', { value: '1440', selected: true }, 'أيام')),
     receipt: h('input', { type: 'number', min: 5, value: 120 }),
     reminder: h('select', [5, 15, 30, 60].map(n => h('option', { value: n, selected: n === 15 }, fmtMinutes(n)))),
     escalate: h('input', { type: 'checkbox' }),
     feed_record_id: h('select')
   };
-  const source = createEditor({ label: 'النص العربي', placeholder: 'اكتب النص العربي أو الصقه هنا…', html: draft.source_html || '' });
+  const source = createEditor({ plain: true, label: 'النص العربي', placeholder: 'اكتب النص العربي أو الصقه هنا…', html: draft.source_html || '' });
   for (const [k, el] of Object.entries(f)) if (draft[k] !== undefined && el.type !== 'file') el.type === 'checkbox' ? (el.checked = draft[k]) : (el.value = draft[k]);
 
   function fillKhateebs() {
@@ -101,11 +102,13 @@ export async function render(ctx) {
   }
   Object.values(stageInputs).forEach(i => i.addEventListener('input', updateSum));
   f.total.addEventListener('input', distribute); f.unit.addEventListener('change', distribute);
+  f.priority.addEventListener('change', () => { f.total.value = PRIORITY_DAYS[f.priority.value] || 3; f.unit.value = '1440'; distribute(); });
   if (draft.stage_minutes) { slaStages.forEach(s => stageInputs[s.key].value = draft.stage_minutes[s.key] ?? 0); updateSum(); } else distribute();
 
   // ---------------- الخطوة ٣: الإسناد ----------------
-  const picked = new Map(); // code -> { stages: Map(key -> assigneeId) }
-  (draft.languages || []).forEach(l => picked.set(l.code, { stages: new Map(l.stages.map(s => [s.key, s.assignee])) }));
+  const picked = new Map(); // code -> { stages: Map(key -> assigneeId), audio: stageKey }
+  (draft.languages || []).forEach(l => picked.set(l.code, { stages: new Map(l.stages.map(s => [s.key, s.assignee])), audio: l.audio_stage || 'translation' }));
+  const translatorStage = key => state.stages.find(s => s.key === key)?.assignee_role === 'translator';
   const langSearch = h('input', { type: 'search', placeholder: 'ابحث عن لغة' });
   const langPills = h('div.lang-pills');
   const assignBox = h('div.stack');
@@ -127,8 +130,9 @@ export async function render(ctx) {
   }
   function toggleLang(code) {
     if (picked.has(code)) picked.delete(code);
-    else { picked.set(code, { stages: new Map(activeStages.map(s => [s.key, ''])) }); suggest(code); }
+    else { picked.set(code, { stages: new Map(activeStages.map(s => [s.key, ''])), audio: 'translation' }); suggest(code); }
     drawLangs(); drawAssign();
+  f.deliverable.addEventListener('change', drawAssign);
   }
   function drawLangs() {
     const q = langSearch.value.trim();
@@ -164,6 +168,14 @@ export async function render(ctx) {
             opts.map(m => h('option', { value: m.id, selected: entry.stages.get(s.key) === m.id }, m.full_name)));
           return h('div.stack', { style: { gap: '4px' } }, h('label.check', box, s.name_ar, s.is_required ? h('span.small.muted', '(أساسية)') : null), select);
         })),
+        f.deliverable.value === 'text_audio' && (() => {
+          const opts = activeStages.filter(s => entry.stages.has(s.key) && translatorStage(s.key));
+          if (!opts.some(s => s.key === entry.audio)) entry.audio = 'translation';
+          return h('label.field', { style: { marginTop: '8px', maxWidth: '420px' } }, 'مسؤول التسجيل الصوتي',
+            h('small', 'التسجيل إلزامي من هذه المرحلة، ويمكن لمن بعدها الاستماع إليه واستبداله'),
+            h('select', { onchange: e => { entry.audio = e.target.value; } },
+              opts.map(s => h('option', { value: s.key, selected: entry.audio === s.key }, `${s.name_ar} — ${members.find(m => m.id === entry.stages.get(s.key))?.full_name || 'لم يُختر بعد'}`))));
+        })(),
         h('p.small.muted', 'المسار: ' + activeStages.filter(s => entry.stages.has(s.key)).map(s => s.name_ar).join(' ← ')),
         warnings.map(w => h('p.small', { style: { color: 'var(--warn)' } }, '⚠ ' + w)));
     }));
@@ -178,21 +190,19 @@ export async function render(ctx) {
       h('div.grid-2', h('label.field', 'نوع المادة', f.material_type), h('label.field', 'مكان الخطبة / الموقع', f.mosque)),
       sermonOnly,
       h('label.field', 'العنوان', f.title),
-      h('div.grid-2', h('label.field', 'التاريخ', f.sermon_date), h('label.field', 'المؤلف أو الجهة المصدرة', f.author),
-        h('label.field', 'الجمهور المستهدف', f.audience), h('label.field', 'مكان النشر أو قناة الاستخدام', f.channel)),
-      h('label.field', 'الغرض من المادة', f.purpose),
+      h('div.grid-2', h('label.field', 'التاريخ', f.sermon_date), h('label.field', 'المؤلف أو الجهة المصدرة', f.author)),
       h('label.field', 'تفاصيل المادة وتعليمات الترجمة', f.instructions),
       h('div.grid-2', h('label.field', 'طريقة إدخال النص العربي', f.source_mode), h('label.field', 'المطلوب تسليمه', f.deliverable)),
       textWrap, pdfWrap),
     h('div.stack',
-      h('div.grid-2', h('label.field', 'مدى الأهمية', f.priority),
+      h('div.grid-2', h('label.field', 'مدى الأهمية', h('small', 'تضبط المدة الكلية تلقائيًا'), f.priority),
         h('div.field', h('b', 'المدة الكلية للتنفيذ'), h('div.row', f.total, f.unit)),
         h('label.field', 'مهلة الاستلام (بالدقائق)', h('small', 'تبدأ مدة الترجمة من لحظة قبول المترجم، لا من الإرسال'), f.receipt),
         h('label.field', 'التذكير قبل نهاية المرحلة', f.reminder)),
       h('fieldset', h('legend', 'الوقت المخصص لكل مرحلة (بالدقائق)'),
         h('div.grid', slaStages.map(s => h('label.field', s.name_ar, stageInputs[s.key], stageHints[s.key]))),
         h('div.row', sumLine, h('button.btn.sm', { type: 'button', onclick: distribute }, 'إعادة التوزيع التلقائي')),
-        h('p.small.muted', 'كل مرحلة تُحاسَب على مدتها من لحظة بدئها. إن اختُصر مسار لغة، يُوزَّع وقت المراحل المتجاوزة على مراحلها تلقائيًا. اعتماد المدير خارج المدة.')),
+        h('p.small.muted', 'تُحدَّد المدة الكلية تلقائيًا حسب الأهمية: طارئة يوم، عاجلة يومان، اعتيادية ثلاثة أيام، وتُوزَّع على المراحل بالنسبة (الترجمة أطول من المراجعة، والاستلام أقصر). المدة تبدأ من قبول المترجم، والموعد النهائي ثابت: إن تأخرت مرحلة قلّ وقت ما بعدها، وإن سبقت زاد. إن اختُصر مسار لغة، يُوزَّع وقت المراحل المتجاوزة على مراحلها. اعتماد المدير خارج المدة.')),
       h('label.check', f.escalate, 'عند تجاوز الوقت: تنبيه مدير المشروع إضافةً إلى المسؤول والمنسق')),
     h('div.stack',
       h('label.field', 'اللغات', langSearch), langPills,
@@ -249,8 +259,7 @@ export async function render(ctx) {
         title: f.title.value.trim(), mosque: f.mosque.value,
         khateeb_id: f.material_type.value === 'خطب' && f.khateeb_id.value ? f.khateeb_id.value : null,
         sermon_date: f.sermon_date.value || null, author: f.author.value.trim() || null,
-        audience: f.audience.value.trim() || null, channel: f.channel.value.trim() || null,
-        purpose: f.purpose.value.trim() || null, instructions: f.instructions.value.trim() || null,
+        instructions: f.instructions.value.trim() || null,
         source_html: f.source_mode.value === 'text' ? source.html : null,
         source_pdf_path: sourcePdfPath || null,
         deliverable: f.deliverable.value, priority: f.priority.value,
@@ -260,7 +269,8 @@ export async function render(ctx) {
       },
       stage_minutes,
       languages: [...picked.entries()].map(([code, entry]) => ({
-        code, stages: activeStages.filter(s => entry.stages.has(s.key)).map(s => ({ key: s.key, assignee: entry.stages.get(s.key) }))
+        code, audio_stage: entry.audio || 'translation',
+        stages: activeStages.filter(s => entry.stages.has(s.key)).map(s => ({ key: s.key, assignee: entry.stages.get(s.key) }))
       }))
     };
   }
