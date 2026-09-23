@@ -20,7 +20,8 @@ const routes = [
   ['/app/languages', () => import('./views/languages.js'), true, true],
   ['/app/khateebs', () => import('./views/khateebs.js'), true, true],
   ['/app/workflow', () => import('./views/workflow.js'), true, true],
-  ['/app/archive', () => import('./views/archive.js'), true, true]
+  ['/app/archive', () => import('./views/archive.js'), true, true],
+  ['/app/revise/:material', () => import('./views/revise.js'), true, true]
 ];
 
 function match(path) {

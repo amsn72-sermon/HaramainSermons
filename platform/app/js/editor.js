@@ -81,6 +81,23 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
     selectedBlocks().forEach(b => { b.style.lineHeight = v; });
     changed();
   }
+  // إزالة التظليل عن التحديد كاملًا (لا يكفي removeFormat في بعض المتصفحات)
+  function clearHighlight() {
+    focus();
+    document.execCommand('styleWithCSS', false, true);
+    document.execCommand('hiliteColor', false, 'transparent');
+    const sel = getSelection();
+    const range = sel.rangeCount ? sel.getRangeAt(0) : null;
+    for (const el of area.querySelectorAll('[style*="background"], font[style], span[style]')) {
+      if (range && !range.intersectsNode(el)) continue;
+      el.style.removeProperty('background-color');
+      el.style.removeProperty('background');
+      if (!el.getAttribute('style')) el.removeAttribute('style');
+      if (el.tagName === 'SPAN' && !el.attributes.length) el.replaceWith(...el.childNodes);
+    }
+    changed();
+  }
+
   function insertTable(spec) {
     const [r, c] = spec.split('x').map(Number);
     const row = tag => `<tr>${Array.from({ length: c }, () => `<${tag}><br></${tag}>`).join('')}</tr>`;
@@ -107,6 +124,7 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
     btn('x₂', 'نص سفلي', () => cmd('subscript')),
     color('لون النص', '#bc9661', v => cmd('foreColor', v)),
     color('تظليل', '#fff3b0', v => cmd('hiliteColor', v)),
+    btn('⌧', 'إزالة التظليل', () => clearHighlight()),
     sep(),
     btn('⇥', 'محاذاة لليمين', () => cmd('justifyRight')),
     btn('≡', 'توسيط', () => cmd('justifyCenter')),

@@ -4,6 +4,7 @@ import { db, storage } from '../sb.js';
 import { state, langName, hadLateness } from '../store.js';
 import { downloadDocx, printTranslation } from '../export.js';
 import { heading, fileName } from '../page.js';
+import { reopenDialog } from './revise.js';
 
 // أيقونات ثابتة (نص موثوق من الكود وليس من المستخدم)
 const ICONS = {
@@ -15,7 +16,8 @@ const ICONS = {
   pause: '<path d="M7 4h4v16H7zM14 4h4v16h-4z"/>',
   audio: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/><path d="M3 3l0 0"/>',
   dl: '<path d="M12 3v12m-5-5 5 5 5-5"/><path d="M4 21h16"/>',
-  log: '<path d="M4 6h16M4 12h16M4 18h10"/>'
+  log: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+  redo: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>'
 };
 function icon(name) {
   const s = h('span.ico', { 'aria-hidden': 'true' });
@@ -27,7 +29,7 @@ const iconBtn = (name, title, onclick, extra = {}) => h('button.icon-btn', { typ
 let player = null;          // مشغّل واحد للأرشيف كله
 let playingBtn = null;
 
-export async function render() {
+export async function render(ctx) {
   const rows = await db.select('tracks', {
     select: 'id,language_code,translation_html,audio_path,completed_at,is_published,receipt_late_seconds,stages:track_stages!track_stages_track_id_fkey(stage_key,late_seconds),material:materials(*,khateeb:khateebs(name))',
     status: 'eq.completed', order: 'completed_at.desc', limit: 500
@@ -83,6 +85,9 @@ export async function render() {
           t.audio_path ? iconBtn('play', 'تشغيل التسجيل', e => play(e.currentTarget, t)) : h('span.icon-btn.off', { title: 'لا تسجيل' }, icon('audio')),
           t.audio_path ? iconBtn('dl', 'تنزيل التسجيل', e => busy(e.currentTarget, () => downloadAudio(t, name).catch(err => toast(err.message, 'bad'))))
             : h('span.icon-btn.off', { 'aria-hidden': 'true' }, icon('dl')),
+          iconBtn('redo', 'إعادة تنشيط الخطبة للتعديل على أصلها', e => busy(e.currentTarget,
+            () => reopenDialog(t.material, mode => { if (mode === 'annotate') ctx.navigate(`/app/revise/${t.material.id}`); else ctx.navigate('/app/archive', { replace: true }); }))
+            .catch(err => toast(err.message, 'bad'))),
           h('a.icon-btn', { href: `/app/tasks/${t.id}`, title: 'السجل والتفاصيل', 'aria-label': 'السجل والتفاصيل' }, icon('log'))));
     }))
       : emptyState(rows.length ? 'لا نتائج مطابقة' : 'لا توجد ترجمات مكتملة بعد', rows.length ? '' : 'تظهر الترجمة هنا بعد اكتمال مسارها.'));

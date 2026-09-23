@@ -366,6 +366,109 @@ exception when others then
 end $$;
 commit;
 
+-- 12ب) نسخ التسجيل الصوتي: تُحفظ كلها، والمدير يعتمد ما يشاء (ملاحظة ١٦)
+select public._assert((select count(*) >= 2 from public.track_audios where track_id = :'en_track'),
+  'حُفظت نسختا التسجيل (المترجم والمراجع) ولم تُستبدل');
+select public._assert((select count(distinct uploaded_by) = 2 from public.track_audios where track_id = :'en_track'),
+  'كل نسخة محفوظة باسم من رفعها');
+
+-- غير المدير لا يعتمد
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'coord', true);
+do $$ declare v_id uuid; begin
+  select id into v_id from public.track_audios limit 1;
+  perform public.approve_track_audios((select track_id from public.track_audios where id = v_id), array[v_id]);
+  raise exception 'NO_ERROR';
+exception when others then
+  if sqlerrm = 'NO_ERROR' then raise exception 'FAIL: اعتمد المنسق التسجيل'; end if;
+  raise notice 'PASS: اعتماد التسجيل لمدير المشروع فقط';
+end $$;
+commit;
+
+-- المدير يعتمد النسخة الأولى، فتصبح هي المعتمدة في المسار
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'mgr', true);
+select public.approve_track_audios(:'en_track',
+  array(select id from public.track_audios where track_id = :'en_track' order by created_at limit 1));
+commit;
+select public._assert((select count(*) = 1 from public.track_audios where track_id = :'en_track' and is_approved),
+  'اعتماد نسخة واحدة يلغي اعتماد ما سواها');
+select public._assert((select t.audio_path = a.path from public.tracks t
+   join public.track_audios a on a.track_id = t.id and a.is_approved where t.id = :'en_track'),
+  'مسار المادة يشير إلى التسجيل المعتمد');
+
+-- ويمكن اعتماد نسختين معًا
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'mgr', true);
+select public.approve_track_audios(:'en_track', array(select id from public.track_audios where track_id = :'en_track'));
+commit;
+select public._assert((select count(*) = 2 from public.track_audios where track_id = :'en_track' and is_approved),
+  'يمكن اعتماد تسجيلين معًا');
+
+-- 14) إعادة تنشيط الخطبة للتعديل على أصلها (ملاحظة ٢٨)
+-- المترجم لا يعيد التنشيط
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'yusuf', true);
+do $$ begin
+  perform public.reopen_material((select material_id from public.tracks where language_code = 'en'),
+    'note', 'أضف فقرة عن الأمانة', null, 'translation', false, null);
+  raise exception 'NO_ERROR';
+exception when others then
+  if sqlerrm = 'NO_ERROR' then raise exception 'FAIL: أعاد المترجم تنشيط الخطبة'; end if;
+  raise notice 'PASS: إعادة التنشيط للمنسق ومدير المشروع فقط';
+end $$;
+commit;
+
+-- المنسق يعيد التنشيط بالتظليل على الأصل، ويطلب إعادة التسجيل الصوتي
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'coord', true);
+select public.reopen_material(:'material_id', 'annotate', 'تعديل من الشيخ على أصل الخطبة',
+  array[:'en_track']::uuid[], 'translation', true, null) as rev \gset
+commit;
+
+select public._assert((select not is_published and status = 'in_progress' from public.tracks where id = :'en_track'),
+  'إعادة التنشيط تُلغي النشر وتعيد المسار إلى العمل');
+select public._assert((select s.stage_key = 'translation' from public.track_stages s
+   join public.tracks t on t.current_stage_id = s.id where t.id = :'en_track'),
+  'المسار عاد إلى المرحلة التي اختارها المنسق');
+select public._assert((select count(*) = 1 from public.material_revisions
+   where material_id = :'material_id' and closed_at is null and mode = 'annotate' and redo_audio),
+  'فُتحت جولة تعديل واحدة على الأصل مع طلب إعادة التسجيل');
+select public._assert((select count(*) = 1 from public.track_events
+   where track_id = :'en_track' and action = 'reopened'),
+  'إعادة التنشيط مسجّلة في سجل الإجراءات');
+
+-- المنسق يحدد موضع التعديل ونوعه على صفحة الأصل
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'coord', true);
+select public.add_revision_mark(:'rev', 1, 0.12, 0.30, 0.70, 0.06, 'delete', 'تُحذف هذه الجملة');
+select public.add_revision_mark(:'rev', 2, 0.10, 0.55, 0.75, 0.05, 'rephrase', 'تُعاد صياغتها');
+commit;
+select public._assert((select count(*) = 2 from public.revision_marks where revision_id = :'rev'),
+  'التحديدات تُحفظ بصفحاتها وأنواعها');
+
+-- المترجم المسند يرى التعديلات المطلوبة على الأصل
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'yusuf', true);
+select public._assert((select count(*) = 2 from public.revision_marks where revision_id = :'rev'),
+  'المترجم المسند يرى مواضع التعديل على الأصل');
+commit;
+
+-- والتسجيل الصوتي القديم لا يكفي بعد طلب إعادته
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'yusuf', true);
+select public._assert(
+  (select 'التعديل يستوجب تسجيلًا صوتيًا جديدًا' = any(public.stage_blockers(:'en_track', true))),
+  'التسجيل السابق لا يكفي بعد طلب إعادة التسجيل');
+commit;
+
+-- إرفاق نسخة جديدة من أصل الخطبة: النسخة السابقة محفوظة
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'coord', true);
+select public.add_source_version(:'material_id', 'sources/khutbah-v2.pdf', 'نسخة الشيخ المعدّلة') as src \gset
+commit;
+begin; set local role authenticated; select set_config('request.jwt.claim.sub', :'coord', true);
+select public.add_source_version(:'material_id', 'sources/khutbah-v3.pdf', 'تعديل ثانٍ من الشيخ');
+commit;
+select public._assert((select count(*) = 2 from public.material_sources where material_id = :'material_id'),
+  'كل نسخة من الأصل تُحفظ برقمها والسابقة لا تُمحى');
+select public._assert((select path = 'sources/khutbah-v2.pdf' from public.material_sources
+   where material_id = :'material_id' order by version limit 1),
+  'النسخة الأقدم من الأصل تبقى كما هي');
+select public._assert((select source_pdf_path = 'sources/khutbah-v3.pdf' from public.materials where id = :'material_id'),
+  'الخطبة صارت تشير إلى أحدث نسخة من الأصل');
+
 -- 13) السجل الكامل
 \echo '--- سجل الإجراءات ---'
 select to_char(e.created_at, 'HH24:MI:SS') || ' · ' || p.full_name || ' · ' || e.action

@@ -32,10 +32,17 @@ export function fileName(m, languageCode, khateeb, n) {
   return name.replace(/[\\/:*?"<>|\n\r]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
 }
 
+// أعمدة البطاقة: نوع الخطبة ثم بقية البيانات — صفّان فقط (تسميات ثم قيم)
+export function cardColumns(m, languageCode, khateeb) {
+  return [['الخطبة', heading(m)], ...cardRows(m, languageCode, khateeb)];
+}
+
+// بطاقة بيانات الخطبة داخل مساحة الترجمة: صفّان بعرض الصفحة
 export function dataCard(m, languageCode, khateeb) {
-  return h('div.data-card', { dir: 'rtl', lang: 'ar', contenteditable: 'false' },
-    h('div.dc-head', heading(m)),
-    h('dl', cardRows(m, languageCode, khateeb).map(([k, v]) => h('div', h('dt', k), h('dd', v)))));
+  const cols = cardColumns(m, languageCode, khateeb);
+  return h('table.data-card', { dir: 'rtl', lang: 'ar', contenteditable: 'false' },
+    h('thead', h('tr', cols.map(([k]) => h('th', k)))),
+    h('tbody', h('tr', cols.map(([, v]) => h('td', v)))));
 }
 
 // إطار الصفحة: body هو صندوق الكتابة الثابت

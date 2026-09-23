@@ -1,13 +1,14 @@
 // مهامي، ومساحة عمل المهمة لكل الأدوار
 import { h, fill, toast, busy, dialog, emptyState, fmtDateTime, fmtMinutes, fmtDuration } from '../ui.js';
 import { db, storage, auth } from '../sb.js';
-import { state, isManager, TRACK_SELECT, MOSQUE, PRIORITY, EVENT_LABEL, sortStages, currentStage,
+import { state, isManager, isAdmin, TRACK_SELECT, MOSQUE, PRIORITY, EVENT_LABEL, sortStages, currentStage,
   langName, langDir, stageName } from '../store.js';
 import { statusBadge, trackTimer, progressBar, stageStrip, lateSummary } from './parts.js';
 import { createEditor } from '../editor.js';
 import { setSafeHtml } from '../sanitize.js';
 import { downloadDocx, printTranslation } from '../export.js';
 import { pdfViewer } from '../pdfview.js';
+import { openRevision, revisionCard } from './revise.js';
 import { dataCard, letterheadPage, heading, fileName } from '../page.js';
 
 const FULL = `${TRACK_SELECT},material:materials(*,khateeb:khateebs(name))`;
@@ -97,6 +98,7 @@ export async function workspace(ctx) {
   sortStages(t);
   const m = t.material;
   const events = await db.select('track_events', { select: '*,actor:profiles(full_name)', track_id: `eq.${t.id}`, order: 'created_at.asc' });
+  const rev = await openRevision(m.id).catch(() => null);   // تعديل مطلوب على أصل الخطبة (ملاحظة ٢٨)
   const cur = currentStage(t);
   const curDef = cur && state.stages.find(s => s.key === cur.stage_key);
   const me = state.profile.id;
@@ -118,10 +120,12 @@ export async function workspace(ctx) {
     sourceEl = h('div', h('p.muted', 'جارٍ تحميل الأصل…'));
     storage.signedUrl('sources', m.source_pdf_path, 600).then(url => {
       const who = auth.user?.email || state.profile.full_name || '';
-      sourceEl.replaceChildren(pdfViewer({ url, lines: [who, `سري — ${new Date().toLocaleDateString('ar-SA-u-ca-gregory-nu-latn')}`] }));
+      sourceEl.replaceChildren(pdfViewer({ url, lines: [who, `سري — ${new Date().toLocaleDateString('ar-SA-u-ca-gregory-nu-latn')}`],
+        marks: rev?.marks || [] }));
     }).catch(err => sourceEl.replaceChildren(h('p.err', err.message)));
   } else {
-    const { page, body } = letterheadPage(dataCard(m, null, m.khateeb?.name), setSafeHtml(h('div.src', { dir: 'rtl', lang: 'ar' }), m.source_html || ''));
+    // الأصل يُعرض كما هو دون أي إضافة (ملاحظة ٢٠)
+    const { page, body } = letterheadPage(setSafeHtml(h('div.src', { dir: 'rtl', lang: 'ar' }), m.source_html || ''));
     page.classList.add('src-page');
     body.addEventListener('copy', e => e.preventDefault());
     sourceEl = page;
@@ -143,12 +147,19 @@ export async function workspace(ctx) {
   const autosave = setInterval(() => { if (!editor.el.isConnected) return clearInterval(autosave); saveDraft(true).catch(() => {}); }, 60_000);
   window.onbeforeunload = () => (dirty ? true : undefined);
 
-  // ----- التسجيل الصوتي -----
+  // ----- التسجيل الصوتي: نسخ متعددة يعتمد المدير منها ما يشاء -----
   let audioCard = null;
   if (needsAudio) {
     const box = h('div.stack', { style: { gap: '10px' } });
     const canUpload = mine && audioNow;
     const isReviewer = mine && cur.stage_key !== t.audio_stage_key && audioNow;
+    const canApprove = isManager() && t.status !== 'awaiting_receipt';
+    let takes = [];
+    const loadTakes = async () => {
+      try { takes = await db.select('track_audios', { select: '*,by:profiles(full_name)', track_id: `eq.${t.id}`, order: 'created_at.asc' }); }
+      catch { takes = []; }
+    };
+    const picks = new Set();
     const drawAudio = () => {
       const input = h('input', { type: 'file', accept: 'audio/*', 'aria-label': 'ملف التسجيل' });
       input.onchange = () => busy(input, async () => {
@@ -160,19 +171,40 @@ export async function workspace(ctx) {
           const ext = (f.name.split('.').pop() || 'mp3').toLowerCase().replace(/[^a-z0-9]/g, '');
           const path = await storage.upload('audio', `${t.id}/${crypto.randomUUID()}.${ext}`, f);
           await db.rpc('set_track_audio', { p_track: t.id, p_path: path });
-          t.audio_path = path; drawAudio(); blockersBox.hidden = true; toast('رُفع التسجيل وحُفظ مع المهمة.', 'ok');
+          t.audio_path = path; await loadTakes(); drawAudio(); blockersBox.hidden = true;
+          toast('أُضيف تسجيل جديد، والسابق محفوظ.', 'ok');
         } catch (err) { toast(err.message, 'bad'); }
       });
+
+      const row = (a, i) => h('div.take', { class: a.is_approved ? 'ok' : '' },
+        h('div.row', { style: { gap: '8px', alignItems: 'center' } },
+          canApprove && h('input', { type: 'checkbox', checked: picks.has(a.id), 'aria-label': `اعتماد التسجيل ${i + 1}`,
+            onchange: e => { e.target.checked ? picks.add(a.id) : picks.delete(a.id); } }),
+          h('b', `التسجيل ${i + 1}`),
+          h('span.small.muted', `${a.by?.full_name || '—'} · ${stageName(a.stage_key) || ''} · ${fmtDateTime(a.created_at)}`),
+          a.is_approved && h('span.badge.ok', 'معتمد')),
+        h('audio', { controls: true, preload: 'none', src: storage.publicUrl('audio', a.path), style: { width: '100%' } }));
+
+      const needNew = t.audio_required_after && !takes.some(a => new Date(a.created_at) > new Date(t.audio_required_after));
       fill(box,
+        needNew && h('p', h('span.badge.bad', 'إعادة التسجيل'), ' التعديل على أصل الخطبة يستوجب تسجيلًا صوتيًا جديدًا؛ التسجيلات السابقة محفوظة.'),
         !audioNow && h('p.small', `التسجيل مسند إلى مرحلة «${stageName(t.audio_stage_key)}» — ${audioStage?.assignee?.full_name || ''}.`),
-        audioNow && (t.audio_path
-          ? h('audio', { controls: true, preload: 'metadata', src: storage.publicUrl('audio', t.audio_path), style: { width: '100%' } })
-          : h('p', h('span.badge.bad', 'مطلوب'), ' لم يُرفع التسجيل بعد، ولا يمكن إتمام المرحلة دونه.')),
-        isReviewer && h('p.small', 'استمع إلى التسجيل كاملًا وتحقق من مطابقته للترجمة. إن عدّلت الترجمة فارفع تسجيلًا جديدًا مطابقًا، أو أعد المهمة إلى المترجم لإعادة التسجيل.'),
-        canUpload && h('label.field', t.audio_path ? 'استبدال التسجيل بملف جديد' : 'رفع التسجيل (يُحفظ فور اختياره)', input));
+        audioNow && !takes.length && h('p', h('span.badge.bad', 'مطلوب'), ' لم يُرفع التسجيل بعد، ولا يمكن إتمام المرحلة دونه.'),
+        takes.map(row),
+        isReviewer && h('p.small', 'استمع إلى التسجيل كاملًا وتحقق من مطابقته للترجمة. إن عدّلت الترجمة فارفع تسجيلًا جديدًا (يُحفظ السابق باسم صاحبه)، أو أعد المهمة إلى المترجم.'),
+        canUpload && h('label.field', takes.length ? 'إضافة تسجيل جديد (تبقى النسخ السابقة)' : 'رفع التسجيل (يُحفظ فور اختياره)', input),
+        canApprove && takes.length > 1 && h('p.small.muted', 'اختر التسجيل الأفضل أداءً وجودة، ويمكن اعتماد أكثر من تسجيل.'),
+        canApprove && takes.length ? h('div.row',
+          h('button.btn.sm', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
+            if (!picks.size) return toast('أشّر على تسجيل واحد على الأقل.', 'bad');
+            try {
+              await db.rpc('approve_track_audios', { p_track: t.id, p_ids: [...picks] });
+              await loadTakes(); drawAudio(); toast('اعتُمد التسجيل المختار.', 'ok');
+            } catch (err) { toast(err.message, 'bad'); }
+          }) }, 'اعتماد التسجيل المختار')) : null);
     };
-    drawAudio();
     audioCard = h('div.card.audio-card', { style: { marginTop: '16px' } }, h('h3', 'التسجيل الصوتي'), box);
+    loadTakes().then(() => { takes.filter(a => a.is_approved).forEach(a => picks.add(a.id)); drawAudio(); });
   }
 
   // ----- الإجراءات (أسفل الصفحة) -----
@@ -249,7 +281,8 @@ export async function workspace(ctx) {
     } catch (e) { toast(e.message, 'bad'); }
   }
 
-  const exportsRow = t.translation_html ? h('div.row',
+  // التصدير والطباعة للمنسق ومدير المشروع فقط (ملاحظة ١٧)
+  const exportsRow = isAdmin() && t.translation_html ? h('div.row',
     h('button.btn.sm', { type: 'button', onclick: e => busy(e.currentTarget, () => downloadDocx(exportArgs).catch(err => toast(err.message, 'bad'))) }, 'تنزيل Word على الكليشة'),
     h('button.btn.sm', { type: 'button', onclick: () => printTranslation(exportArgs) || toast('اسمح بالنوافذ المنبثقة للطباعة.', 'bad') }, 'طباعة / حفظ PDF')) : null;
 
@@ -308,6 +341,7 @@ export async function workspace(ctx) {
           ['الأهمية', PRIORITY[m.priority]], ['الإنجاز', progressBar(t)]].filter(([, v]) => v).map(([k, v]) => h('div', h('div.small.muted', k), h('div', v)))),
       m.instructions && h('p', { style: { marginTop: '12px' } }, h('b', 'تعليمات الترجمة: '), m.instructions),
       lateSummary(t)),
+    rev ? h('div', { style: { marginTop: '16px' } }, revisionCard(rev)) : null,
     h('details.card', h('summary', h('b', 'المسار والمراحل')), h('div', { style: { marginTop: '12px' } }, stageStrip(t))),
     h('div', { style: { marginTop: '16px' } },
       canEdit && h('div.ws-tools', editor.tools),

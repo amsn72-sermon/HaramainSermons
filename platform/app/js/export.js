@@ -3,7 +3,7 @@
 import { h } from './ui.js';
 import { sanitize } from './sanitize.js';
 import { langDir } from './store.js';
-import { PAGE, LETTERHEAD, heading, cardRows, fileName } from './page.js';
+import { PAGE, LETTERHEAD, cardColumns, fileName } from './page.js';
 
 let docxLoading = null;
 function loadDocx() {
@@ -95,19 +95,19 @@ function cardTable(docx, material, track, khateeb) {
   const { Paragraph, TextRun, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType } = docx;
   const b = { style: BorderStyle.SINGLE, size: 8, color: GOLD };
   const run = (text, o = {}) => new TextRun({ text, rightToLeft: true, font: 'Arial', size: 22, ...o });
-  const rows = cardRows(material, track.language_code, khateeb);
+  const cols = cardColumns(material, track.language_code, khateeb);
+  const cell = (children, shading) => new TableCell({
+    borders: { top: b, bottom: b, left: b, right: b },
+    margins: { top: 70, bottom: 70, left: 90, right: 90 },
+    shading: shading ? { fill: 'F6EFE3' } : undefined, children
+  });
+  const para = (text, o) => new Paragraph({ bidirectional: true, alignment: AlignmentType.CENTER, children: [run(text, o)] });
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE }, visuallyRightToLeft: true,
-    rows: [new TableRow({ children: [new TableCell({
-      borders: { top: b, bottom: b, left: b, right: b },
-      margins: { top: 80, bottom: 80, left: 160, right: 160 },
-      children: [
-        new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, spacing: { after: 60 },
-          border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: GOLD, space: 2 } },
-          children: [run(heading(material), { bold: true, size: 26, color: '9A7443' })] }),
-        ...rows.map(([k, v]) => new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT, spacing: { after: 20 },
-          children: [run(`${k}: `, { bold: true, color: '9A7443' }), run(v)] }))
-      ] })] })]
+    rows: [
+      new TableRow({ tableHeader: true, children: cols.map(([k]) => cell([para(k, { bold: true, color: '8A6835' })], true)) }),
+      new TableRow({ children: cols.map(([, v]) => cell([para(v)])) })
+    ]
   });
 }
 
@@ -160,15 +160,17 @@ table.frame > tbody > tr > td { padding: 0 ${P.side}mm; vertical-align: top; }
   const d = w.document;
   d.title = fileName(material, track.language_code, khateeb);
   d.querySelector('img.lh').src = LETTERHEAD;
-  const card = d.createElement('div');
+  // بطاقة البيانات: صفّان بعرض الصفحة
+  const card = d.createElement('table');
   card.className = 'data-card'; card.dir = 'rtl'; card.lang = 'ar';
-  const head = d.createElement('div'); head.className = 'dc-head'; head.textContent = heading(material);
-  const dl = d.createElement('dl');
-  for (const [k, v] of cardRows(material, track.language_code, khateeb)) {
-    const row = d.createElement('div'), dt = d.createElement('dt'), dd = d.createElement('dd');
-    dt.textContent = k; dd.textContent = v; row.append(dt, dd); dl.append(row);
+  const cols = cardColumns(material, track.language_code, khateeb);
+  const thead = d.createElement('thead'), htr = d.createElement('tr');
+  const tb = d.createElement('tbody'), vtr = d.createElement('tr');
+  for (const [k, v] of cols) {
+    const th = d.createElement('th'), td = d.createElement('td');
+    th.textContent = k; td.textContent = v; htr.append(th); vtr.append(td);
   }
-  card.append(head, dl);
+  thead.append(htr); tb.append(vtr); card.append(thead, tb);
   d.querySelector('.card-slot').replaceWith(card);
   d.querySelector('.t').innerHTML = sanitize(track.translation_html);
   const go = () => setTimeout(() => w.print(), 400);

@@ -5,7 +5,7 @@ const TAGS = new Set(['P', 'BR', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', '
 const STYLE_PROPS = new Set(['color', 'background-color', 'text-align', 'direction', 'font-weight', 'font-style', 'text-decoration', 'font-size', 'font-family',
   'line-height', 'margin-left', 'margin-right', 'padding-left', 'padding-right', 'text-indent', 'vertical-align']);
 const SAFE_VALUE = /^[#a-z0-9(),.%\s'"-]+$/i;
-// الأسود يختفي في المظهر الداكن والأبيض يصنع رقعًا في الفاتح: يُترك لون النص للصفحة
+// الورقة بيضاء دائمًا: نحذف النص الأبيض (يختفي) والخلفية البيضاء (رقع)
 const INK = /^(#000(000)?|black|windowtext|rgba?\(\s*0\s*,\s*0\s*,\s*0\s*(,\s*1(\.0*)?\s*)?\)|initial|inherit|currentcolor)$/i;
 const PAPER = /^(#fff(fff)?|white|window|transparent|rgba?\(\s*255\s*,\s*255\s*,\s*255\s*(,\s*1(\.0*)?\s*)?\)|rgba\(.*,\s*0\s*\)|initial|inherit)$/i;
 
@@ -17,7 +17,7 @@ function cleanStyle(style) {
     const prop = decl.slice(0, i).trim().toLowerCase();
     const val = decl.slice(i + 1).trim();
     if (!STYLE_PROPS.has(prop) || !SAFE_VALUE.test(val) || /url|expression/i.test(val)) continue;
-    if (prop === 'color' && INK.test(val)) continue;
+    if (prop === 'color' && PAPER.test(val)) continue;   // أبيض على ورقة بيضاء = نص مختفٍ
     if (prop === 'background-color' && PAPER.test(val)) continue;
     out.push(`${prop}: ${val}`);
   }
@@ -40,7 +40,7 @@ function walk(node) {
       if (n === 'style') { const s = cleanStyle(attr.value); s ? child.setAttribute('style', s) : child.removeAttribute('style'); }
       else if (n === 'dir' && /^(rtl|ltr|auto)$/i.test(attr.value)) continue;
       else if (n === 'align' && /^(right|left|center|justify)$/i.test(attr.value)) continue;
-      else if (child.tagName === 'FONT' && (n === 'color' || n === 'face' || n === 'size') && SAFE_VALUE.test(attr.value) && !(n === 'color' && INK.test(attr.value.trim()))) continue;
+      else if (child.tagName === 'FONT' && (n === 'color' || n === 'face' || n === 'size') && SAFE_VALUE.test(attr.value) && !(n === 'color' && PAPER.test(attr.value.trim()))) continue;
       else if ((child.tagName === 'TD' || child.tagName === 'TH') && (n === 'colspan' || n === 'rowspan') && /^[1-9][0-9]?$/.test(attr.value)) continue;
       else child.removeAttribute(attr.name);
     }
