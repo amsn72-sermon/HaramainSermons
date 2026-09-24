@@ -32,9 +32,14 @@ export function fileName(m, languageCode, khateeb, n) {
   return name.replace(/[\\/:*?"<>|\n\r]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
 }
 
-// أعمدة البطاقة: نوع الخطبة ثم بقية البيانات — صفّان فقط (تسميات ثم قيم)
+// تسمية العمود الأول بحسب نوع المادة: خطبة أو درس أو كتاب… لا «الخطبة» دائمًا (ملاحظة ٣٧)
+const KIND_LABEL = { 'خطب': 'الخطبة', 'دروس علمية': 'الدرس', 'كتب': 'الكتاب', 'مطويات': 'المطوية',
+  'منشورات': 'المنشور', 'إعلانات': 'الإعلان', 'توجيهات': 'التوجيه' };
+export const kindLabel = m => (m.sermon_type ? 'الخطبة' : (KIND_LABEL[m.material_type] || 'المادة'));
+
+// أعمدة البطاقة: نوع المادة ثم بقية البيانات — صفّان فقط (تسميات ثم قيم)
 export function cardColumns(m, languageCode, khateeb) {
-  return [['الخطبة', heading(m)], ...cardRows(m, languageCode, khateeb)];
+  return [[kindLabel(m), heading(m)], ...cardRows(m, languageCode, khateeb)];
 }
 
 // بطاقة بيانات الخطبة داخل مساحة الترجمة: صفّان بعرض الصفحة

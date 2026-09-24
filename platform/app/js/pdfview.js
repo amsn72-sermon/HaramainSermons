@@ -93,8 +93,10 @@ export function pdfViewer({ url, lines, marks = [], onDraw = null }) {
       const res = await fetch(url);
       if (!res.ok) throw new Error('تعذّر تحميل الأصل');
       const data = new Uint8Array(await res.arrayBuffer());
-      doc = await getDocument({ data, isEvalSupported: false,
-        standardFontDataUrl: '/vendor/pdfjs/standard_fonts/' }).promise;
+      // disableFontFace: ترسم الحروف مساراتٍ من الخط المضمّن في الملف نفسه،
+      // فتظهر الخطوط العربية موصولة كما في الأصل على كل المتصفحات (ملاحظة ٣٠)
+      doc = await getDocument({ data, isEvalSupported: false, disableFontFace: true,
+        useSystemFonts: false, standardFontDataUrl: '/vendor/pdfjs/standard_fonts/' }).promise;
       ro.observe(frame);
       await render();
     } catch (e) {

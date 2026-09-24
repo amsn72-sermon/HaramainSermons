@@ -139,8 +139,10 @@ export async function render(ctx) {
     langPills.replaceChildren(...state.languages.filter(l => l.is_active && (!q || l.name_ar.includes(q) || l.native_name.toLowerCase().includes(q.toLowerCase())))
       .map(l => {
         const n = members.filter(m => langsOf(m).has(l.code)).length;
-        return h('button', { type: 'button', 'aria-pressed': String(picked.has(l.code)), title: n ? `${n} عضو مؤهل` : 'لا يوجد عضو مؤهل',
-          onclick: () => toggleLang(l.code) }, l.name_ar, n ? '' : ' ⚠');
+        const on = picked.has(l.code);
+        return h('button', { type: 'button', 'aria-pressed': String(on), title: n ? `${n} عضو مؤهل` : 'لا يوجد عضو مؤهل',
+          onclick: () => toggleLang(l.code) },
+          on ? h('span.tick', { 'aria-hidden': 'true' }, '✓') : '', l.name_ar, n ? '' : ' ⚠');
       }));
   }
   langSearch.addEventListener('input', drawLangs);

@@ -1,5 +1,5 @@
 // مهامي، ومساحة عمل المهمة لكل الأدوار
-import { h, fill, toast, busy, dialog, emptyState, fmtDateTime, fmtMinutes, fmtDuration } from '../ui.js';
+import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDateTime, fmtMinutes, fmtDuration } from '../ui.js';
 import { db, storage, auth } from '../sb.js';
 import { state, isManager, isAdmin, TRACK_SELECT, MOSQUE, PRIORITY, EVENT_LABEL, sortStages, currentStage,
   langName, langDir, stageName } from '../store.js';
@@ -137,15 +137,57 @@ export async function workspace(ctx) {
   const editor = createEditor({ html: t.translation_html || '', dir, readOnly: !canEdit, detachTools: true,
     label: `الترجمة (${langName(t.language_code)})`, top: dataCard(m, t.language_code, m.khateeb?.name),
     placeholder: canEdit ? 'اكتب الترجمة هنا…' : 'لم تُكتب الترجمة بعد.',
-    onChange: () => { dirty = true; saveState.textContent = 'تعديلات غير محفوظة'; } });
+    onChange: () => { dirty = true; saveState.textContent = 'تعديلات غير محفوظة'; onEdit(); } });
+  // نسخة محلية فورية في المتصفح: لو توقف الحاسوب فجأة لا يضيع ما كُتب (ملاحظة ٣٦)
+  const LOCAL = `hs.draft.${t.id}`;
+  const keepLocal = () => { try { localStorage.setItem(LOCAL, JSON.stringify({ html: editor.html, at: Date.now() })); } catch { /* التخزين ممتلئ أو محظور */ } };
+  const dropLocal = () => { try { localStorage.removeItem(LOCAL); } catch { /* */ } };
+
   async function saveDraft(silent = false) {
     if (!canEdit || !dirty) return;
     await db.rpc('save_translation', { p_track: t.id, p_html: editor.html });
-    t.translation_html = editor.html; dirty = false; saveState.textContent = 'محفوظة ' + fmtDateTime(new Date());
-    if (!silent) toast('حُفظت المسودة.', 'ok');
+    t.translation_html = editor.html; dirty = false;
+    dropLocal();
+    saveState.textContent = 'محفوظة ' + fmtDateTime(new Date());
+    saveBtn && saveBtn.classList.remove('primary');
+    if (!silent) toast('حُفظت الترجمة.', 'ok');
   }
-  const autosave = setInterval(() => { if (!editor.el.isConnected) return clearInterval(autosave); saveDraft(true).catch(() => {}); }, 60_000);
+  // زر حفظ ثابت مع أدوات المحرر: يبقى أمام المترجم وهو ينظر إلى ملف الأصل
+  const saveBtn = canEdit ? h('button.btn.sm', { type: 'button', title: 'حفظ الآن (Ctrl/⌘ + S)' },
+    'حفظ الترجمة') : null;
+  if (saveBtn) saveBtn.onclick = e => busy(e.currentTarget, () => saveDraft().catch(err => toast(err.message, 'bad')));
+
+  // حفظ تلقائي كل ٢٠ ثانية، وبعد ٤ ثوانٍ من توقف الكتابة، ونسخة محلية عند كل تعديل
+  let idle = null;
+  const onEdit = () => {
+    keepLocal();
+    saveBtn && saveBtn.classList.add('primary');
+    clearTimeout(idle);
+    idle = setTimeout(() => saveDraft(true).catch(() => {}), 4000);
+  };
+  const autosave = setInterval(() => { if (!editor.el.isConnected) return clearInterval(autosave); saveDraft(true).catch(() => {}); }, 20_000);
+  window.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault(); if (canEdit) saveDraft().catch(err => toast(err.message, 'bad'));
+    }
+  });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveDraft(true).catch(() => {}); });
   window.onbeforeunload = () => (dirty ? true : undefined);
+
+  // استرجاع نسخة محلية أحدث من المحفوظة على الخادم (انقطاع مفاجئ)
+  if (canEdit) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LOCAL) || 'null');
+      if (saved?.html && saved.html !== (t.translation_html || '')) {
+        setTimeout(async () => {
+          const ok = await confirm('استعادة نسخة غير محفوظة',
+            `وُجدت نسخة محفوظة في هذا المتصفح (${fmtDateTime(new Date(saved.at))}) لم تصل إلى الخادم. هل نستعيدها؟`, 'استعادة');
+          if (ok) { editor.html = saved.html; dirty = true; saveState.textContent = 'تعديلات غير محفوظة'; }
+          else dropLocal();
+        }, 400);
+      }
+    } catch { /* لا نسخة محلية */ }
+  }
 
   // ----- التسجيل الصوتي: نسخ متعددة يعتمد المدير منها ما يشاء -----
   let audioCard = null;
@@ -344,7 +386,7 @@ export async function workspace(ctx) {
     rev ? h('div', { style: { marginTop: '16px' } }, revisionCard(rev)) : null,
     h('details.card', h('summary', h('b', 'المسار والمراحل')), h('div', { style: { marginTop: '12px' } }, stageStrip(t))),
     h('div', { style: { marginTop: '16px' } },
-      canEdit && h('div.ws-tools', editor.tools),
+      canEdit && h('div.ws-tools', editor.tools, h('div.ws-save', saveState, saveBtn)),
       h('div.workspace',
         h('div.ws-col', h('h3', 'النص الأصلي — العربية'), sourceEl),
         h('div.ws-col', h('h3', `الترجمة — ${langName(t.language_code)}`), editor.el))),

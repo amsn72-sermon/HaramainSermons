@@ -144,22 +144,23 @@ export function printTranslation({ material, track, khateeb }, { autoPrint = tru
   if (!w) return false;
   const P = PAGE;
   w.document.write(`<!doctype html><html lang="${track.language_code}" dir="${dir}" data-theme="light"><head><meta charset="utf-8"><title></title>
-<link rel="stylesheet" href="/css/app.css"><style>
+<link rel="stylesheet" href="${location.origin}/css/app.css"><style>
 @page { size: A4; margin: 0; }
 html, body { margin: 0; background: #fff !important; color: #111 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-img.lh { position: fixed; top: 0; left: 0; width: ${P.w}mm; height: ${P.h}mm; z-index: -1; }
-table.frame { width: ${P.w}mm; border-collapse: collapse; }
+img.lh { position: fixed; top: 0; left: 0; width: ${P.w}mm; height: ${P.h}mm; z-index: 0; }
+table.frame { position: relative; z-index: 1; width: ${P.w}mm; border-collapse: collapse; background: transparent; }
 table.frame > thead td { height: ${P.top}mm; padding: 0; } table.frame > tfoot td { height: ${P.bottom}mm; padding: 0; }
 table.frame > tbody > tr > td { padding: 0 ${P.side}mm; vertical-align: top; }
 .print-body { --pt: 1pt; font-size: 12pt; line-height: 1.8; }
 .print-body .data-card { font-size: 11pt; }
-@media screen { body { background: #d9d9d9 !important; } .sheet { width: ${P.w}mm; min-height: ${P.h}mm; margin: 16px auto; background: #fff; position: relative; box-shadow: 0 2px 12px #0003; } img.lh { position: absolute; } }
+@media screen { body { background: #d9d9d9 !important; } .sheet { width: ${P.w}mm; min-height: ${P.h}mm; margin: 16px auto; background: #fff; position: relative; isolation: isolate; box-shadow: 0 2px 12px #0003; } img.lh { position: absolute; } }
 </style></head><body><div class="sheet"><img class="lh" alt=""><table class="frame"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot>
 <tbody><tr><td><div class="print-body"><div class="card-slot"></div><div class="t"></div></div></td></tr></tbody></table></div></body></html>`);
   w.document.close();
   const d = w.document;
   d.title = fileName(material, track.language_code, khateeb);
-  d.querySelector('img.lh').src = LETTERHEAD;
+  // رابط مطلق: نافذة الطباعة تُفتح عن about:blank فلا تصلح المسارات النسبية في بعض المتصفحات
+  d.querySelector('img.lh').src = new URL(LETTERHEAD, location.origin).href;
   // بطاقة البيانات: صفّان بعرض الصفحة
   const card = d.createElement('table');
   card.className = 'data-card'; card.dir = 'rtl'; card.lang = 'ar';

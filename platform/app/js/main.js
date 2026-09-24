@@ -60,7 +60,9 @@ async function render() {
   if (!route) { root.replaceChildren(notFound()); return; }
 
   try {
-    await loadReference();
+    // الموقع العام يعمل من أرشيف يوتيوب وحده: تعذُّر الوصول إلى الخادم لا يمنع عرضه
+    if (route.needsAuth) await loadReference();
+    else await loadReference().catch(() => {});
     if (route.needsAuth) {
       if (!auth.session) return navigate('/login?next=' + encodeURIComponent(path), { replace: true });
       if (!state.profile) await loadProfile();
