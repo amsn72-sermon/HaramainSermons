@@ -431,3 +431,32 @@ select.lang-select { width: 100%; min-height: 46px; font: inherit; font-size: 1r
   .card { box-shadow: none; border: 0; padding: 0; }
   .print-doc { font-size: 13pt; line-height: 1.9; }
 }
+
+/* سياسة السرية وتقييم الأعضاء (ملاحظة ٥٧) */
+.check.top { align-items: flex-start; font-weight: 400; }
+.check.top input { margin-top: 4px; flex: none; }
+.policy-text { max-height: 46vh; overflow: auto; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-soft, transparent); }
+.policy-text section { margin-top: 14px; }
+.policy-text h3 { margin: 0 0 6px; font-size: 1rem; }
+.policy-text ul { margin: 0; padding-inline-start: 20px; }
+.policy-text li { margin: 4px 0; line-height: 1.8; }
+.stars { display: inline-flex; gap: 2px; direction: ltr; }
+.stars b { font-weight: 400; color: var(--gold, #c7a24a); }
+.stars b.off { opacity: .28; }
+.perf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.perf-grid > div { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; }
+.perf-grid .v { font-size: 1.15rem; font-weight: 600; }
+.arch-group + .arch-group { margin-top: 22px; }
+.arch-group-head { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; }
+.arch-group-head h3 { margin: 0; font-size: 1.02rem; }
+
+/* شارة عدد اللغات في خطبة عرفة (ملاحظة ٦١) */
+.lang-count { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--gold); color: var(--gold); background: color-mix(in srgb, var(--gold) 10%, transparent);
+  font-size: .82rem; line-height: 1; white-space: nowrap; }
+.lang-count b { font-size: 1.05rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.lang-count .en { opacity: .75; font-size: .72rem; }
+.lang-count.big { padding: 8px 16px; font-size: .95rem; }
+.lang-count.big b { font-size: 1.6rem; }
+.lang-globe { display: inline-flex; }
+.live-block + .live-block { margin-top: 26px; }
