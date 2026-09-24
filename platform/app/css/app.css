@@ -313,6 +313,8 @@ dialog .dlg-foot { display: flex; gap: 8px; justify-content: flex-start; padding
 .tabs { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0 28px; }
 .tabs button { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 9px; padding: 11px 18px; font: inherit; cursor: pointer; min-height: 44px; }
 .tabs button[aria-selected="true"] { background: var(--gold); border-color: var(--gold); color: var(--ink); font-weight: 700; }
+.tabs .tab-link { display: inline-flex; align-items: center; border: 1px dashed var(--gold); background: transparent; color: var(--accent-text); border-radius: 9px; padding: 11px 18px; min-height: 44px; text-decoration: none; }
+.tabs .tab-link:hover { background: color-mix(in srgb, var(--gold) 16%, transparent); }
 .public { padding-bottom: 56px; }
 .public .section-head { display: flex; align-items: end; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
 .public .section-head h2 { font-size: 1.75rem; margin: 0; }
@@ -344,18 +346,26 @@ dialog .dlg-foot { display: flex; gap: 8px; justify-content: flex-start; padding
 .vp-poster-title { font-weight: 700; color: #fff; }
 .vp-poster-sub { color: #d8d2c6; font-size: .9rem; margin-top: 4px; }
 .vp-poster-play { font-size: 2.4rem; color: var(--gold); margin-top: 8px; }
-.vp-bar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 12px; }
-.vp-btn { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 8px 14px; font: inherit; cursor: pointer;
-  border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 10px; }
+/* أزرار صغيرة متجاورة بأيقونات فقط (ملاحظتا ٤١ و٤٢) */
+.vp-bar { display: flex; gap: 6px; justify-content: center; align-items: center; margin-top: 10px; }
+.vp-btn { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 50%; }
+.vp-btn.main { width: 44px; height: 44px; background: var(--gold); border-color: var(--gold); color: var(--ink); }
 .vp-btn:hover { border-color: var(--gold); color: var(--accent-text); }
-.vp-ico { font-size: 1rem; line-height: 1; }
+.vp-btn.main:hover { color: var(--ink); filter: brightness(1.05); }
+.vp-ico { display: grid; place-items: center; line-height: 0; }
 .bi { display: inline-flex; align-items: baseline; gap: 6px; }
 .bi .en { color: var(--muted); font-size: .82em; font-weight: 400; }
-.vp-rows { margin-top: 10px; display: grid; gap: 8px; }
-.vp-row { display: grid; grid-template-columns: minmax(96px, auto) 1fr auto; gap: 10px; align-items: center; }
-.vp-range { width: 100%; accent-color: var(--gold); height: 22px; }
-.vp-time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .88rem; min-width: 84px; text-align: end; }
+.vp-rows { margin-top: 8px; display: grid; gap: 6px; }
+.vp-row { display: flex; gap: 8px; align-items: center; }
+.vp-volrow .vp-btn { width: 28px; height: 28px; border: 0; background: transparent; }
+.vp-volrow .vp-range { max-width: 160px; }
+.vp-range { flex: 1; accent-color: var(--gold); height: 20px; }
+.vp-time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .82rem; white-space: nowrap; }
 .vp-slot { margin-top: 10px; }
+/* في الأعمدة الضيقة نكتفي بالعربية على الأزرار حتى لا تتكدّس */
+.public .card { container-type: inline-size; }
+@media (max-width: 560px) { .tabs .bi .en { display: none; } }
 
 /* الأرشيف: صفّ لكل أسبوع — مكة يمينًا والمدينة يسارًا (ملاحظة ٣٣) */
 .week { margin-top: 26px; }

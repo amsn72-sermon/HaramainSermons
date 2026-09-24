@@ -9,6 +9,7 @@ const routes = [
   // [النمط، الاستيراد، يتطلب دخولًا، للإدارة فقط]
   ['/', () => import('./views/public.js'), false],
   ['/start', () => import('./views/start.js'), false],
+  ['/arafah', () => import('./views/public.js').then(m => ({ render: m.arafah })), false],
   ['/login', () => import('./views/auth.js').then(m => ({ render: m.login })), false],
   ['/register', () => import('./views/auth.js').then(m => ({ render: m.register })), false],
   ['/reset', () => import('./views/auth.js').then(m => ({ render: m.reset })), false],

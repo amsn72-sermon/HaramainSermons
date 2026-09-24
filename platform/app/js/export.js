@@ -137,30 +137,35 @@ export async function downloadDocx({ material, track, khateeb }) {
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 
-// الطباعة / الحفظ PDF: الكليشة خلف كل صفحة، وصندوق الكتابة بنفس مقاسات المحرر
+// الطباعة / الحفظ PDF: نقسّم النص إلى صفحات A4 بأنفسنا، ولكل صفحة كليشتها.
+// لا نعتمد على تكرار المتصفح للعناصر الثابتة ولا لرأس الجدول وتذييله،
+// لأن سفاري لا يكرّرها فتضيع الكليشة ويركب النص على بيانات التواصل (ملاحظة ٣٨).
 export function printTranslation({ material, track, khateeb }, { autoPrint = true } = {}) {
   const dir = langDir(track.language_code);
   const w = window.open('', '_blank');
   if (!w) return false;
   const P = PAGE;
+  const BOX_H = P.h - P.top - P.bottom;      // ارتفاع صندوق الكتابة بالمليمتر
+  const BOX_W = P.w - P.side * 2;
   w.document.write(`<!doctype html><html lang="${track.language_code}" dir="${dir}" data-theme="light"><head><meta charset="utf-8"><title></title>
 <link rel="stylesheet" href="${location.origin}/css/app.css"><style>
 @page { size: A4; margin: 0; }
 html, body { margin: 0; background: #fff !important; color: #111 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-img.lh { position: fixed; top: 0; left: 0; width: ${P.w}mm; height: ${P.h}mm; z-index: 0; }
-table.frame { position: relative; z-index: 1; width: ${P.w}mm; border-collapse: collapse; background: transparent; }
-table.frame > thead td { height: ${P.top}mm; padding: 0; } table.frame > tfoot td { height: ${P.bottom}mm; padding: 0; }
-table.frame > tbody > tr > td { padding: 0 ${P.side}mm; vertical-align: top; }
+.sheet { position: relative; width: ${P.w}mm; height: ${P.h}mm; overflow: hidden; background: #fff; break-after: page; page-break-after: always; }
+.sheet:last-child { break-after: auto; page-break-after: auto; }
+.sheet img.lh { position: absolute; top: 0; left: 0; width: ${P.w}mm; height: ${P.h}mm; }
+.win { position: absolute; top: ${P.top}mm; inset-inline-start: ${P.side}mm; width: ${BOX_W}mm; height: ${BOX_H}mm; overflow: hidden; }
+.flow { position: absolute; top: 0; inset-inline-start: 0; width: ${BOX_W}mm; }
 .print-body { --pt: 1pt; font-size: 12pt; line-height: 1.8; }
 .print-body .data-card { font-size: 11pt; }
-@media screen { body { background: #d9d9d9 !important; } .sheet { width: ${P.w}mm; min-height: ${P.h}mm; margin: 16px auto; background: #fff; position: relative; isolation: isolate; box-shadow: 0 2px 12px #0003; } img.lh { position: absolute; } }
-</style></head><body><div class="sheet"><img class="lh" alt=""><table class="frame"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot>
-<tbody><tr><td><div class="print-body"><div class="card-slot"></div><div class="t"></div></div></td></tr></tbody></table></div></body></html>`);
+#measure { position: absolute; visibility: hidden; top: -10000mm; inset-inline-start: 0; width: ${BOX_W}mm; }
+@media screen { body { background: #d9d9d9 !important; } .sheet { margin: 16px auto; box-shadow: 0 2px 12px #0003; } }
+@media print { .sheet { margin: 0; box-shadow: none; } }
+</style></head><body><div id="pages"></div><div id="measure"><div class="print-body flow"><div class="card-slot"></div><div class="t"></div></div></div></body></html>`);
   w.document.close();
   const d = w.document;
   d.title = fileName(material, track.language_code, khateeb);
-  // رابط مطلق: نافذة الطباعة تُفتح عن about:blank فلا تصلح المسارات النسبية في بعض المتصفحات
-  d.querySelector('img.lh').src = new URL(LETTERHEAD, location.origin).href;
+
   // بطاقة البيانات: صفّان بعرض الصفحة
   const card = d.createElement('table');
   card.className = 'data-card'; card.dir = 'rtl'; card.lang = 'ar';
@@ -174,7 +179,65 @@ table.frame > tbody > tr > td { padding: 0 ${P.side}mm; vertical-align: top; }
   thead.append(htr); tb.append(vtr); card.append(thead, tb);
   d.querySelector('.card-slot').replaceWith(card);
   d.querySelector('.t').innerHTML = sanitize(track.translation_html);
-  const go = () => setTimeout(() => w.print(), 400);
-  if (autoPrint) { if (d.readyState === 'complete') go(); else w.addEventListener('load', go); }
+
+  // مواضع نهايات الأسطر: لا نقطع سطرًا بين صفحتين
+  function lineBottoms(flow) {
+    const top = flow.getBoundingClientRect().top;
+    const out = [];
+    const walk = d.createTreeWalker(flow, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      if (!n.nodeValue || !n.nodeValue.trim()) continue;
+      const r = d.createRange(); r.selectNodeContents(n);
+      for (const rect of r.getClientRects()) if (rect.height) out.push(rect.bottom - top);
+    }
+    // العناصر بلا نص (صور، فواصل، خلايا فارغة) تُحسب بحوافها السفلى
+    for (const el of flow.querySelectorAll('img, hr, tr, td, th, li, p, div')) {
+      const rect = el.getBoundingClientRect();
+      if (rect.height) out.push(rect.bottom - top);
+    }
+    return [...new Set(out.map(v => Math.round(v)))].sort((a, b) => a - b);
+  }
+
+  function paginate() {
+    const measure = d.getElementById('measure');
+    const flow = measure.querySelector('.flow');
+    const probe = d.createElement('div');
+    probe.style.cssText = `height:${BOX_H}mm;width:1px;position:absolute;visibility:hidden`;
+    d.body.append(probe);
+    const boxPx = probe.getBoundingClientRect().height;
+    probe.remove();
+
+    const bottoms = lineBottoms(flow);
+    const total = Math.max(flow.getBoundingClientRect().height, bottoms.at(-1) || 0);
+    const starts = [0];
+    let guard = 0;
+    while (starts.at(-1) + boxPx < total - 1 && guard++ < 200) {
+      const start = starts.at(-1);
+      const limit = start + boxPx;
+      const fit = bottoms.filter(b => b > start + 1 && b <= limit + 0.5);
+      // آخر سطر يكتمل داخل الصفحة، وإن لم يكتمل أي سطر قطعنا عند حد الصفحة
+      starts.push(fit.length ? fit.at(-1) : limit);
+    }
+
+    const pages = d.getElementById('pages');
+    const lhUrl = new URL(LETTERHEAD, location.origin).href;
+    pages.replaceChildren(...starts.map(start => {
+      const img = d.createElement('img'); img.className = 'lh'; img.alt = ''; img.src = lhUrl;
+      const clone = flow.cloneNode(true);
+      clone.style.top = `${-start}px`;
+      const win = d.createElement('div'); win.className = 'win'; win.append(clone);
+      const sheet = d.createElement('div'); sheet.className = 'sheet'; sheet.append(img, win);
+      return sheet;
+    }));
+    measure.remove();
+  }
+
+  const ready = async () => {
+    try { await d.fonts?.ready; } catch { /* المتصفح لا يدعم fonts.ready */ }
+    await new Promise(r => setTimeout(r, 120));
+    paginate();
+    if (autoPrint) setTimeout(() => w.print(), 400);
+  };
+  if (d.readyState === 'complete') ready(); else w.addEventListener('load', ready);
   return true;
 }

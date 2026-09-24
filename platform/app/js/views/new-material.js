@@ -13,7 +13,6 @@ export async function render(ctx) {
   const members = await db.select('profiles', {
     select: 'id,full_name,role,member_languages(language_code)', status: 'eq.active', order: 'full_name.asc'
   });
-  const feed = await fetch(window.HS_CONFIG.feedUrl, { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).catch(() => null);
   const langsOf = m => new Set((m.member_languages || []).map(x => x.language_code));
   const activeStages = state.stages.filter(s => s.is_active);
   const slaStages = activeStages.filter(s => !s.outside_sla);
@@ -39,8 +38,7 @@ export async function render(ctx) {
     unit: h('select', h('option', { value: '60' }, 'ساعات'), h('option', { value: '1440', selected: true }, 'أيام')),
     receipt: h('input', { type: 'number', min: 5, value: 120 }),
     reminder: h('select', [5, 15, 30, 60].map(n => h('option', { value: n, selected: n === 15 }, fmtMinutes(n)))),
-    escalate: h('input', { type: 'checkbox' }),
-    feed_record_id: h('select')
+    escalate: h('input', { type: 'checkbox' })
   };
   const source = createEditor({ plain: true, label: 'النص العربي', placeholder: 'اكتب النص العربي أو الصقه هنا…', html: draft.source_html || '' });
   for (const [k, el] of Object.entries(f)) if (draft[k] !== undefined && el.type !== 'file') el.type === 'checkbox' ? (el.checked = draft[k]) : (el.value = draft[k]);
@@ -52,22 +50,11 @@ export async function render(ctx) {
     f.khateeb_id.value = keep;
   }
   fillKhateebs(); if (draft.khateeb_id) f.khateeb_id.value = draft.khateeb_id;
-  // ربط اختياري بتسجيل الخطبة في أرشيف يوتيوب، لتظهر الترجمة المكتوبة تحت الفيديو في الموقع العام
-  function fillFeed() {
-    const keep = f.feed_record_id.value;
-    const recs = [...(feed?.current || []), ...(feed?.archive || [])]
-      .filter(r => (r.venue === 'madinah' ? 'madinah' : 'makkah') === f.mosque.value).slice(0, 40);
-    fill(f.feed_record_id, h('option', { value: '' }, feed ? '— بلا ربط —' : 'تعذّر تحميل أرشيف يوتيوب'),
-      recs.map(r => h('option', { value: r.id }, `${r.title}`)));
-    f.feed_record_id.value = keep;
-  }
-  fillFeed(); if (draft.feed_record_id) f.feed_record_id.value = draft.feed_record_id;
-  f.mosque.addEventListener('change', () => { fillKhateebs(); fillFeed(); });
+  f.mosque.addEventListener('change', fillKhateebs);
 
   const sermonOnly = h('div.grid-2',
     h('label.field', 'نوع الخطبة', f.sermon_type),
-    h('label.field', 'الخطيب', f.khateeb_id),
-    h('label.field', 'تسجيل الخطبة على يوتيوب', h('small', 'اختياري: يربط الترجمة المكتوبة بالفيديو في الموقع العام'), f.feed_record_id));
+    h('label.field', 'الخطيب', f.khateeb_id));
   const pdfWrap = h('label.field', 'ملف الأصل العربي (PDF)', h('small', 'حتى ٢٠ ميغابايت'), f.pdf);
   const textWrap = h('div.field', h('b', 'النص العربي'), source.el);
   const syncVisibility = () => {
@@ -267,7 +254,7 @@ export async function render(ctx) {
         deliverable: f.deliverable.value, priority: f.priority.value,
         receipt_minutes: Number(f.receipt.value), reminder_minutes: Number(f.reminder.value),
         escalate_to_manager: f.escalate.checked,
-        feed_record_id: f.material_type.value === 'خطب' && f.feed_record_id.value ? f.feed_record_id.value : null
+        feed_record_id: null
       },
       stage_minutes,
       languages: [...picked.entries()].map(([code, entry]) => ({

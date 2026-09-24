@@ -110,10 +110,11 @@ export async function render(ctx) {
   const tabBar = h('div.tabs', { role: 'tablist' });
 
   // بطاقة خطبة: قائمة لغات منسدلة باللغتين + مشغّل المنصة
-  function sermonCard(rec) {
+  function sermonCard(rec, prefer = '') {
     const list = rec.translations || [];
+    const at = Math.max(0, list.findIndex(t => langCode(t) === prefer));
     const sel = h('select.lang-select', { 'aria-label': 'لغة الخطبة — Sermon language' },
-      list.map((t, i) => h('option', { value: String(i) }, bilingual(t))));
+      list.map((t, i) => h('option', { value: String(i), selected: i === at ? true : null }, bilingual(t))));
     const box = h('div.vp-slot');
     const show = () => {
       const t = list[Number(sel.value) || 0];
@@ -130,12 +131,21 @@ export async function render(ctx) {
       box);
   }
 
-  const weekRow = w => h('section.week',
-    h('div.week-head', h('h3', w.dateLabel || w.day), h('span.small.muted', `${[w.makkah, w.madinah].filter(Boolean).length} خطبة`)),
-    h('div.grid-2',
-      w.makkah ? sermonCard(w.makkah) : h('div.card.empty-slot', two('لا توجد خطبة من المسجد الحرام', 'No Makkah sermon')),
-      w.madinah ? sermonCard(w.madinah) : h('div.card.empty-slot', two('لا توجد خطبة من المسجد النبوي', 'No Madinah sermon')),
-      ...w.other.map(sermonCard)));
+  // صفّ أسبوع: للخطب مربّعان ثابتان (مكة يمينًا والمدينة يسارًا)،
+  // وللمجالس والدروس تُعرض المتاح فقط بلا مربّعات فارغة (ملاحظة ٣٩)
+  const weekRow = (w, mode = 'sermons', prefer = '') => {
+    const items = [w.makkah, w.madinah, ...w.other].filter(Boolean);
+    const body = mode === 'lessons'
+      ? items.map(r => sermonCard(r, prefer))
+      : [w.makkah ? sermonCard(w.makkah, prefer) : h('div.card.empty-slot', two('لا توجد خطبة من المسجد الحرام', 'No Makkah sermon')),
+         w.madinah ? sermonCard(w.madinah, prefer) : h('div.card.empty-slot', two('لا توجد خطبة من المسجد النبوي', 'No Madinah sermon')),
+         ...w.other.map(r => sermonCard(r, prefer))];
+    const n = mode === 'lessons' ? items.length : [w.makkah, w.madinah].filter(Boolean).length;
+    return h('section.week',
+      h('div.week-head', h('h3', w.dateLabel || w.day),
+        h('span.small.muted', mode === 'lessons' ? `${n} مجلس` : `${n} خطبة`)),
+      h('div.grid-2', body));
+  };
 
   const views = {
     latest: () => {
@@ -148,28 +158,45 @@ export async function render(ctx) {
     archive: () => {
       if (!weeks.length && !lessonWeeks.length) return emptyState('الأرشيف غير متاح الآن', 'حاول مجددًا بعد قليل.');
       const q = h('input', { type: 'search', placeholder: 'ابحث بعنوان الخطبة أو التاريخ — Search', 'aria-label': 'البحث في الأرشيف' });
+      // بحث بلغة واحدة: من اختار الإنجليزية رأى كل المواد بالإنجليزية خطبًا ودروسًا (ملاحظة ٤٥)
+      const codes = new Map();
+      for (const r of [...sermons, ...lessons]) for (const t of r.translations) if (!codes.has(langCode(t))) codes.set(langCode(t), t);
+      const langSel = h('select.lang-select', { 'aria-label': 'اللغة — Language' },
+        h('option', { value: '' }, 'كل اللغات — All languages'),
+        [...codes.entries()].sort((a, b) => bilingual(a[1]).localeCompare(bilingual(b[1]), 'ar'))
+          .map(([code, t]) => h('option', { value: code }, bilingual(t))));
       const secBox = h('div.stack'); const lessonBox = h('div.stack');
       const more = h('button.btn.sm', { type: 'button' }, two('عرض المزيد', 'Show more'));
       const moreLessons = h('button.btn.sm', { type: 'button' }, two('عرض المزيد', 'Show more'));
       let shown = 3, shownL = 2;
 
+      const hasLang = (r, code) => !code || (r.translations || []).some(t => langCode(t) === code);
+      const keep = (w, code) => {
+        const items = [w.makkah, w.madinah, ...w.other].filter(Boolean);
+        if (!code) return w;
+        const f = { ...w, makkah: hasLang(w.makkah || {}, code) ? w.makkah : null,
+          madinah: hasLang(w.madinah || {}, code) ? w.madinah : null,
+          other: w.other.filter(r => hasLang(r, code)) };
+        return items.some(r => hasLang(r, code)) ? f : null;
+      };
       const match = (w, s) => !s || (w.dateLabel || '').includes(s) ||
         [w.makkah, w.madinah, ...w.other].some(r => r && (r.title || '').includes(s));
       const draw = () => {
-        const s = q.value.trim();
-        const ws = weeks.filter(w => match(w, s));
-        const ls = lessonWeeks.filter(w => match(w, s));
-        secBox.replaceChildren(...(ws.length ? ws.slice(0, shown).map(weekRow) : [emptyState('لا نتائج مطابقة', '')]));
-        lessonBox.replaceChildren(...(ls.length ? ls.slice(0, shownL).map(weekRow) : [h('p.muted', 'لا مجالس مطابقة')]));
+        const s = q.value.trim(); const code = langSel.value;
+        const ws = weeks.filter(w => match(w, s)).map(w => keep(w, code)).filter(Boolean);
+        const ls = lessonWeeks.filter(w => match(w, s)).map(w => keep(w, code)).filter(Boolean);
+        secBox.replaceChildren(...(ws.length ? ws.slice(0, shown).map(w => weekRow(w, 'sermons', code)) : [emptyState('لا نتائج مطابقة', '')]));
+        lessonBox.replaceChildren(...(ls.length ? ls.slice(0, shownL).map(w => weekRow(w, 'lessons', code)) : [h('p.muted', 'لا مجالس مطابقة')]));
         more.hidden = ws.length <= shown; moreLessons.hidden = ls.length <= shownL;
       };
       more.addEventListener('click', () => { shown += 3; draw(); });
       moreLessons.addEventListener('click', () => { shownL += 2; draw(); });
       q.addEventListener('input', () => { shown = 3; shownL = 2; draw(); });
+      langSel.addEventListener('change', () => { shown = 3; shownL = 2; draw(); });
       draw();
 
       return h('div.stack',
-        h('div.grid', h('label.field', two('البحث', 'Search'), q)),
+        h('div.grid', h('label.field', two('اللغة', 'Language'), langSel), h('label.field', two('البحث', 'Search'), q)),
         h('div.section-head.sm', h('h3', 'خطب الجمعة — Friday sermons'), h('p', 'المسجد الحرام يمينًا والمسجد النبوي يسارًا، أسبوعًا بعد أسبوع')),
         secBox, h('div.row', more),
         h('div.section-head.sm', { style: { marginTop: '28px' } }, h('h3', 'المجالس العلمية والدروس — Lessons'), h('p', 'من قناة الخطب على يوتيوب')),
@@ -179,7 +206,8 @@ export async function render(ctx) {
 
   function select(key) {
     active = key;
-    tabBar.replaceChildren(...tabs.map(([k, ar, en]) => h('button', { type: 'button', role: 'tab', 'aria-selected': String(k === active), onclick: () => select(k) }, two(ar, en))));
+    tabBar.replaceChildren(...tabs.map(([k, ar, en]) => h('button', { type: 'button', role: 'tab', 'aria-selected': String(k === active), onclick: () => select(k) }, two(ar, en))),
+      h('a.tab-link', { href: '/arafah' }, two('خطبة عرفة', 'Arafah sermon')));
     history.replaceState(null, '', key === 'latest' ? '/' : `/?tab=${key}`);
     const [title, sub] = HEADS[key];
     panel.replaceChildren(h('div.section-head', h('h2', title), h('p', sub)), views[key]());
@@ -198,6 +226,85 @@ export async function render(ctx) {
       tabBar,
       panel),
     footer('مشروع خادم الحرمين الشريفين لترجمة خطب الحرمين الشريفين', 'الهيئة العامة للعناية بشؤون المسجد الحرام والمسجد النبوي'));
+}
+
+// ---------------------------------------------------------------------
+// صفحة مستقلة لخطبة عرفة برابطها الخاص /arafah (ملاحظة ٤٦)
+// ---------------------------------------------------------------------
+const isArafah = r => r.kind === 'arafah' || /عرفة|عرفات|Arafah|Arafat/i.test(`${r.title || ''} ${r.groupTitle || ''}`);
+
+// قائمة عرفة على يوتيوب قد لا تتضمن الأصل العربي، فيُضاف أولًا من الإعدادات (ملاحظة ٤٧)
+function withArabicFirst(rec) {
+  const list = (rec.translations || []).slice();
+  const hasAr = list.some(t => langCode(t) === 'ar');
+  const id = (cfg.arafahOriginal || {})[rec.year] || (cfg.arafahOriginal || {})[String(rec.year)];
+  if (!hasAr && id) list.unshift({ code: `ar:${id}`, language: 'العربية', englishName: 'Arabic', videoId: id });
+  // العربية أولًا دائمًا
+  list.sort((a, b) => (langCode(a) === 'ar' ? -1 : 0) - (langCode(b) === 'ar' ? -1 : 0));
+  return { ...rec, translations: list };
+}
+
+export async function arafah() {
+  const feed = await fetch(cfg.feedUrl, { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).catch(() => null);
+  const list = groupRecords([...(feed?.current || []), ...(feed?.archive || [])])
+    .filter(isArafah).map(withArabicFirst)
+    .sort((a, b) => dayKey(b.day || b.dateLabel) - dayKey(a.day || a.dateLabel) || String(b.title).localeCompare(String(a.title)));
+
+  const body = h('div.stack');
+  if (!list.length) body.append(emptyState('لم تُضف خطبة عرفة بعد', 'تظهر هنا فور نشرها على قناة الخطب.'));
+  else {
+    const codes = new Map();
+    for (const r of list) for (const t of r.translations) if (!codes.has(langCode(t))) codes.set(langCode(t), t);
+    const langSel = h('select.lang-select', { 'aria-label': 'اللغة — Language' },
+      h('option', { value: '' }, 'كل اللغات — All languages'),
+      [...codes.entries()].sort((a, b) => bilingual(a[1]).localeCompare(bilingual(b[1]), 'ar'))
+        .map(([code, t]) => h('option', { value: code }, bilingual(t))));
+    const cards = h('div.stack');
+    const draw = () => {
+      const code = langSel.value;
+      const rows = list.filter(r => !code || r.translations.some(t => langCode(t) === code));
+      cards.replaceChildren(...(rows.length ? rows.map(r => h('section.week',
+        h('div.week-head', h('h3', r.dateLabel && r.dateLabel !== 'خطبة بلا تاريخ محدد' ? r.dateLabel : (r.year ? `${r.year}هـ` : 'خطبة عرفة')),
+          h('span.small.muted', `${r.translations.length} لغة`)),
+        h('div.grid-2', arafahCard(r, code)))) : [h('p.muted', 'لا نتائج بهذه اللغة')]));
+    };
+    langSel.addEventListener('change', draw); draw();
+    body.append(h('div.grid', h('label.field', two('اللغة', 'Language'), langSel)), cards);
+  }
+
+  return h('div',
+    h('header.topbar', h('div.inner',
+      brand('مشروع خادم الحرمين الشريفين لترجمة خطب الحرمين الشريفين', 'ترجمات بلغات العالم', '/'),
+      h('div.spacer'), themeToggle(), h('a.btn.sm', { href: '/' }, 'الصفحة الرئيسية'))),
+    h('main#main.wrap.public', { tabindex: '-1' },
+      h('section.hero',
+        h('div.eyebrow', 'يوم عرفة — Day of Arafah'),
+        h('h1', 'ترجمة خطبة عرفة بلغات العالم'),
+        h('p', 'The Arafah sermon translated into the languages of the world — اختر لغتك من القائمة.')),
+      h('div.section-head', h('h2', 'خطبة عرفة'), h('p', 'من مسجد نمرة بعرفات — قناة الخطب على يوتيوب')),
+      body),
+    footer('مشروع خادم الحرمين الشريفين لترجمة خطب الحرمين الشريفين', 'الهيئة العامة للعناية بشؤون المسجد الحرام والمسجد النبوي'));
+}
+
+// بطاقة خطبة عرفة: قائمة لغات منسدلة ومشغّل المنصة
+function arafahCard(rec, prefer = '') {
+  const list = rec.translations || [];
+  const at = Math.max(0, list.findIndex(t => langCode(t) === prefer));
+  const sel = h('select.lang-select', { 'aria-label': 'لغة الخطبة — Sermon language' },
+    list.map((t, i) => h('option', { value: String(i), selected: i === at ? true : null }, bilingual(t))));
+  const box = h('div.vp-slot');
+  const show = () => {
+    const t = list[Number(sel.value) || 0];
+    box.replaceChildren(t ? videoPlayer({ videoId: t.videoId, title: `${rec.title} — ${nameAr(t)}`, subtitle: bilingual(t) })
+      : h('div.empty', 'لا يوجد تسجيل — No recording'));
+  };
+  sel.addEventListener('change', show); show();
+  return h('article.card.sermon-card',
+    h('div.eyebrow', 'خطبة عرفة — Arafah sermon'),
+    h('h3', rec.title),
+    h('p.small.muted', rec.dateLabel || ''),
+    h('label.field.lang-pick', two(`لغة الخطبة (${list.length})`, 'Language'), sel),
+    box);
 }
 
 const HEADS = {
