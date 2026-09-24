@@ -115,14 +115,32 @@ export async function render(ctx) {
       if (choice && s.assignee_role === 'translator') used.add(choice.id);
     }
   }
-  function toggleLang(code) {
-    if (picked.has(code)) picked.delete(code);
-    else { picked.set(code, { stages: new Map(activeStages.map(s => [s.key, ''])), audio: 'translation' }); suggest(code); }
-    drawLangs(); drawAssign();
-  f.deliverable.addEventListener('change', drawAssign);
+  function addLang(code) {
+    if (picked.has(code)) return;
+    picked.set(code, { stages: new Map(activeStages.map(s => [s.key, ''])), audio: 'translation' });
+    suggest(code);
   }
+  function toggleLang(code) {
+    if (picked.has(code)) picked.delete(code); else addLang(code);
+    drawLangs(); drawAssign();
+  }
+  // تحديد جماعي مع إبقاء الاختيار الفردي (ملاحظة ٥٨)
+  const activeLangs = () => state.languages.filter(l => l.is_active);
+  const bulk = (pick, label) => h('button.btn.sm', { type: 'button', onclick: () => {
+    pick(); drawLangs(); drawAssign();
+  } }, label);
+  const langCount = h('span.small.muted');
+  const langBulk = h('div.row', { style: { gap: '8px', margin: '8px 0' } },
+    bulk(() => activeLangs().forEach(l => addLang(l.code)), 'تحديد جميع اللغات'),
+    bulk(() => activeLangs().filter(l => l.is_core).forEach(l => addLang(l.code)), 'اللغات الرئيسية'),
+    bulk(() => picked.clear(), 'إلغاء التحديد'),
+    langCount);
   function drawLangs() {
     const q = langSearch.value.trim();
+    const core = activeLangs().filter(l => l.is_core).length;
+    langCount.textContent = picked.size
+      ? `المحدد: ${picked.size} من ${activeLangs().length} لغة`
+      : `لم تُحدَّد لغة بعد — ${activeLangs().length} لغة متاحة، منها ${core} رئيسية`;
     langPills.replaceChildren(...state.languages.filter(l => l.is_active && (!q || l.name_ar.includes(q) || l.native_name.toLowerCase().includes(q.toLowerCase())))
       .map(l => {
         const n = members.filter(m => langsOf(m).has(l.code)).length;
@@ -133,6 +151,7 @@ export async function render(ctx) {
       }));
   }
   langSearch.addEventListener('input', drawLangs);
+  f.deliverable.addEventListener('change', drawAssign);
 
   function drawAssign() {
     assignBox.replaceChildren(...[...picked.entries()].map(([code, entry]) => {
@@ -194,7 +213,7 @@ export async function render(ctx) {
         h('p.small.muted', 'تُحدَّد المدة الكلية تلقائيًا حسب الأهمية: طارئة يوم، عاجلة يومان، اعتيادية ثلاثة أيام، وتُوزَّع على المراحل بالنسبة (الترجمة أطول من المراجعة، والاستلام أقصر). المدة تبدأ من قبول المترجم، والموعد النهائي ثابت: إن تأخرت مرحلة قلّ وقت ما بعدها، وإن سبقت زاد. إن اختُصر مسار لغة، يُوزَّع وقت المراحل المتجاوزة على مراحلها. اعتماد المدير خارج المدة.')),
       h('label.check', f.escalate, 'عند تجاوز الوقت: تنبيه مدير المشروع إضافةً إلى المسؤول والمنسق')),
     h('div.stack',
-      h('label.field', 'اللغات', langSearch), langPills,
+      h('label.field', 'اللغات', langSearch), langBulk, langPills,
       assignBox)
   ];
   const titles = ['١. بيانات المادة', '٢. الوقت والأهمية', '٣. اللغات والإسناد'];

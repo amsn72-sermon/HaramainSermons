@@ -1,7 +1,7 @@
 // أرشيف أعمال الترجمة: كل مادة في سطر واحد، مرقّمة، بأسماء ملفات واضحة واختصارات بالأيقونات
 import { h, toast, busy, emptyState, fmtDateTime, fmtSermonDate } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, langName, hadLateness } from '../store.js';
+import { state, langName, hadLateness, MOSQUE } from '../store.js';
 import { downloadDocx, printTranslation } from '../export.js';
 import { heading, fileName } from '../page.js';
 import { reopenDialog } from './revise.js';
@@ -58,11 +58,33 @@ export async function render(ctx) {
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
 
+  // تقسيم الأرشيف حسب نوع المادة، والخطب حسب المسجد. لا يُعرض قسم بلا مواد (ملاحظة ٥٩)
+  const groupKey = t => {
+    const m = t.material;
+    if (m.material_type === 'خطب') return `خطب:${m.mosque}`;
+    return `نوع:${m.material_type || 'أخرى'}`;
+  };
+  const groupLabel = key => key.startsWith('خطب:')
+    ? `خطب ${MOSQUE[key.slice(4)] || ''}`.trim()
+    : key.slice(4);
+  const GROUP_ORDER = ['خطب:makkah', 'خطب:madinah', 'نوع:دروس علمية', 'نوع:كتب', 'نوع:مطويات',
+    'نوع:منشورات', 'نوع:إعلانات', 'نوع:توجيهات'];
+  const groupRank = key => { const i = GROUP_ORDER.indexOf(key); return i === -1 ? GROUP_ORDER.length : i; };
+
   function draw() {
     const s = q.value.trim();
     const list = rows.filter(t => (!lang.value || t.language_code === lang.value) &&
       (!s || t.material.title.includes(s) || langName(t.language_code).includes(s) || (t.material.khateeb?.name || '').includes(s)));
-    box.replaceChildren(list.length ? h('ol.archive', list.map((t, i) => {
+
+    const groups = new Map();
+    for (const t of list) {
+      const k = groupKey(t);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(t);
+    }
+    const ordered = [...groups.entries()].sort((a, b) => groupRank(a[0]) - groupRank(b[0]) || a[0].localeCompare(b[0], 'ar'));
+
+    const rowEl = t => {
       const khateeb = t.material.khateeb?.name;
       const args = { material: t.material, track: t, khateeb };
       const name = fileName(t.material, t.language_code, khateeb);
@@ -89,7 +111,12 @@ export async function render(ctx) {
             () => reopenDialog(t.material, mode => { if (mode === 'annotate') ctx.navigate(`/app/revise/${t.material.id}`); else ctx.navigate('/app/archive', { replace: true }); }))
             .catch(err => toast(err.message, 'bad'))),
           h('a.icon-btn', { href: `/app/tasks/${t.id}`, title: 'السجل والتفاصيل', 'aria-label': 'السجل والتفاصيل' }, icon('log'))));
-    }))
+    };
+
+    box.replaceChildren(ordered.length
+      ? h('div.stack', ordered.map(([key, items]) => h('section.arch-group',
+          h('div.arch-group-head', h('h3', groupLabel(key)), h('span.badge.gold', `${items.length}`)),
+          h('ol.archive', items.map(rowEl)))))
       : emptyState(rows.length ? 'لا نتائج مطابقة' : 'لا توجد ترجمات مكتملة بعد', rows.length ? '' : 'تظهر الترجمة هنا بعد اكتمال مسارها.'));
   }
   [q, lang].forEach(el => el.addEventListener('input', draw));

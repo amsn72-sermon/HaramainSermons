@@ -5,7 +5,7 @@ import { brand, themeToggle, footer } from './shell.js';
 
 function frame(...children) {
   return h('div',
-    h('header.topbar', h('div.inner', brand(undefined, undefined, '/start'), h('div.spacer'), themeToggle())),
+    h('header.topbar', h('div.inner', brand(undefined, undefined, '/app'), h('div.spacer'), themeToggle())),
     h('main#main.auth-wrap', children),
     footer());
 }
@@ -46,7 +46,7 @@ export async function login(ctx) {
         try { await auth.recover(email.value.trim()); toast('أرسلنا رابط استعادة كلمة المرور إلى بريدك.', 'ok'); }
         catch (err) { showErrors(errs, [err.message]); }
       } }, 'نسيت كلمة المرور')),
-    h('div.row.small', h('a', { href: '/' }, 'خطب الحرمين الشريفين — للمستفيدين'), h('span.muted', '·'), h('a', { href: '/start' }, 'العودة إلى الشاشات الرئيسية')));
+    h('div.row.small', h('a', { href: '/' }, 'خطب الحرمين الشريفين — للمستفيدين')));
   return frame(h('div.card.auth-card.login-panel', form));
 }
 

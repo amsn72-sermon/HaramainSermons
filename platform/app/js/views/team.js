@@ -1,14 +1,31 @@
 // فريق العمل: طلبات التسجيل، التفعيل، الأدوار، واللغات
-import { h, fill, toast, busy, dialog, emptyState, fmtDate } from '../ui.js';
+import { h, fill, toast, busy, dialog, emptyState, fmtDate, fmtDateTime, confirm } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, isManager, ROLE_LABEL, STATUS_LABEL, langName } from '../store.js';
+import { state, isManager, ROLE_LABEL, STATUS_LABEL, langName, stageName } from '../store.js';
+import { POLICY_KEY, POLICY_VERSION } from '../policy.js';
 
 export async function render(ctx) {
-  const [members, priv] = await Promise.all([
+  const [members, priv, perf, rateSum, signed] = await Promise.all([
     db.select('profiles', { select: '*,member_languages(language_code)', order: 'created_at.desc' }),
-    db.select('profile_private', { select: '*' })
+    db.select('profile_private', { select: '*' }),
+    db.select('member_performance', { select: '*' }).catch(() => []),
+    db.select('member_rating_summary', { select: '*' }).catch(() => []),
+    db.select('policy_acceptances', { select: 'member_id,policy_version,signed_name,accepted_at', policy_key: `eq.${POLICY_KEY}` }).catch(() => [])
   ]);
   const privOf = Object.fromEntries(priv.map(p => [p.id, p]));
+  const perfOf = Object.fromEntries(perf.map(r => [r.member_id, r]));
+  const rateOf = Object.fromEntries(rateSum.map(r => [r.member_id, r]));
+  const signOf = {};
+  for (const r of signed) if (r.policy_version === POLICY_VERSION) signOf[r.member_id] = r;
+
+  const stars = n => h('span.stars', { title: n ? `${n} من ٥` : 'بلا تقييم' },
+    [1, 2, 3, 4, 5].map(i => h('b', { class: i <= Math.round(n || 0) ? '' : 'off' }, '★')));
+  const hours = sec => {
+    const s = Math.max(0, Number(sec) || 0);
+    if (s < 3600) return `${Math.round(s / 60)} دقيقة`;
+    return `${(s / 3600).toFixed(1)} ساعة`;
+  };
+  const onTimePct = r => (r && r.done_stages) ? Math.round((r.on_time_stages / r.done_stages) * 100) : null;
   const langsOf = m => (m.member_languages || []).map(x => x.language_code);
   const reload = () => ctx.navigate('/app/team', { replace: true });
 
@@ -111,6 +128,68 @@ export async function render(ctx) {
     } catch (err) { toast(err.message, 'bad'); }
   }
 
+  // ملف الأداء والتقييم — للمنسقين ومدير المشروع فقط (ملاحظة ٥٧)
+  async function performance(m) {
+    const r = perfOf[m.id] || {};
+    const sum = rateOf[m.id] || {};
+    const list = h('div.stack', h('p.muted.small', 'جارٍ التحميل…'));
+
+    const drawList = async () => {
+      try {
+        const rows = await db.select('member_ratings', {
+          select: '*,rater:profiles!member_ratings_rater_id_fkey(full_name)',
+          member_id: `eq.${m.id}`, order: 'created_at.desc', limit: 50
+        });
+        list.replaceChildren(rows.length ? h('div.stack', rows.map(x => h('div.row', { style: { borderBottom: '1px solid var(--border)', paddingBottom: '8px' } },
+          h('div', { style: { flex: 1, minWidth: '180px' } },
+            stars(x.score),
+            x.note ? h('div.small', x.note) : h('div.small.muted', 'بلا ملاحظة'),
+            h('div.small.muted', `${x.rater?.full_name || '—'} — ${fmtDateTime(x.created_at)}${x.stage_key ? ' — ' + stageName(x.stage_key) : ''}`)),
+          (isManager() || x.rater_id === state.profile.id) && h('button.btn.sm.danger', { type: 'button', onclick: async e => {
+            if (!await confirm('حذف التقييم', 'يُحذف هذا التقييم نهائيًا. متابعة؟', 'حذف')) return;
+            await busy(e.currentTarget, async () => {
+              try { await db.rpc('delete_rating', { p_id: x.id }); toast('حُذف التقييم.', 'ok'); drawList(); }
+              catch (err) { toast(err.message, 'bad'); }
+            });
+          } }, 'حذف'))))
+          : h('p.muted.small', 'لا تقييمات بعد.'));
+      } catch (err) { list.replaceChildren(h('p.small.bad', err.message)); }
+    };
+    drawList();
+
+    const score = h('select', { 'aria-label': 'الدرجة' },
+      [5, 4, 3, 2, 1].map(v => h('option', { value: String(v) }, `${v} — ${['', 'ضعيف', 'مقبول', 'جيد', 'جيد جدًا', 'ممتاز'][v]}`)));
+    const note = h('textarea', { rows: 2, placeholder: 'ملاحظة موجزة على الأداء (اختياري)' });
+    const add = h('button.btn.sm.primary', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
+      try {
+        await db.rpc('rate_member', { p_member: m.id, p_score: Number(score.value), p_note: note.value.trim() || null });
+        note.value = ''; toast('سُجّل التقييم.', 'ok'); drawList();
+      } catch (err) { toast(err.message, 'bad'); }
+    }) }, 'إضافة التقييم');
+
+    const pct = onTimePct(r);
+    const sg = signOf[m.id];
+    await dialog({
+      title: `أداء ${m.full_name}`,
+      body: h('div.stack',
+        h('div.perf-grid',
+          h('div', h('div.small.muted', 'مراحل منجزة'), h('div.v', String(r.done_stages ?? 0))),
+          h('div', h('div.small.muted', 'الالتزام بالمواعيد'), h('div.v', pct === null ? '—' : pct + '٪')),
+          h('div', h('div.small.muted', 'مجموع التأخير'), h('div.v', hours(r.late_seconds))),
+          h('div', h('div.small.muted', 'مرات الإعادة'), h('div.v', String(r.redo_rounds ?? 0))),
+          h('div', h('div.small.muted', 'مهام مفتوحة'), h('div.v', String(r.open_stages ?? 0))),
+          h('div', h('div.small.muted', 'معدل التقييم'), h('div.v', sum.avg_score ? `${sum.avg_score} / 5` : '—'),
+            h('div.small.muted', sum.ratings_count ? `${sum.ratings_count} تقييم` : ''))),
+        h('p.small.muted', sg
+          ? `وقّع سياسة السرية (نسخة ${sg.policy_version}) باسم «${sg.signed_name}» في ${fmtDateTime(sg.accepted_at)}.`
+          : 'لم يوقّع على سياسة السرية بنسختها الحالية بعد.'),
+        h('fieldset', h('legend', 'تقييم جديد'),
+          h('div.stack', { style: { gap: '8px' } }, h('label.field', 'الدرجة', score), h('label.field', 'ملاحظة', note), h('div.row', add))),
+        h('fieldset', h('legend', 'سجل التقييمات'), list)),
+      buttons: [{ label: 'إغلاق', value: null }]
+    });
+  }
+
   async function setStatus(btn, m, status) {
     await busy(btn, async () => {
       try {
@@ -126,13 +205,20 @@ export async function render(ctx) {
       .filter(m => !filterStatus.value || m.status === filterStatus.value)
       .filter(m => !q.value.trim() || m.full_name.includes(q.value.trim()) || m.email.includes(q.value.trim()));
     table.replaceChildren(list.length ? h('div.table-wrap', h('table.responsive',
-      h('thead', h('tr', ['الاسم', 'الدور', 'اللغات', 'الحالة', ''].map(t => h('th', t)))),
+      h('thead', h('tr', ['الاسم', 'الدور', 'اللغات', 'التقييم', 'السرية', 'الحالة', ''].map(t => h('th', t)))),
       h('tbody', list.map(m => h('tr',
         h('td', { 'data-label': 'الاسم' }, h('b', m.full_name), h('span.sub', { dir: 'ltr' }, m.email)),
         h('td', { 'data-label': 'الدور' }, ROLE_LABEL[m.role]),
         h('td', { 'data-label': 'اللغات' }, langsOf(m).map(langName).join('، ') || '—'),
+        h('td', { 'data-label': 'التقييم' },
+          rateOf[m.id]?.avg_score ? h('span', stars(rateOf[m.id].avg_score), h('span.sub', `${rateOf[m.id].avg_score} / 5`)) : h('span.muted', '—'),
+          onTimePct(perfOf[m.id]) === null ? null : h('span.sub', `الالتزام ${onTimePct(perfOf[m.id])}٪ · ${perfOf[m.id].done_stages} مرحلة`)),
+        h('td', { 'data-label': 'السرية' }, signOf[m.id]
+          ? h('span.badge.ok', { title: fmtDateTime(signOf[m.id].accepted_at) }, 'موقّعة')
+          : h('span.badge.warn', 'لم توقّع')),
         h('td', { 'data-label': 'الحالة' }, h('span.badge', { class: m.status === 'active' ? 'ok' : 'bad' }, STATUS_LABEL[m.status])),
         h('td', canManage(m) && m.id !== state.profile.id && h('div.row',
+          h('button.btn.sm', { type: 'button', onclick: () => performance(m) }, 'الأداء والتقييم'),
           h('button.btn.sm', { type: 'button', onclick: () => edit(m) }, 'الملف والتعديل'),
           m.status === 'active'
             ? h('button.btn.sm.danger', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'disabled') }, 'تعطيل')
