@@ -57,6 +57,15 @@ async function render() {
 
   if (!configured) { root.replaceChildren(setupNotice()); return; }
 
+  // نطاق المنصة يفتح على صفحة الدخول، ونطاق البث لا يخدم مسارات المنصة (ملاحظة ٥٥)
+  const cfg = window.HS_CONFIG || {};
+  const here = location.hostname;
+  if (cfg.platformHost && here === cfg.platformHost && path === '/') return navigate('/start', { replace: true });
+  if (cfg.publicHost && here === cfg.publicHost && cfg.platformHost && /^\/(app|start|login|register|reset)(\/|$)/.test(path)) {
+    location.href = `https://${cfg.platformHost}${path}${location.search}`;
+    return;
+  }
+
   const route = match(path);
   if (!route) { root.replaceChildren(notFound()); return; }
 

@@ -6,6 +6,9 @@ import { brand, themeToggle, footer } from './shell.js';
 import { videoPlayer } from '../player.js';
 
 const cfg = window.HS_CONFIG;
+// رابط المنصة: نطاقها الفرعي إن كان مضبوطًا، وإلا فمسار داخل الموقع نفسه
+export const staffUrl = () => (cfg.platformHost && location.hostname !== cfg.platformHost)
+  ? `https://${cfg.platformHost}/start` : '/start';
 const langCode = t => String(t.code || '').split(':')[0];
 const two = (ar, en) => h('span.bi', h('span', ar), h('span.en', en));
 
@@ -217,7 +220,7 @@ export async function render(ctx) {
   return h('div',
     h('header.topbar', h('div.inner',
       brand('مشروع خادم الحرمين الشريفين لترجمة خطب الحرمين الشريفين', 'ترجمات بلغات العالم', '/'),
-      h('div.spacer'), themeToggle(), h('a.btn.sm', { href: '/start' }, 'دخول فريق الترجمة'))),
+      h('div.spacer'), themeToggle(), h('a.btn.sm', { href: staffUrl() }, 'دخول فريق الترجمة'))),
     h('main#main.wrap.public', { tabindex: '-1' },
       h('section.hero',
         h('div.eyebrow', 'المسجد الحرام والمسجد النبوي'),
