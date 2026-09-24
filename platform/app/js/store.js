@@ -1,12 +1,15 @@
 // الحالة المشتركة: المستخدم الحالي والبيانات المرجعية
 import { auth, db } from './sb.js';
+import { POLICY_KEY, POLICY_VERSION } from './policy.js';
 
 export const state = {
   profile: null,      // صف profiles للمستخدم الحالي
   languages: [],
   stages: [],
   khateebs: [],
-  loadedRef: false
+  loadedRef: false,
+  policySigned: false,   // وقّع العضو نسخة سياسة السرية الحالية
+  policyLoaded: false
 };
 
 export const ROLE_LABEL = { manager: 'مدير المشروع', coordinator: 'منسق', translator: 'مترجم' };
@@ -39,6 +42,23 @@ export async function loadProfile() {
   const rows = await db.select('profiles', { select: '*', id: `eq.${uid}` });
   state.profile = rows[0] || null;
   return state.profile;
+}
+
+// إقرار سياسة السرية: يُطلب عند أول دخول بعد التفعيل، ويتجدد إذا تغيّرت نسخة السياسة (ملاحظة ٥٧)
+export async function loadPolicyState(force = false) {
+  if (state.policyLoaded && !force) return state.policySigned;
+  if (!state.profile) return false;
+  try {
+    const rows = await db.select('policy_acceptances', {
+      select: 'policy_version', member_id: `eq.${state.profile.id}`, policy_key: `eq.${POLICY_KEY}`
+    });
+    state.policySigned = rows.some(r => r.policy_version === POLICY_VERSION);
+  } catch {
+    // تعذّر الفحص لا يحجب العمل
+    state.policySigned = true;
+  }
+  state.policyLoaded = true;
+  return state.policySigned;
 }
 
 export async function loadReference(force = false) {

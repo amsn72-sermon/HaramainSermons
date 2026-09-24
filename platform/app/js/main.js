@@ -1,6 +1,6 @@
 import { auth, configured } from './sb.js';
 import { h, toast } from './ui.js';
-import { state, loadProfile, loadReference, isAdmin, isActive } from './store.js';
+import { state, loadProfile, loadReference, loadPolicyState, isAdmin, isActive } from './store.js';
 import { staffShell } from './views/shell.js';
 
 const DEFAULT_TITLE = document.title;
@@ -8,8 +8,8 @@ const DEFAULT_TITLE = document.title;
 const routes = [
   // [النمط، الاستيراد، يتطلب دخولًا، للإدارة فقط]
   ['/', () => import('./views/public.js'), false],
-  ['/start', () => import('./views/start.js'), false],
   ['/arafah', () => import('./views/public.js').then(m => ({ render: m.arafah })), false],
+  ['/policy', () => import('./views/policy.js'), true],
   ['/login', () => import('./views/auth.js').then(m => ({ render: m.login })), false],
   ['/register', () => import('./views/auth.js').then(m => ({ render: m.register })), false],
   ['/reset', () => import('./views/auth.js').then(m => ({ render: m.reset })), false],
@@ -60,7 +60,8 @@ async function render() {
   // نطاق المنصة يفتح على صفحة الدخول، ونطاق البث لا يخدم مسارات المنصة (ملاحظة ٥٥)
   const cfg = window.HS_CONFIG || {};
   const here = location.hostname;
-  if (cfg.platformHost && here === cfg.platformHost && path === '/') return navigate('/start', { replace: true });
+  // مدخل واحد للعاملين: لا شاشة «اختر وجهتك»؛ الدور هو من يحدد الوجهة (ملاحظة ٥٦)
+  if (cfg.platformHost && here === cfg.platformHost && (path === '/' || path === '/start')) return navigate('/app', { replace: true });
   if (cfg.publicHost && here === cfg.publicHost && cfg.platformHost && /^\/(app|start|login|register|reset)(\/|$)/.test(path)) {
     location.href = `https://${cfg.platformHost}${path}${location.search}`;
     return;
@@ -82,6 +83,9 @@ async function render() {
         if (seq === renderSeq) root.replaceChildren(await pending());
         return;
       }
+      // لا وصول إلى مساحة العمل قبل التوقيع على سياسة السرية (ملاحظة ٥٧)
+      if (path !== '/policy' && !(await loadPolicyState())) return navigate('/policy', { replace: true });
+      if (path === '/policy' && state.policySigned) return navigate('/app', { replace: true });
       if (route.adminOnly && !isAdmin()) return navigate('/app', { replace: true });
     }
     const mod = await route.load();
@@ -89,7 +93,7 @@ async function render() {
     const ctx = { params: route.params, query: new URLSearchParams(location.search), navigate };
     const view = await mod.render(ctx);
     if (seq !== renderSeq) return;
-    root.replaceChildren(route.needsAuth ? staffShell(view, path) : view);
+    root.replaceChildren(route.needsAuth && path !== '/policy' ? staffShell(view, path) : view);
     const main = document.getElementById('main');
     if (main && !path.startsWith('/app/tasks/')) window.scrollTo(0, 0);
   } catch (err) {
@@ -118,7 +122,7 @@ function errorView(err) {
 try { const t = localStorage.getItem('hs.theme'); if (t) document.documentElement.dataset.theme = t; } catch { /* */ }
 
 // تغيّر الجلسة (خروج، انتهاء) يعيد التحقق
-auth.onChange(s => { if (!s) { state.profile = null; if (location.pathname.startsWith('/app')) navigate('/start', { replace: true }); } });
+auth.onChange(s => { if (!s) { state.profile = null; state.policySigned = false; state.policyLoaded = false; if (location.pathname.startsWith('/app')) navigate('/login', { replace: true }); } });
 
 // روابط البريد (تأكيد الحساب أو استعادة كلمة المرور)
 const fromEmail = configured ? auth.consumeUrlTokens() : null;
