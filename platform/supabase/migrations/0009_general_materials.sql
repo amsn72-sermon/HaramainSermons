@@ -17,49 +17,50 @@ comment on column public.materials.mosque
 -- ٢) محو المحذوفات نهائيًا بعد أسبوع (ملاحظة ٧٤)
 --    يُستدعى من مهمة ليلية على الخادم.
 -- ---------------------------------------------------------------------
+-- الملفات تُحذف عبر واجهة التخزين لا مباشرةً من جداولها، فنعيد مساراتها للسكربت
+create or replace function public.deleted_archive_paths(p_days int default 7)
+returns table (bucket text, path text)
+language sql security definer set search_path = public as $$
+  with cut as (select now() - make_interval(days => greatest(coalesce(p_days, 7), 1)) as t)
+  select 'sources', m.source_pdf_path from public.materials m, cut
+    where m.deleted_at is not null and m.deleted_at < cut.t and m.source_pdf_path is not null
+  union
+  select 'sources', s.path from public.material_sources s join public.materials m on m.id = s.material_id, cut
+    where m.deleted_at is not null and m.deleted_at < cut.t and s.path is not null
+  union
+  select 'audio', t.audio_path from public.tracks t, cut
+    where t.deleted_at is not null and t.deleted_at < cut.t and t.audio_path is not null
+  union
+  select 'audio', a.path from public.track_audios a join public.tracks t on t.id = a.track_id, cut
+    where t.deleted_at is not null and t.deleted_at < cut.t and a.path is not null
+$$;
+
+revoke all on function public.deleted_archive_paths(int) from public, anon, authenticated;
+
+-- محو الصفوف نفسها بعد انقضاء المهلة
 create or replace function public.purge_deleted_archive(p_days int default 7)
-returns table (materials_purged int, tracks_purged int, objects_purged int)
+returns table (materials_purged int, tracks_purged int)
 language plpgsql security definer set search_path = public as $$
 declare
   v_cut timestamptz := now() - make_interval(days => greatest(coalesce(p_days, 7), 1));
-  v_paths text[];
-  v_m int := 0; v_t int := 0; v_o int := 0;
+  v_m int := 0; v_t int := 0;
 begin
-  -- ملفات المواد والمسارات التي انقضت مهلتها: المصادر والتسجيلات الصوتية
-  select coalesce(array_agg(p), '{}') into v_paths from (
-    select m.source_pdf_path as p from public.materials m
-      where m.deleted_at is not null and m.deleted_at < v_cut and m.source_pdf_path is not null
-    union all
-    select s.path from public.material_sources s join public.materials m on m.id = s.material_id
-      where m.deleted_at is not null and m.deleted_at < v_cut and s.path is not null
-    union all
-    select t.audio_path from public.tracks t
-      where t.deleted_at is not null and t.deleted_at < v_cut and t.audio_path is not null
-    union all
-    select a.path from public.track_audios a join public.tracks t on t.id = a.track_id
-      where t.deleted_at is not null and t.deleted_at < v_cut and a.path is not null
-  ) q;
-
-  delete from storage.objects o where o.name = any (v_paths);
-  get diagnostics v_o = row_count;
-
-  -- المسارات المحذوفة وحدها (مادتها باقية)
   delete from public.tracks t
    where t.deleted_at is not null and t.deleted_at < v_cut
      and not exists (select 1 from public.materials m where m.id = t.material_id and m.deleted_at is not null);
   get diagnostics v_t = row_count;
 
-  -- المواد المحذوفة بكل ما يتبعها (cascade)
   delete from public.materials m where m.deleted_at is not null and m.deleted_at < v_cut;
   get diagnostics v_m = row_count;
 
-  return query select v_m, v_t, v_o;
+  return query select v_m, v_t;
 end $$;
 
 revoke all on function public.purge_deleted_archive(int) from public, anon, authenticated;
 
 comment on function public.purge_deleted_archive(int)
   is 'محو نهائي لما مضى على حذفه أكثر من المهلة — يُشغّل من مهمة ليلية على الخادم وحدها';
+
 
 -- ---------------------------------------------------------------------
 -- ٣) مدير المشروع ينشئ حساب عضو يدويًا (ملاحظة ٦٨)
