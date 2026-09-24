@@ -1,15 +1,17 @@
 // لوحة المتابعة (المنسق والمدير)، والمترجم يُحوَّل إلى مهامه
 import { h, fill, emptyState, fmtSermonDate, toast, busy, dialog, confirm } from '../ui.js';
 import { db } from '../sb.js';
-import { state, isAdmin, MATERIAL_SELECT, MOSQUE, CITY, PRIORITY, sortStages, currentStage, trackProgress,
+import { state, isAdmin, isManager, MATERIAL_SELECT, MOSQUE, CITY, PRIORITY, sortStages, currentStage, trackProgress,
   isLateNow, hadLateness, langName, stageName } from '../store.js';
-import { statusBadge, trackTimer, progressBar, stageStrip, timelineTable, lateSummary } from './parts.js';
+import { statusBadge, trackTimer, progressBar, stageStrip, timelineTable, lateSummary, deleteDialog } from './parts.js';
 
 export async function render(ctx) {
   if (!isAdmin()) { const m = await import('./tasks.js'); return m.list(ctx); }
 
-  const materials = await db.select('materials', { select: MATERIAL_SELECT, order: 'created_at.desc', limit: 300 });
-  materials.forEach(m => m.tracks.forEach(sortStages));
+  const all = await db.select('materials', { select: MATERIAL_SELECT, order: 'created_at.desc', limit: 300 });
+  // المحذوف لا يظهر في قائمة العمل (ملاحظة ٦٦)
+  const materials = all.filter(m => !m.deleted_at);
+  materials.forEach(m => { m.tracks = (m.tracks || []).filter(t => !t.deleted_at); m.tracks.forEach(sortStages); });
 
   const filters = {
     q: h('input', { type: 'search', placeholder: 'عنوان المادة أو اسم المسؤول', 'aria-label': 'البحث' }),
@@ -96,7 +98,11 @@ export async function render(ctx) {
           h('td', { 'data-label': 'الوقت' }, trackTimer(t)),
           h('td', h('div.row',
             h('a.btn.sm', { href: `/app/tasks/${t.id}` }, 'فتح'),
-            h('button.btn.sm', { type: 'button', onclick: () => showDetails(m) }, 'تفاصيل'))))))))
+            h('button.btn.sm', { type: 'button', onclick: () => showDetails(m) }, 'تفاصيل'),
+            isManager() && h('button.btn.sm.danger', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
+              try { if (await deleteDialog({ material: m, track: t, langLabel: langName(t.language_code) })) { toast('حُذفت من الأرشيف، ويمكن استرجاعها.', 'ok'); reload(); } }
+              catch (err) { toast(err.message, 'bad'); }
+            }) }, 'حذف'))))))))
         : emptyState(materials.length ? 'لا نتائج مطابقة' : 'جاهز لأول مادة', materials.length ? 'غيّر عوامل التصفية.' : 'أضف الخطبة وحدد لغاتها وفريقها لتظهر متابعتها هنا.',
           !materials.length && h('a.btn.primary', { href: '/app/new' }, '＋ إضافة مادة')),
       details);

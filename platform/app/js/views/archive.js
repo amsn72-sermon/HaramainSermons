@@ -1,10 +1,11 @@
 // أرشيف أعمال الترجمة: كل مادة في سطر واحد، مرقّمة، بأسماء ملفات واضحة واختصارات بالأيقونات
 import { h, toast, busy, emptyState, fmtDateTime, fmtSermonDate } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, langName, hadLateness, MOSQUE } from '../store.js';
+import { state, langName, hadLateness, isManager, MOSQUE } from '../store.js';
 import { downloadDocx, printTranslation } from '../export.js';
 import { heading, fileName } from '../page.js';
 import { reopenDialog } from './revise.js';
+import { deleteDialog, restoreFromArchive } from './parts.js';
 
 // أيقونات ثابتة (نص موثوق من الكود وليس من المستخدم)
 const ICONS = {
@@ -17,7 +18,9 @@ const ICONS = {
   audio: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/><path d="M3 3l0 0"/>',
   dl: '<path d="M12 3v12m-5-5 5 5 5-5"/><path d="M4 21h16"/>',
   log: '<path d="M4 6h16M4 12h16M4 18h10"/>',
-  redo: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>'
+  redo: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+  trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
+  undo: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>'
 };
 function icon(name) {
   const s = h('span.ico', { 'aria-hidden': 'true' });
@@ -30,10 +33,16 @@ let player = null;          // مشغّل واحد للأرشيف كله
 let playingBtn = null;
 
 export async function render(ctx) {
-  const rows = await db.select('tracks', {
-    select: 'id,language_code,translation_html,audio_path,completed_at,is_published,receipt_late_seconds,stages:track_stages!track_stages_track_id_fkey(stage_key,late_seconds),material:materials(*,khateeb:khateebs(name))',
+  const fetched = await db.select('tracks', {
+    select: 'id,language_code,translation_html,audio_path,completed_at,is_published,receipt_late_seconds,deleted_at,stages:track_stages!track_stages_track_id_fkey(stage_key,late_seconds),material:materials(*,khateeb:khateebs(name))',
     status: 'eq.completed', order: 'completed_at.desc', limit: 500
   });
+  // المحذوف مخفي، ويراه مدير المشروع في قائمة مستقلة ليسترجعه (ملاحظة ٦٦)
+  const isDeleted = t => !!(t.deleted_at || t.material?.deleted_at);
+  const rows = fetched.filter(t => !isDeleted(t));
+  const trashed = fetched.filter(isDeleted);
+  let showTrash = false;
+  const trashBtn = h('button.btn.sm', { type: 'button', onclick: () => { showTrash = !showTrash; draw(); } });
   const q = h('input', { type: 'search', placeholder: 'العنوان أو الخطيب أو اللغة', 'aria-label': 'البحث في الأرشيف' });
   const lang = h('select', { 'aria-label': 'اللغة' }, h('option', { value: '' }, 'كل اللغات'), state.languages.map(l => h('option', { value: l.code }, l.name_ar)));
   const box = h('div');
@@ -110,14 +119,43 @@ export async function render(ctx) {
           iconBtn('redo', 'إعادة تنشيط الخطبة للتعديل على أصلها', e => busy(e.currentTarget,
             () => reopenDialog(t.material, mode => { if (mode === 'annotate') ctx.navigate(`/app/revise/${t.material.id}`); else ctx.navigate('/app/archive', { replace: true }); }))
             .catch(err => toast(err.message, 'bad'))),
-          h('a.icon-btn', { href: `/app/tasks/${t.id}`, title: 'السجل والتفاصيل', 'aria-label': 'السجل والتفاصيل' }, icon('log'))));
+          h('a.icon-btn', { href: `/app/tasks/${t.id}`, title: 'السجل والتفاصيل', 'aria-label': 'السجل والتفاصيل' }, icon('log')),
+          isManager() && iconBtn('trash', 'حذف من الأرشيف (إخفاء قابل للاسترجاع)', e => busy(e.currentTarget, async () => {
+            try {
+              if (await deleteDialog({ material: t.material, track: t, langLabel: langName(t.language_code) })) {
+                toast('حُذفت من الأرشيف، ويمكن استرجاعها.', 'ok'); ctx.navigate('/app/archive', { replace: true });
+              }
+            } catch (err) { toast(err.message, 'bad'); }
+          }), { class: 'danger' })));
     };
+
+    const trashRow = t => h('li.arch-row.is-trashed', { title: fileName(t.material, t.language_code, t.material.khateeb?.name) },
+      h('span.arch-n', '—'),
+      h('span.arch-name', h('b', `${heading(t.material)} (${t.material.title})`),
+        h('span.muted', [t.material.khateeb?.name, langName(t.language_code)].filter(Boolean).join('، '))),
+      h('span.arch-meta.small.muted', 'حُذفت ' + fmtDateTime(t.deleted_at || t.material.deleted_at)),
+      h('span.arch-badges', h('span.badge.bad', 'محذوفة')),
+      h('span.arch-actions',
+        iconBtn('undo', 'استرجاع إلى الأرشيف', e => busy(e.currentTarget, async () => {
+          try {
+            if (await restoreFromArchive({ material: t.material, track: t.deleted_at ? t : null })) {
+              toast('استُرجعت.', 'ok'); ctx.navigate('/app/archive', { replace: true });
+            }
+          } catch (err) { toast(err.message, 'bad'); }
+        }))));
 
     box.replaceChildren(ordered.length
       ? h('div.stack', ordered.map(([key, items]) => h('section.arch-group',
           h('div.arch-group-head', h('h3', groupLabel(key)), h('span.badge.gold', `${items.length}`)),
           h('ol.archive', items.map(rowEl)))))
       : emptyState(rows.length ? 'لا نتائج مطابقة' : 'لا توجد ترجمات مكتملة بعد', rows.length ? '' : 'تظهر الترجمة هنا بعد اكتمال مسارها.'));
+
+    if (isManager() && trashed.length) {
+      trashBtn.textContent = showTrash ? `إخفاء المحذوفة (${trashed.length})` : `عرض المحذوفة (${trashed.length})`;
+      box.append(h('section.arch-group', { style: { marginTop: '26px' } },
+        h('div.arch-group-head', h('h3', 'المحذوفة'), trashBtn),
+        showTrash ? h('ol.archive', trashed.map(trashRow)) : h('p.small.muted', 'مخفية عن الأرشيف، وتُسترجع بضغطة.')));
+    }
   }
   [q, lang].forEach(el => el.addEventListener('input', draw));
   draw();

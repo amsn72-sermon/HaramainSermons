@@ -1,4 +1,4 @@
-import { h, fill, toast, busy } from '../ui.js';
+import { h, fill, toast, busy, dialog } from '../ui.js';
 import { auth, db, storage } from '../sb.js';
 import { state, loadProfile, STATUS_LABEL } from '../store.js';
 import { brand, themeToggle, footer } from './shell.js';
@@ -42,11 +42,26 @@ export async function login(ctx) {
     h('div.row', h('a', { href: '/register' }, 'التسجيل في فريق الترجمة'), h('span.muted', '·'),
       h('a', { href: '#', onclick: async e => {
         e.preventDefault();
-        if (!email.value.trim()) return showErrors(errs, ['اكتب بريدك أولًا ثم اضغط «نسيت كلمة المرور»']);
-        try { await auth.recover(email.value.trim()); toast('أرسلنا رابط استعادة كلمة المرور إلى بريدك.', 'ok'); }
+        // نافذة مستقلة لكتابة البريد ثم الإرسال (ملاحظة ٦٤)
+        const box = h('input', { type: 'email', dir: 'ltr', autocomplete: 'username', value: email.value.trim() });
+        const to = await dialog({
+          title: 'استعادة كلمة المرور',
+          body: h('div.stack',
+            h('p.small.muted', 'اكتب بريدك المسجَّل في المنصة، ونرسل إليه رابط تعيين كلمة مرور جديدة.'),
+            h('label.field', 'البريد الإلكتروني', box)),
+          buttons: [
+            { label: 'إرسال الرابط', kind: 'primary', validate: () => {
+              if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(box.value.trim())) { toast('البريد الإلكتروني غير صحيح.', 'bad'); return false; }
+              return true;
+            }, value: () => box.value.trim() },
+            { label: 'إلغاء', value: null }
+          ]
+        });
+        if (!to) return;
+        try { await auth.recover(to); toast('أرسلنا رابط استعادة كلمة المرور إلى بريدك، وراجع مجلد البريد غير المرغوب إن تأخر.', 'ok'); }
         catch (err) { showErrors(errs, [err.message]); }
       } }, 'نسيت كلمة المرور')),
-    h('div.row.small', h('a', { href: '/' }, 'خطب الحرمين الشريفين — للمستفيدين')));
+);
   return frame(h('div.card.auth-card.login-panel', form));
 }
 
@@ -62,6 +77,10 @@ export async function register(ctx) {
     password: h('input', { type: 'password', autocomplete: 'new-password', dir: 'ltr', minlength: 8 }),
     confirm: h('input', { type: 'password', autocomplete: 'new-password', dir: 'ltr' }),
     consent: h('input', { type: 'checkbox' }),
+    // المنسقون يسجّلون بنفس الرابط وأكثرهم لا يترجم (ملاحظة ٦٣)
+    applied_as: h('select',
+      h('option', { value: 'translator' }, 'مترجم أو مراجع'),
+      h('option', { value: 'coordinator' }, 'منسق أو إداري (لا أترجم)')),
     iqama: h('input', { type: 'file', accept: 'image/*,application/pdf' })   // صورة الهوية أو الإقامة (ملاحظة ٥١)
   };
   // اختيار اللغات من قائمة منسدلة، والمختارة تظهر رقائق تُحذف بضغطة (ملاحظة ٥٠)
@@ -88,6 +107,16 @@ export async function register(ctx) {
   });
   drawLangs();
   const langList = h('div.stack', { style: { gap: '10px' } }, langSelect, langChips);
+  const langsHint = h('small.muted');
+  const langsBox = h('fieldset', h('legend', 'لغات الترجمة'), langsHint, langList);
+  const drawLangsBox = () => {
+    const tr = f.applied_as.value === 'translator';
+    langsHint.textContent = tr
+      ? 'اختر اللغات التي تترجم إليها — لغة واحدة على الأقل.'
+      : 'اختياري للمنسقين والإداريين: اتركها فارغة إن كنت لا تترجم.';
+  };
+  f.applied_as.addEventListener('change', drawLangsBox);
+  drawLangsBox();
   const errs = errorsBox();
   const submit = h('button.btn.primary', { type: 'submit' }, 'إرسال طلب التسجيل');
 
@@ -98,7 +127,7 @@ export async function register(ctx) {
     if (f.whatsapp.value && !/^\+?[0-9\s-]{8,16}$/.test(f.whatsapp.value.trim())) e.push('رقم واتس آب غير صحيح');
     const nid = f.national_id.value.trim();
     if (nid && !/^[12][0-9]{9}$/.test(nid)) e.push('رقم الهوية أو الإقامة: ١٠ أرقام تبدأ بـ١ (هوية) أو ٢ (إقامة)');
-    if (!chosen.size) e.push('اختر لغة ترجمة واحدة على الأقل');
+    if (f.applied_as.value === 'translator' && !chosen.size) e.push('اختر لغة ترجمة واحدة على الأقل');
     if (f.password.value.length < 8) e.push('كلمة المرور ٨ أحرف على الأقل');
     if (f.password.value !== f.confirm.value) e.push('كلمتا المرور غير متطابقتين');
     if (!f.consent.checked) e.push('يلزم الإقرار بإشعار الخصوصية');
@@ -115,7 +144,8 @@ export async function register(ctx) {
         await auth.signUp(f.email.value.trim(), f.password.value, {
           full_name: f.full_name.value.trim(), whatsapp: f.whatsapp.value.trim() || null,
           nationality: f.nationality.value.trim() || null, national_id: f.national_id.value.trim() || null,
-          residence: f.residence.value.trim() || null, languages: [...chosen]
+          residence: f.residence.value.trim() || null, languages: [...chosen],
+          applied_as: f.applied_as.value
         });
         // صورة الهوية: تُرفع فورًا إن فُتحت الجلسة، وإلا فعند أول دخول
         let note = '';
@@ -139,8 +169,9 @@ export async function register(ctx) {
     });
   } },
     h('h2', 'التسجيل في فريق الترجمة'),
-    h('p.muted', 'يُراجع المنسق الطلب ويفعّله. تُسند مهام المراجعة والتحرير لاحقًا حسب اللغة ولا تحتاج تسجيلًا منفصلًا.'),
+    h('p.muted', 'هذا الرابط للمترجمين والمنسقين معًا. يُراجع الطلب ويُفعَّل الحساب، ثم يحدد مدير المشروع الدور. تُسند مهام المراجعة والتحرير لاحقًا حسب اللغة ولا تحتاج تسجيلًا منفصلًا.'),
     errs,
+    h('label.field', 'أتقدّم بصفة', f.applied_as),
     h('div.grid-2',
       h('label.field', 'الاسم الكامل', f.full_name),
       h('label.field', 'البريد الإلكتروني', h('small', 'تدخل به إلى المنصة'), f.email),
@@ -148,7 +179,7 @@ export async function register(ctx) {
       h('label.field', 'الجنسية', f.nationality),
       h('label.field', 'رقم الهوية أو الإقامة', h('small', 'اختياري لمن يعمل من خارج المملكة'), f.national_id),
       h('label.field', 'مكان الإقامة', f.residence)),
-    h('fieldset', h('legend', 'لغات الترجمة'), langList),
+    langsBox,
     h('div.grid-2',
       h('label.field', 'كلمة المرور', h('small', '٨ أحرف على الأقل'), f.password),
       h('label.field', 'تأكيد كلمة المرور', f.confirm)),

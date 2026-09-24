@@ -37,6 +37,8 @@ export async function render(ctx) {
   const table = h('div');
 
   const canManage = m => isManager() || m.role === 'translator';
+  // الصفة التي تقدّم بها العضو عند التسجيل — إفصاح للاسترشاد لا صلاحية (ملاحظة ٦٣)
+  const APPLIED_LABEL = { translator: 'مترجم أو مراجع', coordinator: 'منسق أو إداري' };
 
   async function edit(m) {
     const role = h('select', { disabled: !isManager() || m.id === state.profile.id },
@@ -96,7 +98,8 @@ export async function render(ctx) {
       body: h('div.stack',
         h('div.grid-2',
           h('div', h('div.small.muted', 'البريد'), h('div', { dir: 'ltr' }, m.email)),
-          h('div', h('div.small.muted', 'تاريخ التسجيل'), h('div', fmtDate(m.created_at)))),
+          h('div', h('div.small.muted', 'تاريخ التسجيل'), h('div', fmtDate(m.created_at))),
+          h('div', h('div.small.muted', 'تقدّم بصفة'), h('div', APPLIED_LABEL[p.applied_as] || 'غير محددة'))),
         h('div.grid-2',
           h('label.field', 'الاسم الكامل', fld.full_name),
           h('label.field', 'رقم واتس آب', fld.whatsapp),
@@ -235,6 +238,7 @@ export async function render(ctx) {
     h('div.card', h('h3', `طلبات التسجيل (${pending.length})`),
       pending.length ? h('div.stack', pending.map(m => h('div.row', { style: { borderBottom: '1px solid var(--border)', paddingBottom: '10px' } },
         h('div', { style: { flex: 1, minWidth: '200px' } }, h('b', m.full_name), h('div.small.muted', { dir: 'ltr' }, m.email),
+          h('div.small', 'تقدّم بصفة: ', h('b', APPLIED_LABEL[privOf[m.id]?.applied_as] || 'غير محددة')),
           h('div.small', 'اللغات: ', langsOf(m).map(langName).join('، ') || '—')),
         h('button.btn.sm', { type: 'button', onclick: () => edit(m) }, 'مراجعة الملف'),
         h('button.btn.sm.primary', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'active') }, 'تفعيل'),

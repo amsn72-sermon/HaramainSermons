@@ -64,3 +64,47 @@ export function lateSummary(track) {
   for (const s of track.stages || []) if (s.late_seconds > 0) parts.push(`${stageName(s.stage_key)} ${fmtDuration(s.late_seconds)}`);
   return h('span.badge.bad', { title: parts.join('، ') }, 'سُجّل تأخير: ' + parts.join('، '));
 }
+
+// ---------------------------------------------------------------------
+// الحذف من الأرشيف وقائمة العمل: إخفاء قابل للاسترجاع، لمدير المشروع وحده (ملاحظة ٦٦)
+// ---------------------------------------------------------------------
+export async function deleteDialog({ material, track, langLabel }) {
+  const { h: hh, dialog, toast } = await import('../ui.js');
+  const { db } = await import('../sb.js');
+  const single = !!track;
+  const scope = hh('select', { 'aria-label': 'نطاق الحذف' },
+    single ? hh('option', { value: 'track' }, `هذه الترجمة وحدها${langLabel ? ' — ' + langLabel : ''}`) : null,
+    hh('option', { value: 'material' }, 'المادة بكل لغاتها'));
+  const reason = hh('input', { placeholder: 'مثال: أُدخلت خطأً، أو مكرّرة' });
+  const res = await dialog({
+    title: `حذف «${material.title}» من الأرشيف`,
+    body: hh('div.stack',
+      hh('p.small.muted', 'الحذف هنا إخفاء لا محو: تختفي المادة من الأرشيف وقائمة العمل، ويستطيع مدير المشروع استرجاعها من قائمة «المحذوفة». تُسجَّل العملية باسمك ووقتها.'),
+      hh('label.field', 'ما الذي يُحذف', scope),
+      hh('label.field', 'سبب الحذف', reason)),
+    buttons: [
+      { label: 'حذف', kind: 'danger', validate: () => {
+        if (reason.value.trim().length < 3) { toast('اكتب سبب الحذف.', 'bad'); return false; }
+        return true;
+      }, value: () => ({ scope: scope.value, reason: reason.value.trim() }) },
+      { label: 'إلغاء', value: null }
+    ]
+  });
+  if (!res) return false;
+  await db.rpc('set_archive_deleted', {
+    p_material: res.scope === 'material' ? material.id : null,
+    p_track: res.scope === 'material' ? null : track.id,
+    p_deleted: true, p_reason: res.reason
+  });
+  return true;
+}
+
+export async function restoreFromArchive({ material, track }) {
+  const { confirm } = await import('../ui.js');
+  const { db } = await import('../sb.js');
+  if (!await confirm('استرجاع', `تعود «${material.title}» إلى الأرشيف وقائمة العمل. متابعة؟`, 'استرجاع')) return false;
+  await db.rpc('set_archive_deleted', {
+    p_material: track ? null : material.id, p_track: track ? track.id : null, p_deleted: false, p_reason: null
+  });
+  return true;
+}
