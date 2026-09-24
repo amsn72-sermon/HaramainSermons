@@ -109,7 +109,7 @@ export function videoPlayer({ videoId, title, subtitle }) {
   });
   const rows = h('div.vp-rows',
     h('div.vp-row', seek, timeLabel),
-    h('div.vp-row.vp-volrow', muteBtn, vol));
+    h('div.vp-row.vp-volrow', vol, muteBtn));
   const wrap = h('div.player', frame, bar, rows);
 
   function setState(s) {

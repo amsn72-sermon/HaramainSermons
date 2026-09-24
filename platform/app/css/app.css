@@ -359,11 +359,11 @@ dialog .dlg-foot { display: flex; gap: 8px; justify-content: flex-start; padding
 .bi { display: inline-flex; align-items: baseline; gap: 6px; }
 .bi .en { color: var(--muted); font-size: .82em; font-weight: 400; }
 .vp-rows { margin-top: 8px; display: grid; gap: 6px; }
-.vp-row { display: flex; gap: 8px; align-items: center; }
-.vp-volrow .vp-btn { width: 28px; height: 28px; border: 0; background: transparent; }
-.vp-volrow .vp-range { max-width: 160px; }
-.vp-range { flex: 1; accent-color: var(--gold); height: 20px; }
-.vp-time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .82rem; white-space: nowrap; }
+/* الشريطان بالطول نفسه: الصوت مثل شريط التشغيل تمامًا (ملاحظة ٥٣) */
+.vp-row { display: grid; grid-template-columns: 1fr 84px; gap: 8px; align-items: center; }
+.vp-volrow .vp-btn { width: 28px; height: 28px; border: 0; background: transparent; justify-self: center; }
+.vp-range { width: 100%; accent-color: var(--gold); height: 20px; }
+.vp-time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .82rem; white-space: nowrap; text-align: center; }
 .vp-slot { margin-top: 10px; }
 /* في الأعمدة الضيقة نكتفي بالعربية على الأزرار حتى لا تتكدّس */
 .public .card { container-type: inline-size; }

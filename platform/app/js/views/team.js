@@ -1,5 +1,5 @@
 // فريق العمل: طلبات التسجيل، التفعيل، الأدوار، واللغات
-import { h, toast, busy, dialog, emptyState, fmtDate } from '../ui.js';
+import { h, fill, toast, busy, dialog, emptyState, fmtDate } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { state, isManager, ROLE_LABEL, STATUS_LABEL, langName } from '../store.js';
 
@@ -24,36 +24,89 @@ export async function render(ctx) {
   async function edit(m) {
     const role = h('select', { disabled: !isManager() || m.id === state.profile.id },
       Object.entries(ROLE_LABEL).map(([k, v]) => h('option', { value: k, selected: m.role === k }, v)));
+
+    // اللغات من قائمة منسدلة مع رقائق تُحذف بضغطة (ملاحظة ٥٢)
     const chosen = new Set(langsOf(m));
-    const pills = h('div.lang-pills', state.languages.map(l => h('button', { type: 'button', 'aria-pressed': String(chosen.has(l.code)),
-      onclick: e => { chosen.has(l.code) ? chosen.delete(l.code) : chosen.add(l.code); e.currentTarget.setAttribute('aria-pressed', String(chosen.has(l.code))); } }, l.name_ar)));
+    const langSelect = h('select', { 'aria-label': 'أضف لغة' });
+    const langChips = h('div.lang-pills.chosen');
+    function drawLangs() {
+      const rest = state.languages.filter(l => l.is_active && !chosen.has(l.code));
+      fill(langSelect, h('option', { value: '' }, rest.length ? '— أضف لغة —' : '— أُضيفت كل اللغات —'),
+        rest.map(l => h('option', { value: l.code }, l.name_ar)));
+      langChips.replaceChildren(...[...chosen].map(code => h('button', { type: 'button', 'aria-pressed': 'true',
+        'aria-label': `إزالة ${langName(code)}`, title: 'إزالة اللغة',
+        onclick: () => { chosen.delete(code); drawLangs(); } },
+        h('span.tick', { 'aria-hidden': 'true' }, '✓'), langName(code), h('span.x', { 'aria-hidden': 'true' }, '×'))));
+      if (!chosen.size) langChips.append(h('span.small.muted', 'لا لغات'));
+    }
+    langSelect.addEventListener('change', () => { if (langSelect.value) { chosen.add(langSelect.value); drawLangs(); } });
+    drawLangs();
+
+    // بيانات التواصل قابلة للتعديل من المنسق ومدير المشروع (ملاحظة ٥٢)
     const p = privOf[m.id] || {};
-    const iqama = h('div');
-    if (p.iqama_path) storage.signedUrl('private-docs', p.iqama_path, 600)
-      .then(url => iqama.replaceChildren(h('a.btn.sm', { href: url, target: '_blank', rel: 'noopener' }, 'عرض صورة الإقامة (رابط مؤقت ١٠ دقائق)')))
-      .catch(() => iqama.replaceChildren(h('span.small.muted', 'تعذّر فتح الصورة')));
+    const fld = {
+      full_name: h('input', { value: m.full_name || '' }),
+      whatsapp: h('input', { dir: 'ltr', value: p.whatsapp || '', placeholder: '+9665XXXXXXXX' }),
+      nationality: h('input', { value: p.nationality || '' }),
+      national_id: h('input', { dir: 'ltr', inputmode: 'numeric', maxlength: 10, value: p.national_id || '', placeholder: '1XXXXXXXXX' }),
+      residence: h('input', { value: p.residence || '' })
+    };
+
+    const iqama = h('div.stack', { style: { gap: '8px' } });
+    const drawIqama = () => {
+      const view = h('div');
+      if (p.iqama_path) storage.signedUrl('private-docs', p.iqama_path, 600)
+        .then(url => view.replaceChildren(h('a.btn.sm', { href: url, target: '_blank', rel: 'noopener' }, 'عرض صورة الهوية (رابط مؤقت ١٠ دقائق)')))
+        .catch(() => view.replaceChildren(h('span.small.muted', 'تعذّر فتح الصورة')));
+      else view.replaceChildren(h('span.small.muted', 'لم تُرفع صورة الهوية بعد'));
+      const up = h('input', { type: 'file', accept: 'image/*,application/pdf', 'aria-label': 'رفع صورة الهوية' });
+      up.onchange = () => busy(up, async () => {
+        const file = up.files[0]; if (!file) return;
+        try {
+          const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const path = `${m.id}/iqama-${Date.now()}.${ext}`;
+          await storage.upload('private-docs', path, file);
+          await db.rpc('admin_set_iqama', { p_member: m.id, p_path: path });
+          p.iqama_path = path; drawIqama(); toast('رُفعت صورة الهوية.', 'ok');
+        } catch (err) { toast(err.message, 'bad'); }
+      });
+      iqama.replaceChildren(view, h('label.field', 'رفع صورة الهوية أو الإقامة', up));
+    };
+    drawIqama();
 
     const result = await dialog({
       title: `${m.full_name} — ${ROLE_LABEL[m.role]}`,
       body: h('div.stack',
         h('div.grid-2',
           h('div', h('div.small.muted', 'البريد'), h('div', { dir: 'ltr' }, m.email)),
-          h('div', h('div.small.muted', 'واتس آب'), h('div', { dir: 'ltr' }, p.whatsapp || '—')),
-          h('div', h('div.small.muted', 'الجنسية'), h('div', p.nationality || '—')),
-          h('div', h('div.small.muted', 'الهوية / الإقامة'), h('div', { dir: 'ltr' }, p.national_id || '—')),
-          h('div', h('div.small.muted', 'مكان الإقامة'), h('div', p.residence || '—')),
           h('div', h('div.small.muted', 'تاريخ التسجيل'), h('div', fmtDate(m.created_at)))),
+        h('div.grid-2',
+          h('label.field', 'الاسم الكامل', fld.full_name),
+          h('label.field', 'رقم واتس آب', fld.whatsapp),
+          h('label.field', 'الجنسية', fld.nationality),
+          h('label.field', 'رقم الهوية أو الإقامة', fld.national_id),
+          h('label.field', 'مكان الإقامة', fld.residence)),
         iqama,
         h('label.field', 'الدور', role, !isManager() && h('small', 'تغيير الأدوار الإدارية بيد مدير المشروع')),
-        h('fieldset', h('legend', 'اللغات المؤهل فيها'), pills)),
+        h('fieldset', h('legend', 'اللغات المؤهل فيها'), h('div.stack', { style: { gap: '10px' } }, langSelect, langChips))),
       buttons: [
-        { label: 'حفظ', kind: 'primary', value: () => ({ role: role.value, languages: [...chosen] }) },
+        { label: 'حفظ', kind: 'primary', validate: () => {
+          const nid = fld.national_id.value.trim();
+          if (nid && !/^[12][0-9]{9}$/.test(nid)) { toast('رقم الهوية أو الإقامة: ١٠ أرقام تبدأ بـ١ أو ٢.', 'bad'); return false; }
+          if (fld.full_name.value.trim().length < 3) { toast('اكتب الاسم الكامل.', 'bad'); return false; }
+          return true;
+        }, value: () => ({ role: role.value, languages: [...chosen],
+          contact: { full_name: fld.full_name.value.trim(), whatsapp: fld.whatsapp.value.trim(),
+            nationality: fld.nationality.value.trim(), national_id: fld.national_id.value.trim(), residence: fld.residence.value.trim() } }) },
         { label: 'إلغاء', value: null }
       ]
     });
     if (!result) return;
     try {
       await db.rpc('admin_update_member', { p_member: m.id, p_status: null, p_role: result.role === m.role ? null : result.role, p_languages: result.languages });
+      await db.rpc('admin_update_contact', { p_member: m.id, p_full_name: result.contact.full_name || null,
+        p_whatsapp: result.contact.whatsapp || null, p_nationality: result.contact.nationality || null,
+        p_national_id: result.contact.national_id || null, p_residence: result.contact.residence || null });
       toast('حُفظت بيانات العضو.', 'ok'); reload();
     } catch (err) { toast(err.message, 'bad'); }
   }

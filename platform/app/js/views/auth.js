@@ -61,7 +61,8 @@ export async function register(ctx) {
     residence: h('input', { placeholder: 'المدينة والحي، أو الدولة لمن يعمل عن بُعد' }),
     password: h('input', { type: 'password', autocomplete: 'new-password', dir: 'ltr', minlength: 8 }),
     confirm: h('input', { type: 'password', autocomplete: 'new-password', dir: 'ltr' }),
-    consent: h('input', { type: 'checkbox' })
+    consent: h('input', { type: 'checkbox' }),
+    iqama: h('input', { type: 'file', accept: 'image/*,application/pdf' })   // صورة الهوية أو الإقامة (ملاحظة ٥١)
   };
   // اختيار اللغات من قائمة منسدلة، والمختارة تظهر رقائق تُحذف بضغطة (ملاحظة ٥٠)
   const chosen = new Set();
@@ -116,9 +117,23 @@ export async function register(ctx) {
           nationality: f.nationality.value.trim() || null, national_id: f.national_id.value.trim() || null,
           residence: f.residence.value.trim() || null, languages: [...chosen]
         });
+        // صورة الهوية: تُرفع فورًا إن فُتحت الجلسة، وإلا فعند أول دخول
+        let note = '';
+        const file = f.iqama.files[0];
+        if (file && auth.session?.user?.id) {
+          try {
+            const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const path = `${auth.session.user.id}/iqama-${Date.now()}.${ext}`;
+            await storage.upload('private-docs', path, file);
+            await db.update('profile_private', { id: `eq.${auth.session.user.id}` }, { iqama_path: path });
+            note = 'ووصلت صورة الهوية.';
+          } catch { note = 'ولم تُرفع صورة الهوية؛ ترفعها بعد أول دخول.'; }
+        } else if (file) {
+          note = 'وترفع صورة الهوية بعد تأكيد البريد وأول دخول.';
+        }
         form.replaceWith(h('div.stack',
           h('h2', 'وصل طلبك'),
-          h('p', 'أرسلنا رابط تأكيد إلى بريدك. بعد التأكيد، يراجع المنسق طلبك ويفعّل حسابك، ثم تستطيع الدخول واستلام المهام.'),
+          h('p', `أرسلنا رابط تأكيد إلى بريدك. بعد التأكيد، يراجع المنسق طلبك ويفعّل حسابك، ثم تستطيع الدخول واستلام المهام. ${note}`),
           h('a.btn', { href: '/login' }, 'صفحة الدخول')));
       } catch (err) { showErrors(errs, [err.message]); }
     });
@@ -137,7 +152,7 @@ export async function register(ctx) {
     h('div.grid-2',
       h('label.field', 'كلمة المرور', h('small', '٨ أحرف على الأقل'), f.password),
       h('label.field', 'تأكيد كلمة المرور', f.confirm)),
-    h('p.small.muted', 'صورة الإقامة تُرفع بعد تأكيد البريد والدخول الأول، ولا يطّلع عليها إلا المنسق ومدير المشروع.'),
+    h('label.field', 'صورة الهوية أو الإقامة', h('small', 'اختياري — صورة أو ملف PDF، ولا يطّلع عليها إلا المنسق ومدير المشروع'), f.iqama),
     h('label.check', f.consent, 'أقر بأن بياناتي تُستخدم لإدارة أعمال الترجمة في المشروع فقط، ولا يطّلع على الهوية والإقامة إلا المنسق ومدير المشروع.'),
     submit,
     h('a', { href: '/login' }, 'لديك حساب؟ الدخول'));

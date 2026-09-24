@@ -246,8 +246,10 @@ function withArabicFirst(rec) {
 
 export async function arafah() {
   const feed = await fetch(cfg.feedUrl, { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).catch(() => null);
+  // من ١٤٤٦هـ فصاعدًا: الخطب الأقدم قليلة ومبتورة على القناة (ملاحظة ٥٤)
+  const FIRST_YEAR = 1446;
   const list = groupRecords([...(feed?.current || []), ...(feed?.archive || [])])
-    .filter(isArafah).map(withArabicFirst)
+    .filter(r => isArafah(r) && Number(r.year) >= FIRST_YEAR).map(withArabicFirst)
     .sort((a, b) => dayKey(b.day || b.dateLabel) - dayKey(a.day || a.dateLabel) || String(b.title).localeCompare(String(a.title)));
 
   const body = h('div.stack');
