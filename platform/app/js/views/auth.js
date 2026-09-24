@@ -130,7 +130,7 @@ export async function register(ctx) {
     if (f.applied_as.value === 'translator' && !chosen.size) e.push('اختر لغة ترجمة واحدة على الأقل');
     if (f.password.value.length < 8) e.push('كلمة المرور ٨ أحرف على الأقل');
     if (f.password.value !== f.confirm.value) e.push('كلمتا المرور غير متطابقتين');
-    if (!f.consent.checked) e.push('يلزم الإقرار بإشعار الخصوصية');
+    if (!f.consent.checked) e.push('يلزم الإقرار بصحة المعلومات');
     return e;
   }
 
@@ -184,7 +184,7 @@ export async function register(ctx) {
       h('label.field', 'كلمة المرور', h('small', '٨ أحرف على الأقل'), f.password),
       h('label.field', 'تأكيد كلمة المرور', f.confirm)),
     h('label.field', 'صورة الهوية أو الإقامة', h('small', 'اختياري — صورة أو ملف PDF، ولا يطّلع عليها إلا المنسق ومدير المشروع'), f.iqama),
-    h('label.check', f.consent, 'أقر بأن بياناتي تُستخدم لإدارة أعمال الترجمة في المشروع فقط، ولا يطّلع على الهوية والإقامة إلا المنسق ومدير المشروع.'),
+    h('label.check.top', f.consent, 'أقرّ بأن المعلومات التي أدخلتها صحيحة، وأن بياناتي تُستخدم لإدارة أعمال الترجمة في المشروع فقط، ولا يطّلع على الهوية والإقامة إلا المنسق ومدير المشروع.'),
     submit,
     h('a', { href: '/login' }, 'لديك حساب؟ الدخول'));
   return frame(h('div.card.auth-card.wide', form));

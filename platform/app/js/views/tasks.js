@@ -1,7 +1,7 @@
 // مهامي، ومساحة عمل المهمة لكل الأدوار
-import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDateTime, fmtMinutes, fmtDuration } from '../ui.js';
+import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDateTime, fmtMinutes, fmtDuration, digitalCountdown } from '../ui.js';
 import { db, storage, auth } from '../sb.js';
-import { state, isManager, isAdmin, TRACK_SELECT, MOSQUE, PRIORITY, EVENT_LABEL, sortStages, currentStage,
+import { state, isManager, isAdmin, TRACK_SELECT, MOSQUE, MOSQUE_ANY, PRIORITY, EVENT_LABEL, sortStages, currentStage,
   langName, langDir, stageName } from '../store.js';
 import { statusBadge, trackTimer, progressBar, stageStrip, lateSummary } from './parts.js';
 import { createEditor } from '../editor.js';
@@ -156,6 +156,8 @@ export async function workspace(ctx) {
   const saveBtn = canEdit ? h('button.btn.sm', { type: 'button', title: 'حفظ الآن (Ctrl/⌘ + S)' },
     'حفظ الترجمة') : null;
   if (saveBtn) saveBtn.onclick = e => busy(e.currentTarget, () => saveDraft().catch(err => toast(err.message, 'bad')));
+  // الحفظ داخل شريط الأدوات لا خارجه، فيبقى الشريط كاملًا أمام المترجم (ملاحظة ٦٨)
+  if (canEdit) editor.tools.append(h('span.tb-save', saveState, saveBtn));
 
   // حفظ تلقائي كل ٢٠ ثانية، وبعد ٤ ثوانٍ من توقف الكتابة، ونسخة محلية عند كل تعديل
   let idle = null;
@@ -367,6 +369,16 @@ export async function workspace(ctx) {
 
   const lastReturn = [...events].reverse().find(e => e.action === 'returned');
   const returnedToMe = lastReturn && mine && lastReturn.target_stage_key === cur?.stage_key;
+  // العد التنازلي كساعة رقمية كبيرة: أخضر ثم أحمر عند التجاوز (ملاحظة ٦٧)
+  const workspaceClock = tr => {
+    if (tr.status === 'completed') return h('div.digital-clock.done', h('span.dc-time', '—'), h('span.dc-note', 'اكتملت'));
+    if (tr.status === 'awaiting_receipt') return digitalCountdown(tr.receipt_due_at);
+    const c = currentStage(tr);
+    if (!c) return null;
+    if (c.outside_sla) return h('div.digital-clock.off', h('span.dc-time', '—'), h('span.dc-note', 'خارج وقت التنفيذ'));
+    return digitalCountdown(c.due_at);
+  };
+
   document.title = fileName(m, t.language_code, m.khateeb?.name);
 
   return h('div',
@@ -374,19 +386,19 @@ export async function workspace(ctx) {
       h('div.eyebrow', `${t.status === 'completed' ? 'مهمة مكتملة' : t.status === 'awaiting_receipt' ? 'بانتظار الاستلام' : 'مهمة ' + stageName(cur?.stage_key)} · ${heading(m)}`),
       h('h1', `${langName(t.language_code)} — ${m.title}`),
       h('p.sub', `من العربية إلى ${langName(t.language_code)}`)),
-      statusBadge(t), h('div', trackTimer(t)), h('a.btn.sm', { href: '/app/tasks' }, 'مهامي')),
+      statusBadge(t), h('a.btn.sm', { href: '/app/tasks' }, 'مهامي'), workspaceClock(t)),
     returnedToMe && h('div.card', { style: { borderColor: 'var(--warn)', marginBottom: '16px' } },
       h('b', 'أُعيدت إليك للتعديل: '), lastReturn.note, h('span.small.muted', ` — ${lastReturn.actor?.full_name}، ${fmtDateTime(lastReturn.created_at)}`)),
     h('div.card',
       h('div.grid',
-        ...[['الموقع', MOSQUE[m.mosque]], ['المطلوب', needsAudio ? `ترجمة وتسجيل صوتي (التسجيل: ${stageName(t.audio_stage_key)})` : 'ترجمة نصية'],
+        ...[['الموقع', MOSQUE_ANY[m.mosque] || '—'], ['المطلوب', needsAudio ? `ترجمة وتسجيل صوتي (التسجيل: ${stageName(t.audio_stage_key)})` : 'ترجمة نصية'],
           ['الأهمية', PRIORITY[m.priority]], ['الإنجاز', progressBar(t)]].filter(([, v]) => v).map(([k, v]) => h('div', h('div.small.muted', k), h('div', v)))),
       m.instructions && h('p', { style: { marginTop: '12px' } }, h('b', 'تعليمات الترجمة: '), m.instructions),
       lateSummary(t)),
     rev ? h('div', { style: { marginTop: '16px' } }, revisionCard(rev)) : null,
     h('details.card', h('summary', h('b', 'المسار والمراحل')), h('div', { style: { marginTop: '12px' } }, stageStrip(t))),
     h('div', { style: { marginTop: '16px' } },
-      canEdit && h('div.ws-tools', editor.tools, h('div.ws-save', saveState, saveBtn)),
+      canEdit && h('div.ws-tools', editor.tools),
       h('div.workspace',
         h('div.ws-col', h('h3', 'النص الأصلي — العربية'), sourceEl),
         h('div.ws-col', h('h3', `الترجمة — ${langName(t.language_code)}`), editor.el))),

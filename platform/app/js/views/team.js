@@ -3,6 +3,7 @@ import { h, fill, toast, busy, dialog, emptyState, fmtDate, fmtDateTime, confirm
 import { db, storage } from '../sb.js';
 import { state, isManager, ROLE_LABEL, STATUS_LABEL, langName, stageName } from '../store.js';
 import { POLICY_KEY, POLICY_VERSION } from '../policy.js';
+import { TEAM_FIELDS, teamRows, exportExcel, exportWord, exportPdf } from '../teamexport.js';
 
 export async function render(ctx) {
   const [members, priv, perf, rateSum, signed] = await Promise.all([
@@ -131,6 +132,136 @@ export async function render(ctx) {
     } catch (err) { toast(err.message, 'bad'); }
   }
 
+  // ---------------------------------------------------------------
+  // إضافة عضو يدويًا — لمدير المشروع وحده (ملاحظة ٦٨)
+  // ---------------------------------------------------------------
+  async function addMember() {
+    const fld = {
+      full_name: h('input', { autocomplete: 'off' }),
+      email: h('input', { type: 'email', dir: 'ltr', autocomplete: 'off' }),
+      password: h('input', { type: 'text', dir: 'ltr', autocomplete: 'off',
+        value: 'Haramain-' + Math.random().toString(36).slice(2, 8) }),
+      role: h('select', Object.entries(ROLE_LABEL).map(([k, v]) => h('option', { value: k }, v))),
+      whatsapp: h('input', { dir: 'ltr', placeholder: '+9665XXXXXXXX' }),
+      nationality: h('input'),
+      national_id: h('input', { dir: 'ltr', inputmode: 'numeric', maxlength: 10, placeholder: '1XXXXXXXXX' }),
+      residence: h('input')
+    };
+    const chosen = new Set();
+    const langSelect = h('select', { 'aria-label': 'أضف لغة' });
+    const langChips = h('div.lang-pills.chosen');
+    const drawLangs = () => {
+      const rest = state.languages.filter(l => l.is_active && !chosen.has(l.code));
+      fill(langSelect, h('option', { value: '' }, rest.length ? '— أضف لغة —' : '— أُضيفت كل اللغات —'),
+        rest.map(l => h('option', { value: l.code }, l.name_ar)));
+      langChips.replaceChildren(...[...chosen].map(code => h('button', { type: 'button', 'aria-pressed': 'true',
+        title: 'إزالة اللغة', 'aria-label': `إزالة ${langName(code)}`, onclick: () => { chosen.delete(code); drawLangs(); } },
+        h('span.tick', { 'aria-hidden': 'true' }, '✓'), langName(code), h('span.x', { 'aria-hidden': 'true' }, '×'))));
+      if (!chosen.size) langChips.append(h('span.small.muted', 'لا لغات'));
+    };
+    langSelect.addEventListener('change', () => { if (langSelect.value) { chosen.add(langSelect.value); drawLangs(); } });
+    drawLangs();
+
+    const res = await dialog({
+      title: 'إضافة عضو يدويًا',
+      body: h('div.stack',
+        h('p.small.muted', 'يُنشأ الحساب مفعّلًا وبريده مؤكَّد. سلّم العضو كلمة المرور المؤقتة وذكّره بتغييرها من «نسيت كلمة المرور».'),
+        h('div.grid-2',
+          h('label.field', 'الاسم الكامل', fld.full_name),
+          h('label.field', 'البريد الإلكتروني', fld.email),
+          h('label.field', 'كلمة المرور المؤقتة', fld.password),
+          h('label.field', 'الدور', fld.role),
+          h('label.field', 'رقم الجوال', fld.whatsapp),
+          h('label.field', 'الجنسية', fld.nationality),
+          h('label.field', 'رقم الهوية أو الإقامة', fld.national_id),
+          h('label.field', 'مكان الإقامة', fld.residence)),
+        h('fieldset', h('legend', 'اللغات'), h('div.stack', { style: { gap: '10px' } }, langSelect, langChips))),
+      buttons: [
+        { label: 'إنشاء الحساب', kind: 'primary', validate: () => {
+          if (fld.full_name.value.trim().length < 3) { toast('اكتب الاسم الكامل.', 'bad'); return false; }
+          if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fld.email.value.trim())) { toast('البريد الإلكتروني غير صحيح.', 'bad'); return false; }
+          if (fld.password.value.length < 8) { toast('كلمة المرور ٨ أحرف على الأقل.', 'bad'); return false; }
+          const nid = fld.national_id.value.trim();
+          if (nid && !/^[12][0-9]{9}$/.test(nid)) { toast('رقم الهوية أو الإقامة: ١٠ أرقام تبدأ بـ١ أو ٢.', 'bad'); return false; }
+          if (fld.role.value === 'translator' && !chosen.size) { toast('اختر لغة واحدة على الأقل للمترجم.', 'bad'); return false; }
+          return true;
+        }, value: () => ({ ...Object.fromEntries(Object.entries(fld).map(([k, el]) => [k, el.value.trim()])), languages: [...chosen] }) },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
+    try {
+      await db.rpc('admin_create_member', {
+        p_email: res.email, p_password: res.password, p_full_name: res.full_name, p_role: res.role,
+        p_whatsapp: res.whatsapp || null, p_nationality: res.nationality || null,
+        p_national_id: res.national_id || null, p_residence: res.residence || null,
+        p_languages: res.languages.length ? res.languages : null
+      });
+      toast(`أُنشئ حساب ${res.full_name}. كلمة المرور المؤقتة: ${res.password}`, 'ok');
+      reload();
+    } catch (err) { toast(err.message, 'bad'); }
+  }
+
+  // ---------------------------------------------------------------
+  // تصدير بيانات الفريق: اختيار الأعضاء والحقول والصيغة (ملاحظة ٧٨)
+  // ---------------------------------------------------------------
+  async function exportTeam() {
+    const pool = members.filter(m => m.status !== 'pending');
+    const picked = new Set(pool.map(m => m.id));
+    const fields = new Set(['full_name', 'role', 'email', 'whatsapp', 'languages']);
+
+    const memberBox = h('div.pick-list');
+    const allBox = h('input', { type: 'checkbox', checked: true });
+    const drawMembers = () => {
+      memberBox.replaceChildren(...pool.map(m => {
+        const cb = h('input', { type: 'checkbox', checked: picked.has(m.id) ? true : null });
+        cb.onchange = () => { cb.checked ? picked.add(m.id) : picked.delete(m.id); allBox.checked = picked.size === pool.length; count(); };
+        return h('label.check', cb, h('span', m.full_name, h('span.small.muted', ` — ${ROLE_LABEL[m.role]}`)));
+      }));
+    };
+    allBox.onchange = () => { picked.clear(); if (allBox.checked) pool.forEach(m => picked.add(m.id)); drawMembers(); count(); };
+
+    const fieldBox = h('div.pick-list', TEAM_FIELDS.map(([k, label]) => {
+      const cb = h('input', { type: 'checkbox', checked: fields.has(k) ? true : null });
+      cb.onchange = () => { cb.checked ? fields.add(k) : fields.delete(k); count(); };
+      return h('label.check', cb, h('span', label));
+    }));
+    const counter = h('p.small.muted');
+    const count = () => { counter.textContent = `المحدد: ${picked.size} عضوًا و${fields.size} حقلًا`; };
+    drawMembers(); count();
+
+    const fmt = h('select', { 'aria-label': 'صيغة الملف' },
+      h('option', { value: 'xlsx' }, 'Excel — جدول بيانات'),
+      h('option', { value: 'docx' }, 'Word — مستند'),
+      h('option', { value: 'pdf' }, 'PDF على كليشة الهيئة'));
+
+    const res = await dialog({
+      title: 'تصدير بيانات فريق العمل',
+      body: h('div.stack',
+        h('div.row', h('label.field', { style: { flex: 1 } }, 'الصيغة', fmt), counter),
+        h('div.grid-2',
+          h('fieldset', h('legend', 'الأعضاء'), h('label.check', allBox, h('b', 'تحديد الكل')), memberBox),
+          h('fieldset', h('legend', 'البيانات المطلوبة'), fieldBox))),
+      buttons: [
+        { label: 'تصدير', kind: 'primary', validate: () => {
+          if (!picked.size) { toast('اختر عضوًا واحدًا على الأقل.', 'bad'); return false; }
+          if (!fields.size) { toast('اختر حقلًا واحدًا على الأقل.', 'bad'); return false; }
+          return true;
+        }, value: () => fmt.value },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
+    const keys = TEAM_FIELDS.map(f => f[0]).filter(k => fields.has(k));
+    const rows = teamRows(pool.filter(m => picked.has(m.id)), keys, { privOf, signOf });
+    try {
+      if (res === 'xlsx') exportExcel(rows);
+      else if (res === 'docx') await exportWord(rows);
+      else if (!exportPdf(rows)) return toast('اسمح بالنوافذ المنبثقة.', 'bad');
+      toast('جرى التصدير.', 'ok');
+    } catch (err) { toast(err.message, 'bad'); }
+  }
+
   // ملف الأداء والتقييم — للمنسقين ومدير المشروع فقط (ملاحظة ٥٧)
   async function performance(m) {
     const r = perfOf[m.id] || {};
@@ -233,7 +364,11 @@ export async function render(ctx) {
 
   const pending = members.filter(m => m.status === 'pending');
   return h('div',
-    h('div.page-head', h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'فريق العمل'),
+    h('div.page-head',
+      h('div.row', { style: { marginInlineStart: 'auto', order: 2 } },
+        isManager() && h('button.btn.sm.primary', { type: 'button', onclick: addMember }, '＋ إضافة عضو'),
+        h('button.btn.sm', { type: 'button', onclick: exportTeam }, 'تصدير البيانات')),
+      h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'فريق العمل'),
       h('p.muted', 'ينضم الأعضاء عبر صفحة التسجيل، ثم يفعّلهم المنسق. التعطيل يحفظ سجل العضو بدل حذفه، ولا يُعطَّل من لديه مهمة قائمة.'))),
     h('div.card', h('h3', `طلبات التسجيل (${pending.length})`),
       pending.length ? h('div.stack', pending.map(m => h('div.row', { style: { borderBottom: '1px solid var(--border)', paddingBottom: '10px' } },

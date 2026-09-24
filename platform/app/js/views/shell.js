@@ -29,11 +29,22 @@ export function footer(left = 'إدارة ترجمة الحرمين الشريف
   return h('footer.site', h('div.inner', h('span', left), h('span', right)));
 }
 
-// رابط الموقع العام: نطاقه إن كان مضبوطًا، وإلا فجذر الموقع نفسه
-const publicUrl = () => {
-  const cfg = window.HS_CONFIG || {};
-  return (cfg.publicHost && location.hostname !== cfg.publicHost) ? `https://${cfg.publicHost}/` : '/';
-};
+// سياسة السرية حاضرة دائمًا: أخضر إن وُقّعت وأحمر إن لم تُوقّع (ملاحظة ٧٦)
+export function policyChip() {
+  const chip = h('button.btn.sm.policy-chip', { type: 'button', title: 'سياسة السرية التامة' });
+  const paint = () => {
+    const ok = !!state.policySigned;
+    chip.className = 'btn sm policy-chip ' + (ok ? 'signed' : 'unsigned');
+    chip.replaceChildren(h('span.dot', { 'aria-hidden': 'true' }), 'سياسة السرية');
+    chip.setAttribute('aria-label', ok ? 'سياسة السرية — موقّعة' : 'سياسة السرية — لم تُوقّع بعد');
+  };
+  chip.onclick = async () => {
+    const m = await import('./policy.js');
+    if (await m.policyDialog()) paint();
+  };
+  paint();
+  return chip;
+}
 
 export function staffShell(view, path) {
   const p = state.profile;
@@ -50,7 +61,7 @@ export function staffShell(view, path) {
       h('div.spacer'),
       h('div.who', p.full_name, h('small', ROLE_LABEL[p.role])),
       themeToggle(),
-      h('a.btn.sm', { href: publicUrl() }, 'الموقع العام'),
+      policyChip(),
       h('button.btn.sm', { type: 'button', onclick: () => auth.signOut() }, 'خروج'))),
     h('div.layout',
       h('nav.sidenav', { 'aria-label': 'التنقل' }, nav),

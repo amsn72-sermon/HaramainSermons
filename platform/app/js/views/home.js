@@ -1,7 +1,7 @@
 // لوحة المتابعة (المنسق والمدير)، والمترجم يُحوَّل إلى مهامه
 import { h, fill, emptyState, fmtSermonDate, toast, busy, dialog, confirm } from '../ui.js';
 import { db } from '../sb.js';
-import { state, isAdmin, isManager, MATERIAL_SELECT, MOSQUE, CITY, PRIORITY, sortStages, currentStage, trackProgress,
+import { state, isAdmin, isManager, MATERIAL_SELECT, MOSQUE, MOSQUE_ANY, CITY, PRIORITY, sortStages, currentStage, trackProgress,
   isLateNow, hadLateness, langName, stageName } from '../store.js';
 import { statusBadge, trackTimer, progressBar, stageStrip, timelineTable, lateSummary, deleteDialog } from './parts.js';
 
@@ -92,7 +92,7 @@ export async function render(ctx) {
       list.length ? h('div.table-wrap', h('table.responsive',
         h('thead', h('tr', ['المادة واللغة', 'المرحلة / المسؤول', 'الإنجاز', 'الوقت', ''].map(t => h('th', t)))),
         h('tbody', list.map(({ m, t, cur }) => h('tr',
-          h('td', { 'data-label': 'المادة' }, h('b', m.title), h('span.sub', `${langName(t.language_code)} · ${MOSQUE[m.mosque]}${m.priority !== 'normal' ? ' · ' + PRIORITY[m.priority] : ''}`), lateSummary(t)),
+          h('td', { 'data-label': 'المادة' }, h('b', m.title), h('span.sub', `${langName(t.language_code)} · ${MOSQUE_ANY[m.mosque] || '—'}${m.priority !== 'normal' ? ' · ' + PRIORITY[m.priority] : ''}`), lateSummary(t)),
           h('td', { 'data-label': 'المرحلة' }, statusBadge(t), h('span.sub', cur?.assignee?.full_name || (t.status === 'awaiting_receipt' ? t.stages[0]?.assignee?.full_name : '') || '')),
           h('td', { 'data-label': 'الإنجاز' }, progressBar(t)),
           h('td', { 'data-label': 'الوقت' }, trackTimer(t)),
@@ -146,7 +146,7 @@ export async function render(ctx) {
   function showDetails(m) {
     details.replaceChildren(h('div.card',
       h('div.row', h('h3', { style: { flex: 1 } }, `تفاصيل: ${m.title}`), h('button.btn.sm', { onclick: () => details.replaceChildren() }, 'إغلاق')),
-      h('p.muted.small', [MOSQUE[m.mosque], m.khateeb?.name, m.sermon_date && fmtSermonDate(m.sermon_date), PRIORITY[m.priority]].filter(Boolean).join(' · ')),
+      h('p.muted.small', [MOSQUE_ANY[m.mosque], m.khateeb?.name, m.sermon_date && fmtSermonDate(m.sermon_date), PRIORITY[m.priority]].filter(Boolean).join(' · ')),
       h('div.stack', m.tracks.map(t => h('div.stack', { style: { gap: '8px' } },
         h('div.row', h('b', langName(t.language_code)), statusBadge(t), lateSummary(t), h('span', { style: { flex: 1 } }),
           t.status !== 'completed' && h('button.btn.sm.danger', { type: 'button', onclick: e => busy(e.currentTarget, () => cancelTrack(m, t)) }, 'إلغاء إسناد اللغة')),

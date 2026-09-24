@@ -1,7 +1,7 @@
 // إضافة مادة وإسنادها — على ثلاث خطوات مع حفظ مسودة محلية
 import { h, fill, toast, busy, fmtMinutes, confirm } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, MATERIAL_TYPES, SERMON_TYPES, MOSQUE, PRIORITY, langName, stageName } from '../store.js';
+import { state, MATERIAL_TYPES, SERMON_TYPES, MOSQUE, PRIORITY, langName, stageName, needsMosque, GENERAL_MOSQUE } from '../store.js';
 import { createEditor } from '../editor.js';
 import { plainText } from '../sanitize.js';
 
@@ -55,10 +55,13 @@ export async function render(ctx) {
   const sermonOnly = h('div.grid-2',
     h('label.field', 'نوع الخطبة', f.sermon_type),
     h('label.field', 'الخطيب', f.khateeb_id));
+  // الخطب والدروس تتبع مسجدًا؛ الكتب والمطويات والإعلانات والتوجيهات عامة (ملاحظة ٦٩)
+  const mosqueWrap = h('label.field', 'مكان الخطبة / الموقع', f.mosque);
   const pdfWrap = h('label.field', 'ملف الأصل العربي (PDF)', h('small', 'حتى ٢٠ ميغابايت'), f.pdf);
   const textWrap = h('div.field', h('b', 'النص العربي'), source.el);
   const syncVisibility = () => {
     sermonOnly.hidden = f.material_type.value !== 'خطب';
+    mosqueWrap.hidden = !needsMosque(f.material_type.value);
     pdfWrap.hidden = f.source_mode.value !== 'pdf';
     textWrap.hidden = f.source_mode.value !== 'text';
   };
@@ -195,7 +198,7 @@ export async function render(ctx) {
   const errs = h('div.form-errors', { hidden: true, role: 'alert' });
   const steps = [
     h('div.stack',
-      h('div.grid-2', h('label.field', 'نوع المادة', f.material_type), h('label.field', 'مكان الخطبة / الموقع', f.mosque)),
+      h('div.grid-2', h('label.field', 'نوع المادة', f.material_type), mosqueWrap),
       sermonOnly,
       h('label.field', 'العنوان', f.title),
       h('div.grid-2', h('label.field', 'التاريخ', f.sermon_date), h('label.field', 'المؤلف أو الجهة المصدرة', f.author)),
@@ -264,7 +267,7 @@ export async function render(ctx) {
       material: {
         material_type: f.material_type.value,
         sermon_type: f.material_type.value === 'خطب' ? f.sermon_type.value : null,
-        title: f.title.value.trim(), mosque: f.mosque.value,
+        title: f.title.value.trim(), mosque: needsMosque(f.material_type.value) ? f.mosque.value : GENERAL_MOSQUE,
         khateeb_id: f.material_type.value === 'خطب' && f.khateeb_id.value ? f.khateeb_id.value : null,
         sermon_date: f.sermon_date.value || null, author: f.author.value.trim() || null,
         instructions: f.instructions.value.trim() || null,

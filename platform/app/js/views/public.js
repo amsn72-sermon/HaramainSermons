@@ -313,7 +313,7 @@ export async function arafah() {
         h('div.eyebrow', 'يوم عرفة — Day of Arafah'),
         h('h1', 'ترجمة خطبة عرفة بلغات العالم'),
         h('p', 'The Arafah sermon translated into the languages of the world — اختر لغتك من القائمة.')),
-      h('div.section-head', h('h2', 'خطبة عرفة'), h('p', 'من مسجد نمرة بعرفات — قناة الخطب على يوتيوب'),
+      h('div.section-head', h('h2', 'خطبة عرفة'),
         list.length ? h('div.row', { style: { marginTop: '10px' } },
           langCountBadge(list[0].translations.length, true),
           h('span.small.muted', list[0].year ? `في عام ${list[0].year}هـ` : '')) : null),

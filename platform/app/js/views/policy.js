@@ -1,5 +1,5 @@
 // شاشة سياسة السرية: تُعرض عند أول دخول بعد التفعيل، ولا يُتجاوزها إلا بالتوقيع (ملاحظة ٥٧)
-import { h, toast, busy, fmtDate } from '../ui.js';
+import { h, toast, busy, fmtDate, fmtDateTime } from '../ui.js';
 import { db, auth } from '../sb.js';
 import { state } from '../store.js';
 import { brand, themeToggle, footer } from './shell.js';
@@ -10,6 +10,52 @@ export function policyText() {
     h('p.muted', POLICY_INTRO),
     POLICY_SECTIONS.map(([title, items]) =>
       h('section', h('h3', title), h('ul', items.map(t => h('li', t))))));
+}
+
+// عرض السياسة كاملة من الزر الدائم؛ ومن لم يوقّع يستطيع التوقيع من هنا (ملاحظة ٧٦)
+export async function policyDialog() {
+  const { dialog } = await import('../ui.js');
+  const signed = !!state.policySigned;
+  const agree = h('input', { type: 'checkbox' });
+  const name = h('input', { autocomplete: 'off', placeholder: state.profile?.full_name || 'اكتب اسمك الكامل' });
+  let stamp = null;
+  if (signed) {
+    try {
+      const rows = await db.select('policy_acceptances', {
+        select: 'signed_name,policy_version,accepted_at',
+        member_id: `eq.${state.profile.id}`, policy_key: `eq.${POLICY_KEY}`, order: 'accepted_at.desc', limit: 1
+      });
+      stamp = rows[0] || null;
+    } catch { /* العرض لا يتوقف على السجل */ }
+  }
+  const res = await dialog({
+    title: POLICY_TITLE,
+    body: h('div.stack',
+      h('div.policy-state', { class: signed ? 'signed' : 'unsigned' },
+        signed
+          ? `تم التوقيع${stamp ? ` باسم «${stamp.signed_name}» في ${fmtDateTime(stamp.accepted_at)} — النسخة ${stamp.policy_version}` : ''}`
+          : 'لم توقّع على هذه السياسة بعد'),
+      h('p.small.muted', `النسخة ${POLICY_VERSION}`),
+      policyText(),
+      signed ? null : h('div.stack',
+        h('label.check.top', agree, h('span', POLICY_ACK)),
+        h('label.field', 'التوقيع: اكتب اسمك الكامل', name))),
+    buttons: signed
+      ? [{ label: 'إغلاق', value: null }]
+      : [{ label: 'أوافق وأوقّع', kind: 'primary', validate: () => {
+            if (!agree.checked) { toast('ضع علامة الإقرار أولًا.', 'bad'); return false; }
+            if (name.value.trim().length < 3) { toast('اكتب اسمك الكامل توقيعًا.', 'bad'); return false; }
+            return true;
+          }, value: () => name.value.trim() },
+          { label: 'إغلاق', value: null }]
+  });
+  if (!res) return false;
+  try {
+    await db.rpc('accept_policy', { p_version: POLICY_VERSION, p_name: res, p_key: POLICY_KEY });
+    state.policySigned = true;
+    toast('شكرًا لك، سُجّل توقيعك.', 'ok');
+    return true;
+  } catch (err) { toast(err.message, 'bad'); return false; }
 }
 
 export async function render(ctx) {
