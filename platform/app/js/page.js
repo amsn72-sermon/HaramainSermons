@@ -11,11 +11,26 @@ const SERMON_LABEL = { 'خطبة جمعة': 'خطبة الجمعة', 'خطبة �
 // «خطبة الجمعة من المسجد الحرام»
 export function heading(m) {
   const kind = m.sermon_type ? (SERMON_LABEL[m.sermon_type] || m.sermon_type) : (m.material_type || 'مادة');
-  return m.mosque ? `${kind} من ${MOSQUE[m.mosque]}` : kind;
+  return (m.mosque && MOSQUE[m.mosque]) ? `${kind} من ${MOSQUE[m.mosque]}` : kind;
 }
+
+// المواد العامة: كتب ومطويات ومنشورات وإعلانات وتوجيهات — لا تتبع مسجدًا ولا خطيبًا (ملاحظتا ٦٩ و٧٢)
+const GENERAL_TYPES = ['كتب', 'مطويات', 'منشورات', 'إعلانات', 'توجيهات'];
+export const isGeneralMaterial = m => !m?.sermon_type && GENERAL_TYPES.includes(m?.material_type);
+// «المؤلف» للكتب والمطويات والمنشورات، و«الجهة» للإعلانات والتوجيهات
+const SOURCE_LABEL = { 'كتب': 'المؤلف', 'مطويات': 'المؤلف', 'منشورات': 'المؤلف',
+  'إعلانات': 'الجهة', 'توجيهات': 'الجهة' };
 
 // بطاقة البيانات الثابتة: [التسمية، القيمة]
 export function cardRows(m, languageCode, khateeb) {
+  if (isGeneralMaterial(m)) {
+    return [
+      ['العنوان', m.title],
+      [SOURCE_LABEL[m.material_type] || 'المؤلف', m.author],
+      ['التاريخ', m.sermon_date && fmtSermonDate(m.sermon_date)],
+      ['اللغة', languageCode && langName(languageCode)]
+    ].filter(([, v]) => v);
+  }
   return [
     ['العنوان', m.title],
     ['الخطيب', khateeb || m.khateeb?.name],

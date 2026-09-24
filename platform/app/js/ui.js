@@ -109,6 +109,29 @@ export function countdown(dueAt, { soonMinutes = 15, prefix = true } = {}) {
   return el;
 }
 
+// ساعة رقمية للعد التنازلي: أخضر ما دام في الوقت، وأحمر إذا تجاوزه (ملاحظة ٦٧)
+export function digitalCountdown(dueAt, { soonMinutes = 15 } = {}) {
+  const time = h('span.dc-time');
+  const note = h('span.dc-note');
+  const el = h('div.digital-clock', { role: 'timer', 'aria-live': 'off' }, time, note);
+  const two = n => String(Math.floor(Math.abs(n))).padStart(2, '0');
+  const tick = () => {
+    if (!el.isConnected && el.dataset.started) { clearInterval(id); return; }
+    el.dataset.started = '1';
+    const diff = (new Date(dueAt) - Date.now()) / 1000;
+    const late = diff < 0;
+    const a = Math.abs(diff);
+    // ساعات كاملة بلا فصل الأيام: أرقام لاتينية متصلة تُقرأ كساعة رقمية
+    time.textContent = `${two(a / 3600)}:${two((a % 3600) / 60)}:${two(a % 60)}`;
+    note.textContent = late ? 'تجاوز الوقت' : 'المتبقّي';
+    el.classList.toggle('late', late);
+    el.classList.toggle('soon', !late && diff < soonMinutes * 60);
+    el.setAttribute('aria-label', (late ? 'تجاوز الوقت ' : 'المتبقّي ') + time.textContent);
+  };
+  const id = setInterval(tick, 1000); tick();
+  return el;
+}
+
 export const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 export function loading(text = 'جارٍ التحميل…') { return h('div.empty', h('span', text)); }

@@ -21,6 +21,11 @@ export const TRACK_STATUS = {
   completed: ['مكتملة', 'ok']
 };
 export const MOSQUE = { makkah: 'المسجد الحرام', madinah: 'المسجد النبوي' };
+// مادة عامة لا تتبع مسجدًا (كتب، مطويات، منشورات، إعلانات، توجيهات) — ملاحظة ٦٩
+export const GENERAL_MOSQUE = 'general';
+export const MOSQUE_ANY = { ...MOSQUE, general: 'مادة عامة' };
+export const SERMON_MATERIALS = ['خطب', 'دروس علمية'];
+export const needsMosque = type => SERMON_MATERIALS.includes(type);
 export const CITY = { makkah: 'مكة المكرمة', madinah: 'المدينة المنورة' };
 export const PRIORITY = { normal: 'اعتيادية', urgent: 'عاجلة', emergency: 'طارئة' };
 export const MATERIAL_TYPES = ['خطب', 'دروس علمية', 'إعلانات', 'توجيهات', 'كتب', 'مطويات', 'منشورات'];

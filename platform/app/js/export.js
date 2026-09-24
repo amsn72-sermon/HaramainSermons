@@ -6,7 +6,7 @@ import { langDir } from './store.js';
 import { PAGE, LETTERHEAD, cardColumns, fileName } from './page.js';
 
 let docxLoading = null;
-function loadDocx() {
+export function loadDocx() {
   if (window.docx) return Promise.resolve(window.docx);
   if (!docxLoading) docxLoading = new Promise((resolve, reject) => {
     const s = document.createElement('script');
@@ -148,7 +148,8 @@ export function printTranslation({ material, track, khateeb }, { autoPrint = tru
   const BOX_H = P.h - P.top - P.bottom;      // ارتفاع صندوق الكتابة بالمليمتر
   const BOX_W = P.w - P.side * 2;
   const NUM_H = 8;                          // شريط رقم الصفحة أسفل صندوق الكتابة
-  const WIN_H = BOX_H - NUM_H;
+  const SAFE_H = 5;                         // فسحة أمان تمنع قصّ السطر الأخير (ملاحظة ٧١)
+  const WIN_H = BOX_H - NUM_H - SAFE_H;
   w.document.write(`<!doctype html><html lang="${track.language_code}" dir="${dir}" data-theme="light"><head><meta charset="utf-8"><title></title>
 <link rel="stylesheet" href="${location.origin}/css/app.css"><style>
 @page { size: A4; margin: 0; }
