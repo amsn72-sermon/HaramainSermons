@@ -462,3 +462,42 @@ select.lang-select { width: 100%; min-height: 46px; font: inherit; font-size: 1r
 .live-block + .live-block { margin-top: 26px; }
 .icon-btn.danger { color: var(--bad, #c0564f); }
 .arch-row.is-trashed { opacity: .72; }
+
+/* زر سياسة السرية الدائم (ملاحظة ٧٦) */
+.policy-chip { display: inline-flex; align-items: center; gap: 6px; }
+.policy-chip .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.policy-chip.signed { border-color: #3f9e6b; color: #7fd6a4; }
+.policy-chip.signed .dot { background: #3f9e6b; }
+.policy-chip.unsigned { border-color: #c0564f; color: #ff9a94; }
+.policy-chip.unsigned .dot { background: #d2493f; animation: policy-pulse 1.8s ease-in-out infinite; }
+@keyframes policy-pulse { 50% { opacity: .35; } }
+:root[data-theme="light"] .policy-chip.signed { color: #1f6b45; }
+:root[data-theme="light"] .policy-chip.unsigned { color: #a3322b; }
+.policy-state { padding: 8px 12px; border-radius: 10px; font-weight: 600; }
+.policy-state.signed { background: var(--ok-bg); color: var(--ok); }
+.policy-state.unsigned { background: var(--bad-bg); color: var(--bad); }
+
+/* شريط التحرير: أكبر قليلًا، في صفّين، والحفظ في آخره (ملاحظتا ٦٧ و٦٨) */
+.ws-tools .tools { max-height: none; row-gap: 6px; padding: 8px; }
+.ws-tools .tools button, .ws-tools .tools select { min-height: 38px; font-size: .95rem; padding: 4px 10px; }
+.ws-tools .tools .color input { width: 40px; min-height: 38px; }
+.tb-save { display: flex; align-items: center; gap: 10px; margin-inline-start: auto; padding-inline-start: 10px; }
+.tb-save .btn { white-space: nowrap; min-height: 38px; }
+
+/* ساعة العد التنازلي (ملاحظة ٦٧) */
+.digital-clock { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 14px;
+  border-radius: 10px; background: #0d1b14; border: 1px solid #1d4530; min-width: 178px; margin-inline-start: 6px; }
+.digital-clock .dc-time { font-family: "DS-Digital", "Courier New", ui-monospace, monospace; font-size: 2rem;
+  font-weight: 700; line-height: 1; letter-spacing: 1px; color: #35e07f; font-variant-numeric: tabular-nums; direction: ltr; }
+.digital-clock .dc-note { font-size: .7rem; color: #7fd6a4; }
+.digital-clock.soon { border-color: #6b5220; background: #1d1708; }
+.digital-clock.soon .dc-time { color: #ffc34d; } .digital-clock.soon .dc-note { color: #e0b562; }
+.digital-clock.late { border-color: #6b2320; background: #1d0b0a; }
+.digital-clock.late .dc-time { color: #ff4d42; } .digital-clock.late .dc-note { color: #ff9a94; }
+.digital-clock.done, .digital-clock.off { background: var(--soft); border-color: var(--border); }
+.digital-clock.done .dc-time, .digital-clock.off .dc-time { color: var(--muted); font-size: 1.4rem; }
+.digital-clock.done .dc-note, .digital-clock.off .dc-note { color: var(--muted); }
+@media (max-width: 640px) { .digital-clock { min-width: 140px; } .digital-clock .dc-time { font-size: 1.6rem; } }
+.pick-list { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow: auto;
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+.pick-list .check { font-weight: 400; }
