@@ -334,6 +334,8 @@ dialog .dlg-foot { display: flex; gap: 8px; justify-content: flex-start; padding
 .lang-pills button:hover { border-color: var(--gold); color: var(--accent-text); }
 .lang-pills button[aria-pressed="true"] { background: var(--gold); border-color: var(--gold); color: var(--ink); font-weight: 700; }
 .lang-pills .tick { font-weight: 900; margin-inline-end: 5px; }
+.lang-pills.chosen button { background: var(--gold); border-color: var(--gold); color: var(--ink); font-weight: 700; }
+.lang-pills.chosen .x { margin-inline-start: 7px; font-weight: 900; opacity: .75; }
 
 /* مشغّل الخطب: لا تحكم من داخل الفيديو، والأزرار أسفله (ملاحظة ٣٢) */
 .player { margin-top: 14px; }

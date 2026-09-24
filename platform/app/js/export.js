@@ -147,20 +147,25 @@ export function printTranslation({ material, track, khateeb }, { autoPrint = tru
   const P = PAGE;
   const BOX_H = P.h - P.top - P.bottom;      // ارتفاع صندوق الكتابة بالمليمتر
   const BOX_W = P.w - P.side * 2;
+  const NUM_H = 8;                          // شريط رقم الصفحة أسفل صندوق الكتابة
+  const WIN_H = BOX_H - NUM_H;
   w.document.write(`<!doctype html><html lang="${track.language_code}" dir="${dir}" data-theme="light"><head><meta charset="utf-8"><title></title>
 <link rel="stylesheet" href="${location.origin}/css/app.css"><style>
 @page { size: A4; margin: 0; }
 html, body { margin: 0; background: #fff !important; color: #111 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-.sheet { position: relative; width: ${P.w}mm; height: ${P.h}mm; overflow: hidden; background: #fff; break-after: page; page-break-after: always; }
-.sheet:last-child { break-after: auto; page-break-after: auto; }
-.sheet img.lh { position: absolute; top: 0; left: 0; width: ${P.w}mm; height: ${P.h}mm; }
-.win { position: absolute; top: ${P.top}mm; inset-inline-start: ${P.side}mm; width: ${BOX_W}mm; height: ${BOX_H}mm; overflow: hidden; }
+/* فاصل قبل كل صفحة تالية لا بعد كل صفحة، وإلا أنتج المتصفح صفحة بيضاء بينها (ملاحظة ٤٨) */
+.sheet { position: relative; width: ${P.w}mm; height: ${P.h}mm; overflow: hidden; background: #fff; }
+.sheet + .sheet { break-before: page; page-break-before: always; }
+.sheet img.lh { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+.win { position: absolute; top: ${P.top}mm; inset-inline-start: ${P.side}mm; width: ${BOX_W}mm; height: ${WIN_H}mm; overflow: hidden; }
+.pageno { position: absolute; top: ${P.top + WIN_H}mm; inset-inline-start: ${P.side}mm; width: ${BOX_W}mm; height: ${NUM_H}mm;
+  display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #6b6257; letter-spacing: .5px; }
 .flow { position: absolute; top: 0; inset-inline-start: 0; width: ${BOX_W}mm; }
 .print-body { --pt: 1pt; font-size: 12pt; line-height: 1.8; }
 .print-body .data-card { font-size: 11pt; }
 #measure { position: absolute; visibility: hidden; top: -10000mm; inset-inline-start: 0; width: ${BOX_W}mm; }
 @media screen { body { background: #d9d9d9 !important; } .sheet { margin: 16px auto; box-shadow: 0 2px 12px #0003; } }
-@media print { .sheet { margin: 0; box-shadow: none; } }
+@media print { .sheet { margin: 0; box-shadow: none; height: ${P.h - 0.5}mm; } }
 </style></head><body><div id="pages"></div><div id="measure"><div class="print-body flow"><div class="card-slot"></div><div class="t"></div></div></div></body></html>`);
   w.document.close();
   const d = w.document;
@@ -202,7 +207,7 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
     const measure = d.getElementById('measure');
     const flow = measure.querySelector('.flow');
     const probe = d.createElement('div');
-    probe.style.cssText = `height:${BOX_H}mm;width:1px;position:absolute;visibility:hidden`;
+    probe.style.cssText = `height:${WIN_H}mm;width:1px;position:absolute;visibility:hidden`;
     d.body.append(probe);
     const boxPx = probe.getBoundingClientRect().height;
     probe.remove();
@@ -221,12 +226,16 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 
     const pages = d.getElementById('pages');
     const lhUrl = new URL(LETTERHEAD, location.origin).href;
-    pages.replaceChildren(...starts.map(start => {
+    const nfmt = new Intl.NumberFormat('ar-SA-u-nu-arab');
+    pages.replaceChildren(...starts.map((start, i) => {
       const img = d.createElement('img'); img.className = 'lh'; img.alt = ''; img.src = lhUrl;
       const clone = flow.cloneNode(true);
       clone.style.top = `${-start}px`;
       const win = d.createElement('div'); win.className = 'win'; win.append(clone);
-      const sheet = d.createElement('div'); sheet.className = 'sheet'; sheet.append(img, win);
+      // ترقيم الصفحات أسفل صندوق الكتابة (ملاحظة ٤٩)
+      const num = d.createElement('div'); num.className = 'pageno';
+      num.textContent = `${nfmt.format(i + 1)} / ${nfmt.format(starts.length)}`;
+      const sheet = d.createElement('div'); sheet.className = 'sheet'; sheet.append(img, win, num);
       return sheet;
     }));
     measure.remove();

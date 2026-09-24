@@ -1,4 +1,4 @@
-import { h, toast, busy } from '../ui.js';
+import { h, fill, toast, busy } from '../ui.js';
 import { auth, db, storage } from '../sb.js';
 import { state, loadProfile, STATUS_LABEL } from '../store.js';
 import { brand, themeToggle, footer } from './shell.js';
@@ -63,12 +63,30 @@ export async function register(ctx) {
     confirm: h('input', { type: 'password', autocomplete: 'new-password', dir: 'ltr' }),
     consent: h('input', { type: 'checkbox' })
   };
+  // اختيار اللغات من قائمة منسدلة، والمختارة تظهر رقائق تُحذف بضغطة (ملاحظة ٥٠)
   const chosen = new Set();
-  const langList = h('div.lang-pills', state.languages.filter(l => l.is_active).map(l =>
-    h('button', { type: 'button', 'aria-pressed': 'false', onclick: e => {
-      const on = !chosen.has(l.code); on ? chosen.add(l.code) : chosen.delete(l.code);
-      e.currentTarget.setAttribute('aria-pressed', String(on));
-    } }, l.name_ar)));
+  const langSelect = h('select', { 'aria-label': 'أضف لغة ترجمة' });
+  const langChips = h('div.lang-pills.chosen');
+  const activeLangs = () => state.languages.filter(l => l.is_active);
+  function drawLangs() {
+    const rest = activeLangs().filter(l => !chosen.has(l.code));
+    fill(langSelect, h('option', { value: '' }, rest.length ? '— أضف لغة —' : '— أُضيفت كل اللغات —'),
+      rest.map(l => h('option', { value: l.code }, l.name_ar)));
+    langChips.replaceChildren(...[...chosen].map(code => {
+      const l = state.languages.find(x => x.code === code);
+      return h('button', { type: 'button', 'aria-pressed': 'true', title: 'إزالة اللغة',
+        'aria-label': `إزالة ${l?.name_ar || code}`,
+        onclick: () => { chosen.delete(code); drawLangs(); } },
+        h('span.tick', { 'aria-hidden': 'true' }, '✓'), l?.name_ar || code, h('span.x', { 'aria-hidden': 'true' }, '×'));
+    }));
+    if (!chosen.size) langChips.append(h('span.small.muted', 'لم تُختر لغة بعد'));
+  }
+  langSelect.addEventListener('change', () => {
+    if (!langSelect.value) return;
+    chosen.add(langSelect.value); drawLangs();
+  });
+  drawLangs();
+  const langList = h('div.stack', { style: { gap: '10px' } }, langSelect, langChips);
   const errs = errorsBox();
   const submit = h('button.btn.primary', { type: 'submit' }, 'إرسال طلب التسجيل');
 
