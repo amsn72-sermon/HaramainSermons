@@ -460,3 +460,5 @@ select.lang-select { width: 100%; min-height: 46px; font: inherit; font-size: 1r
 .lang-count.big b { font-size: 1.6rem; }
 .lang-globe { display: inline-flex; }
 .live-block + .live-block { margin-top: 26px; }
+.icon-btn.danger { color: var(--bad, #c0564f); }
+.arch-row.is-trashed { opacity: .72; }
