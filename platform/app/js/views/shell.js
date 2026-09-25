@@ -94,16 +94,26 @@ export function staffShell(view, path) {
     if (count > 0) mail.append(h('span.nav-badge', String(count)));
   }).catch(() => {});
 
+  // في الجوال تُطوى القائمة خلف زر، فلا تسبق المحتوى بجدار روابط (ملاحظة ١٠٦)
+  const navEl = h('nav#sidenav.sidenav', { 'aria-label': 'التنقل' }, nav);
+  const navBtn = h('button.btn.sm.nav-toggle', { type: 'button', 'aria-controls': 'sidenav', 'aria-expanded': 'false' },
+    h('span.bars', { 'aria-hidden': 'true' }, '☰'), 'القائمة');
+  const setNav = on => {
+    navEl.classList.toggle('open', on);
+    navBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
+  };
+  navBtn.onclick = () => setNav(!navEl.classList.contains('open'));
+  navEl.addEventListener('click', e => { if (e.target.closest('a')) setNav(false); });
+
   return h('div',
     h('header.topbar', h('div.inner',
+      navBtn,
       brand(),
       h('div.spacer'),
       h('div.who', p.full_name, h('small', ROLE_LABEL[p.role])),
       themeToggle(),
       policyChip(),
       h('button.btn.sm', { type: 'button', onclick: () => auth.signOut() }, 'خروج'))),
-    h('div.layout',
-      h('nav.sidenav', { 'aria-label': 'التنقل' }, nav),
-      h('main#main', { tabindex: '-1' }, view)),
+    h('div.layout', navEl, h('main#main', { tabindex: '-1' }, view)),
     footer());
 }
