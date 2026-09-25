@@ -70,9 +70,9 @@ export function staffShell(view, path) {
          link('/app/languages', 'اللغات'),
          link('/app/khateebs', 'الخطباء'),
          link('/app/workflow', 'إعداد سير العمل')]),
-       group('حسابي', [mine])]
+       group('حسابي', [mine, link('/about', 'عن المنصة')])]
     : [group('عملي', [link('/app/tasks', 'مهامي'), mail]),
-       group('حسابي', [mine])];
+       group('حسابي', [mine, link('/about', 'عن المنصة')])];
   // شارة ما لم يُوقَّع عليه بالعلم
   db.rpc('my_pending_circulars').then(n => {
     const count = Number(Array.isArray(n) ? n[0] : n) || 0;

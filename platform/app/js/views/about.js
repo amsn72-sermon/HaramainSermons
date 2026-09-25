@@ -5,18 +5,15 @@ import { db, auth } from '../sb.js';
 import { state, isManager, loadProfile } from '../store.js';
 import { brand, themeToggle, footer } from './shell.js';
 
-const KEY = 'about';
-const CODE_STASH = 'hs-about-code';
+const readCode = key => { try { return sessionStorage.getItem('hs-page-' + key) || ''; } catch { return ''; } };
+const keepCode = (key, v) => { try { sessionStorage.setItem('hs-page-' + key, v); } catch { /* وضع تصفّح خاص */ } };
 
-const readCode = () => { try { return sessionStorage.getItem(CODE_STASH) || ''; } catch { return ''; } };
-const keepCode = v => { try { sessionStorage.setItem(CODE_STASH, v); } catch { /* وضع تصفّح خاص */ } };
-
-function shell(inner, extra) {
+function shell(inner, extra, wide) {
   return h('div',
     h('header.topbar', h('div.inner',
       brand('مشروع خادم الحرمين الشريفين لترجمة خطب الحرمين الشريفين', 'ترجمات بلغات العالم', '/'),
       h('div.spacer'), extra, themeToggle())),
-    h('main#main.wrap.public.about', { tabindex: '-1' }, inner),
+    h('main#main.wrap.public.about', { tabindex: '-1', class: wide ? 'wide-type' : '' }, inner),
     footer('مشروع خادم الحرمين الشريفين لترجمة خطب الحرمين الشريفين',
       'الهيئة العامة للعناية بشؤون المسجد الحرام والمسجد النبوي'));
 }
@@ -24,7 +21,7 @@ function shell(inner, extra) {
 // ---------------------------------------------------------------------
 // بوابة الرمز
 // ---------------------------------------------------------------------
-function gate(onOpen) {
+function gate(key, title, onOpen) {
   const code = h('input', { type: 'password', autocomplete: 'off', 'aria-label': 'رمز الاطّلاع' });
   const err = h('div.form-errors', { hidden: true, role: 'alert' });
   const go = h('button.btn.primary', { type: 'submit' }, 'عرض الصفحة');
@@ -34,8 +31,8 @@ function gate(onOpen) {
       const v = code.value.trim();
       if (!v) { err.textContent = 'اكتب رمز الاطّلاع.'; err.hidden = false; return; }
       try {
-        const data = await db.rpc('open_page', { p_key: KEY, p_code: v });
-        keepCode(v);
+        const data = await db.rpc('open_page', { p_key: key, p_code: v });
+        keepCode(key, v);
         onOpen(data);
       } catch (e2) {
         err.textContent = /REQUIRE_CODE/.test(e2.message) ? 'اكتب رمز الاطّلاع.' : e2.message;
@@ -43,7 +40,7 @@ function gate(onOpen) {
       }
     });
   } },
-    h('h2', 'عن المنصة'),
+    h('h2', title),
     err,
     h('label.field', 'رمز الاطّلاع', code),
     go,
@@ -157,6 +154,10 @@ function page(d) {
       return h('li', h('span.ab-goal-num', String(i + 1)),
         h('div', head && h('b', head), h('p', rest)));
     }));
+    if (kind === 'stagenames') return h('div.fig',
+      h('ol.ab-chips', (d.stages || []).map(([name], i) =>
+        h('li', h('span.ab-chip-num', String(i + 1)), name))),
+      h('p.fig-cap', 'المسار القياسي لكل لغة'));
     if (kind === 'stages') return h('div.fig',
       h('ol.ab-stages', (d.stages || []).map(([name, who, task], i) =>
         h('li', h('span.ab-step', String(i + 1)),
@@ -169,9 +170,10 @@ function page(d) {
 
   const secEl = ([id, title, blocks]) => h('section.ab-sec', { id }, h('h2', title), blocks.map(block));
 
-  const toc = h('nav.ab-toc', { 'aria-label': 'محتويات الصفحة' },
+  const many = (d.sections || []).length > 2;
+  const toc = many ? h('nav.ab-toc', { 'aria-label': 'محتويات الصفحة' },
     h('b', 'المحتويات'),
-    h('ol', (d.sections || []).map(([id, title]) => h('li', h('a', { href: `#${id}` }, title)))));
+    h('ol', d.sections.map(([id, title]) => h('li', h('a', { href: `#${id}` }, title))))) : null;
 
   return h('div',
     h('section.hero.ab-hero',
@@ -179,12 +181,12 @@ function page(d) {
       h('h1', d.h1),
       h('p', d.lead),
       h('div.ab-stats', (d.stats || []).map(([n, label]) => h('div.ab-stat', h('b', n), h('span', label))))),
-    h('div.ab-body', toc, h('div.ab-main', (d.sections || []).map(secEl))),
-    h('p.ab-foot-note', d.note));
+    h('div.ab-body', { class: many ? '' : 'solo' }, toc, h('div.ab-main', (d.sections || []).map(secEl))),
+    d.note ? h('p.ab-foot-note', d.note) : null);
 }
 
 // تغيير رمز الاطّلاع — لمدير المشروع
-function codeBtn() {
+function codeBtn(key) {
   const btn = h('button.btn.sm', { type: 'button' }, 'رمز الاطّلاع');
   btn.onclick = async () => {
     const code = h('input', { type: 'text', autocomplete: 'off', placeholder: 'اتركه فارغًا لفتح الصفحة للجميع' });
@@ -197,33 +199,45 @@ function codeBtn() {
     });
     if (res === null) return;
     try {
-      await db.rpc('set_page_code', { p_key: KEY, p_code: res.trim() || null });
+      await db.rpc('set_page_code', { p_key: key, p_code: res.trim() || null });
       toast(res.trim() ? 'حُفظ رمز الاطّلاع.' : 'صارت الصفحة مفتوحة للجميع.', 'ok');
     } catch (e) { toast(e.message, 'bad'); }
   };
   return btn;
 }
 
-export async function render() {
+async function view({ key, title, login = false, wide = false }) {
   // الصفحة عامة، فالملف الشخصي لا يُحمَّل تلقائيًّا: نحمّله ليظهر زر الرمز للمدير
   if (auth.session && !state.profile) await loadProfile().catch(() => {});
   const printBtn = h('button.btn.sm', { type: 'button', onclick: () => window.print() }, 'طباعة أو حفظ PDF');
+  const loginBtn = h('a.btn.sm.primary', { href: '/login' }, 'تسجيل الدخول');
   const tools = h('div.row');
 
   const draw = data => {
-    tools.replaceChildren(...[printBtn, auth.session && isManager() ? codeBtn() : null].filter(Boolean));
+    tools.replaceChildren(...[
+      login && !auth.session ? loginBtn : null,
+      printBtn,
+      auth.session && isManager() ? codeBtn(key) : null
+    ].filter(Boolean));
     return page(data);
   };
 
   // العضو المفعّل يراها مباشرة، والزائر يُجرَّب له الرمز المحفوظ في هذه الجلسة
   try {
-    const data = await db.rpc('open_page', { p_key: KEY, p_code: readCode() || null });
-    return shell(draw(data), tools);
+    const data = await db.rpc('open_page', { p_key: key, p_code: readCode(key) || null });
+    return shell(draw(data), tools, wide);
   } catch (e) {
-    if (!/REQUIRE_CODE|رمز الاطّلاع/.test(e.message)) return shell(h('p.err', e.message), tools);
+    if (!/REQUIRE_CODE|رمز الاطّلاع/.test(e.message)) return shell(h('p.err', e.message), tools, wide);
   }
 
+  tools.replaceChildren(...[login && !auth.session ? loginBtn : null].filter(Boolean));
   const box = h('div');
-  box.replaceChildren(gate(data => { box.replaceChildren(draw(data)); window.scrollTo(0, 0); }));
-  return shell(box, tools);
+  box.replaceChildren(gate(key, title, data => { box.replaceChildren(draw(data)); window.scrollTo(0, 0); }));
+  return shell(box, tools, wide);
 }
+
+// /about — تعريف موجز بالمنصة، مفتوح
+export const render = () => view({ key: 'about', title: 'عن المنصة' });
+
+// /initiative — عرض المبادرة كاملًا، رابط مستقل بزر دخول وخط أكبر
+export const initiative = () => view({ key: 'initiative', title: 'عن المبادرة', login: true, wide: true });

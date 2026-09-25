@@ -6,7 +6,7 @@ import { urlToDataUrl } from '../photo.js';
 import {
   CARD, HARAMAIN_LOGO, ITEM_LABEL, ITEM_ORDER, COLORS, PRESETS, PRESET_LAYOUT,
   DEFAULT_LAYOUT, normalizeLayout, clampLayout, photoH, itemText, itemStyle,
-  bandStyle, ruleStyle, scaleStyle, logoExtra
+  bandStyle, ruleStyle, scaleStyle, logoExtra, newCustom, customLabel
 } from '../carddesign.js';
 
 const SCALE = 6;                           // بكسل لكل مليمتر على الشاشة
@@ -32,6 +32,13 @@ export async function render(ctx) {
   let logoPath = saved.logo_path || null;
   let logoUrl = null;                       // رابط الشعار المرفوع بعد جلبه
   let selected = 'name';
+  const customUrls = {};                    // روابط صور العناصر المضافة
+  const cus = id => (layout.custom || []).find(c => c.id === id) || null;
+  const curItem = () => (selected.startsWith('c:') ? cus(selected.slice(2)) : layout.items[selected]);
+  const loadCustomImg = async c => {
+    if (!c.path || customUrls[c.id]) return;
+    try { customUrls[c.id] = await storage.signedUrl('brand', c.path, 3600); } catch { /* يُعاد لاحقًا */ }
+  };
 
   const pool = members.filter(m => m.status === 'active');
   const picked = new Set(pool.filter(m => m.role === 'translator').map(m => m.id));
@@ -113,6 +120,23 @@ export async function render(ctx) {
       const el = elFor(key, member);
       if (el) kids.push(el);
     }
+    for (const c of (layout.custom || [])) {
+      if (!c.show) continue;
+      const st = { ...itemStyle(c, c.type === 'image' ? 'ci' : 'ct'),
+        left: px(c.x), top: px(c.y), width: px(c.w) };
+      if (c.size) st.fontSize = `${c.size * SCALE * 25.4 / 72}px`;
+      let inner;
+      if (c.type === 'image') {
+        Object.assign(st, scaleStyle(logoExtra(c), SCALE) || {});
+        inner = customUrls[c.id]
+          ? h('img', { src: customUrls[c.id], alt: '', style: { width: '100%', height: 'auto', display: 'block' } })
+          : h('span.cd-photo-ph', 'صورة');
+      } else inner = document.createTextNode(c.text || '(نص)');
+      const box = h('div.cd-item.editable', { style: st, 'data-key': `c:${c.id}` }, inner);
+      if (selected === `c:${c.id}`) box.classList.add('sel');
+      box.addEventListener('pointerdown', e => startDrag(e, `c:${c.id}`, box));
+      kids.push(box);
+    }
     stage.replaceChildren(...kids);
     const img = stage.querySelector('.cd-photo-img');
     if (img && member && photoOf[member.id]) {
@@ -129,7 +153,8 @@ export async function render(ctx) {
     selected = key;
     stage.querySelectorAll('.cd-item').forEach(el => el.classList.toggle('sel', el.dataset.key === key));
     drawPanel();
-    const it = layout.items[key];
+    const it = key.startsWith('c:') ? cus(key.slice(2)) : layout.items[key];
+    if (!it) return;
     const startX = e.clientX, startY = e.clientY, ox = it.x, oy = it.y;
     box.setPointerCapture?.(e.pointerId);
     const move = ev => {
@@ -154,7 +179,8 @@ export async function render(ctx) {
     const step = e.shiftKey ? 2 : 0.5;
     const d = { ArrowRight: [step, 0], ArrowLeft: [-step, 0], ArrowDown: [0, step], ArrowUp: [0, -step] }[e.key];
     if (!d) return;
-    const it = layout.items[selected];
+    const it = curItem();
+    if (!it) return;
     it.x += d[0]; it.y += d[1];
     clampLayout(layout); drawStage();
     e.preventDefault();
@@ -185,9 +211,14 @@ export async function render(ctx) {
   };
 
   function drawPanel() {
-    const it = layout.items[selected];
+    const isCustom = selected.startsWith('c:');
+    const it = curItem();
+    if (!it) { selected = 'name'; return drawPanel(); }
+
     const pick = h('select', { 'aria-label': 'العنصر' },
-      ITEM_ORDER.map(k => h('option', { value: k, selected: k === selected ? true : null }, ITEM_LABEL[k])));
+      ITEM_ORDER.map(k => h('option', { value: k, selected: k === selected ? true : null }, ITEM_LABEL[k])),
+      (layout.custom || []).map((c, i) =>
+        h('option', { value: `c:${c.id}`, selected: `c:${c.id}` === selected ? true : null }, customLabel(c, i))));
     pick.onchange = () => { selected = pick.value; drawStage(); };
 
     const posX = h('input', { type: 'number', step: '0.5', value: round(it.x), 'aria-label': 'البُعد الأفقي' });
@@ -201,10 +232,39 @@ export async function render(ctx) {
       h('div.grid-2',
         h('label.field', 'من اليسار (مم)', posX),
         h('label.field', 'من الأعلى (مم)', posY)),
-      h('label.field', `${selected === 'photo' ? 'عرض الصورة' : 'عرض الحقل'} (${round(it.w)} مم)`,
-        sizeRange(it.w, 4, CARD.w, 0.5, v => { it.w = v; }))
+      h('label.field', `${selected === 'photo' || it.type === 'image' ? 'عرض الصورة' : 'عرض الحقل'} (${round(it.w)} مم)`,
+        sizeRange(it.w, 3, CARD.w, 0.5, v => { it.w = v; }))
     ];
-    if ('size' in it) {
+
+    // نص العنصر المضاف يُكتب هنا
+    if (isCustom && it.type === 'text') {
+      const txt = h('input', { value: it.text || '', maxlength: 300, 'aria-label': 'نص العنصر' });
+      txt.oninput = () => { it.text = txt.value; drawStage(); };
+      kids.splice(1, 0, h('label.field', 'النص', txt));
+    }
+    if (isCustom && it.type === 'image') {
+      const up = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/svg+xml',
+        'aria-label': 'صورة العنصر' });
+      up.onchange = () => busy(up, async () => {
+        const file = up.files[0]; if (!file) return;
+        if (file.size > 3 * 1024 * 1024) return toast('الحد الأقصى ٣ ميغابايت.', 'bad');
+        try {
+          const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const path = `card-${it.id}-${Date.now()}.${ext}`;
+          await storage.upload('brand', path, file);
+          it.path = path;
+          customUrls[it.id] = await storage.signedUrl('brand', path, 3600);
+          toast('رُفعت الصورة — احفظ التصميم لتثبيتها.', 'ok');
+          drawStage();
+        } catch (e) { toast(e.message, 'bad'); }
+      });
+      kids.splice(1, 0, h('label.field', it.path ? 'استبدال الصورة أو الشعار' : 'رفع الصورة أو الشعار',
+        h('small', 'PNG بخلفية شفافة أفضل — حتى ٣ ميغابايت'), up));
+      kids.push(h('div.row', chip(it.badge ? 'خلفية داكنة خلفها' : 'بلا خلفية', it.badge,
+        () => { it.badge = !it.badge; })));
+    }
+
+    if ('size' in it && !(isCustom && it.type === 'image')) {
       kids.push(
         h('label.field', `حجم الخط (${round(it.size)} نقطة)`,
           h('div.row.tight',
@@ -220,6 +280,32 @@ export async function render(ctx) {
           chip('يسار', it.align === 'left', () => { it.align = 'left'; })),
         h('label.field', 'اللون', colorRow(it.color, v => { it.color = v; })));
     }
+
+    // إضافة عنصر جديد وحذف المضاف
+    const addText = h('button.btn.sm', { type: 'button' }, '＋ نص');
+    addText.onclick = () => {
+      const c = newCustom('text', (layout.custom || []).length + 1);
+      layout.custom = [...(layout.custom || []), c];
+      selected = `c:${c.id}`; clampLayout(layout); drawStage();
+    };
+    const addImg = h('button.btn.sm', { type: 'button' }, '＋ صورة أو شعار');
+    addImg.onclick = () => {
+      const c = newCustom('image', (layout.custom || []).length + 1);
+      layout.custom = [...(layout.custom || []), c];
+      selected = `c:${c.id}`; clampLayout(layout); drawStage();
+    };
+    kids.push(h('hr'), h('div.field', h('span.field-head', 'إضافة عنصر'), h('div.row', addText, addImg)));
+
+    if (isCustom) {
+      const del = h('button.btn.sm.ghost', { type: 'button' }, 'حذف هذا العنصر');
+      del.onclick = () => {
+        layout.custom = (layout.custom || []).filter(c => c.id !== it.id);
+        selected = 'name'; drawStage();
+        toast('حُذف العنصر.', '');
+      };
+      kids.push(h('div.row', del));
+    }
+
     panel.replaceChildren(...kids);
   }
 
@@ -305,6 +391,10 @@ export async function render(ctx) {
         t.onclick = () => { it.badge = !it.badge; drawStage(); drawLogo(); };
         return t;
       })()));
+  }
+
+  for (const c of (layout.custom || [])) {
+    if (c.type === 'image' && c.path) loadCustomImg(c).then(() => drawStage()).catch(() => {});
   }
 
   if (logoKind === 'custom' && logoPath) {
@@ -398,10 +488,18 @@ export async function render(ctx) {
     let logoData = null;
     const src = logoSrc();
     if (src) { try { logoData = await urlToDataUrl(src); } catch { logoData = src; } }
+    // صور العناصر المضافة
+    const customData = {};
+    await Promise.all((layout.custom || []).filter(c => c.type === 'image' && c.path).map(async c => {
+      try {
+        const u = customUrls[c.id] || await storage.signedUrl('brand', c.path, 600);
+        customData[c.id] = await urlToDataUrl(u);
+      } catch { /* عنصر بلا صورة لا يوقف الطباعة */ }
+    }));
     const ok = printCards(chosen.map(m => ({
       member: m, photo: photos[m.id] || null,
       langsText: (langsOf[m.id] || []).map(c => langName(c)).join(' · ')
-    })), cfg(), layout, logoData);
+    })), cfg(), layout, logoData, customData);
     if (!ok) toast('اسمح بالنوافذ المنبثقة لإتمام الطباعة.', 'bad');
   });
 
@@ -440,14 +538,14 @@ export async function render(ctx) {
 }
 
 // بطاقة واحدة — من شاشة «بياناتي»
-export function printOneCard(row, cfg, layout, logoData) {
-  return printCards([row], cfg, layout, logoData);
+export function printOneCard(row, cfg, layout, logoData, customData) {
+  return printCards([row], cfg, layout, logoData, customData);
 }
 
 // ---------------------------------------------------------------------
 // صفحة الطباعة: نفس النموذج بالمليمتر، عشر بطاقات في صفحة A4
 // ---------------------------------------------------------------------
-function printCards(rows, cfg, layout, logoData) {
+function printCards(rows, cfg, layout, logoData, customData = {}) {
   const w = window.open('', '_blank');
   if (!w) return false;
   const esc = escapeHtml;
@@ -483,7 +581,21 @@ function printCards(rows, cfg, layout, logoData) {
   const rules = ['top', 'bottom']
     .map(k => ruleStyle(layout.rules[k]) ? `<div style="${styleStr(ruleStyle(layout.rules[k]))}"></div>` : '')
     .join('');
-  const card = row => `<div class="wcard">${band}${rules}${ITEM_ORDER.map(k => itemHtml(k, row)).join('')}</div>`;
+  // العناصر المضافة: نصوص وصور فوق البطاقة (ملاحظة ٩٥)
+  const customHtml = (layout.custom || []).map(c => {
+    if (!c.show) return '';
+    const st = css(c, c.type === 'image' ? 'ci' : 'ct');
+    if (c.type === 'image') {
+      const src = customData[c.id];
+      if (!src) return '';
+      const extra = Object.entries(logoExtra(c))
+        .map(([k, v]) => `;${k.replace(/[A-Z]/g, ch => '-' + ch.toLowerCase())}:${v}`).join('');
+      return `<div class="cd-item" style="${st}${extra}"><img src="${src}" alt="" style="width:100%;height:auto;display:block"></div>`;
+    }
+    return c.text ? `<div class="cd-item" style="${st}">${esc(c.text)}</div>` : '';
+  }).join('');
+
+  const card = row => `<div class="wcard">${band}${rules}${ITEM_ORDER.map(k => itemHtml(k, row)).join('')}${customHtml}</div>`;
 
   const perPage = 10;
   const pages = [];

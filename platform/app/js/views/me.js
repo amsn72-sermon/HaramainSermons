@@ -169,7 +169,13 @@ async function cardSection(me, priv, langs, issued, settings) {
     ? await storage.signedUrl('member-photos', priv.photo_path, 600).catch(() => null)
     : null;
 
-  const build = scale => staticCard(h, { layout, member: me, cfg, roleLabel, langsText, logoSrc, photoUrl, scale });
+  // صور العناصر المضافة إلى التصميم
+  const customUrls = {};
+  await Promise.all((layout.custom || []).filter(c => c.type === 'image' && c.path).map(async c => {
+    try { customUrls[c.id] = await storage.signedUrl('brand', c.path, 600); } catch { /* تُتجاوز */ }
+  }));
+
+  const build = scale => staticCard(h, { layout, member: me, cfg, roleLabel, langsText, logoSrc, photoUrl, customUrls, scale });
 
   const expired = validUntil && new Date(validUntil) < new Date(new Date().toDateString());
   const showBtn = h('button.btn.primary', { type: 'button' }, 'إبراز البطاقة');
@@ -187,8 +193,12 @@ async function cardSection(me, priv, langs, issued, settings) {
     if (logoSrc) { try { logoData = await urlToDataUrl(logoSrc); } catch { /* يبقى الرابط */ } }
     let photoData = null;
     if (photoUrl) { try { photoData = await urlToDataUrl(photoUrl); } catch { /* بلا صورة */ } }
+    const customData = {};
+    await Promise.all(Object.entries(customUrls).map(async ([id, u]) => {
+      try { customData[id] = await urlToDataUrl(u); } catch { /* تُتجاوز */ }
+    }));
     const { printOneCard } = await import('./cards.js');
-    if (!printOneCard({ member: me, photo: photoData, langsText }, cfg, layout, logoData)) {
+    if (!printOneCard({ member: me, photo: photoData, langsText }, cfg, layout, logoData, customData)) {
       toast('اسمح بالنوافذ المنبثقة لإتمام الطباعة.', 'bad');
     }
   });
