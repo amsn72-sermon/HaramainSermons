@@ -1,6 +1,6 @@
 import { auth, configured } from './sb.js';
 import { h, toast } from './ui.js';
-import { state, loadProfile, loadReference, loadPolicyState, loadCircularState, isAdmin, isActive } from './store.js';
+import { state, loadProfile, loadReference, loadPolicyState, loadCircularState, loadMfaState, isAdmin, isActive } from './store.js';
 import { staffShell } from './views/shell.js';
 import { start as idleStart, stop as idleStop } from './idle.js';
 
@@ -13,6 +13,7 @@ const routes = [
   ['/about', () => import('./views/about.js'), false],
   ['/initiative', () => import('./views/about.js').then(m => ({ render: m.initiative })), false],
   ['/policy', () => import('./views/policy.js'), true],
+  ['/mfa', () => import('./views/mfa.js'), true],
   ['/login', () => import('./views/auth.js').then(m => ({ render: m.login })), false],
   ['/register', () => import('./views/auth.js').then(m => ({ render: m.register })), false],
   ['/reset', () => import('./views/auth.js').then(m => ({ render: m.reset })), false],
@@ -21,6 +22,7 @@ const routes = [
   ['/app/tasks/:id', () => import('./views/tasks.js').then(m => ({ render: m.workspace })), true],
   ['/app/new', () => import('./views/new-material.js'), true, true],
   ['/app/staff', () => import('./views/staff.js'), true, true],
+  ['/app/staff/admins', () => import('./views/staff.js').then(m => ({ render: m.admins })), true, true],
   ['/app/team', () => import('./views/staff.js'), true, true],
   ['/app/field', () => import('./views/staff.js').then(m => ({ render: m.field })), true, true],
   ['/app/languages', () => import('./views/languages.js'), true, true],
@@ -106,6 +108,10 @@ async function render() {
         if (seq === renderSeq) root.replaceChildren(await pending());
         return;
       }
+      // التحقق بخطوتين قبل كل شيء: إلزامي للإدارة، ولازم لمن فعّله (ملاحظة ١٠٣)
+      if (path !== '/mfa' && !(await loadMfaState())) {
+        return navigate('/mfa?next=' + encodeURIComponent(path), { replace: true });
+      }
       // لا وصول إلى مساحة العمل قبل التوقيع على سياسة السرية (ملاحظة ٥٧)
       if (path !== '/policy' && !(await loadPolicyState())) return navigate('/policy', { replace: true });
       if (path === '/policy' && state.policySigned) return navigate('/app', { replace: true });
@@ -121,7 +127,7 @@ async function render() {
     const ctx = { params: route.params, query: new URLSearchParams(location.search), navigate };
     const view = await mod.render(ctx);
     if (seq !== renderSeq) return;
-    root.replaceChildren(route.needsAuth && path !== '/policy' ? staffShell(view, path) : view);
+    root.replaceChildren(route.needsAuth && path !== '/policy' && path !== '/mfa' ? staffShell(view, path) : view);
     const main = document.getElementById('main');
     if (main && !path.startsWith('/app/tasks/')) window.scrollTo(0, 0);
   } catch (err) {
@@ -152,7 +158,7 @@ try { const t = localStorage.getItem('hs.theme'); if (t) document.documentElemen
 // تغيّر الجلسة (خروج، انتهاء) يعيد التحقق
 auth.onChange(s => { if (s) idleStart(); else idleStop();
   if (!s) { state.profile = null; state.policySigned = false; state.policyLoaded = false;
-  state.blockingCirculars = 0; state.circularsLoaded = false; if (location.pathname.startsWith('/app')) navigate('/login', { replace: true }); } });
+  state.blockingCirculars = 0; state.circularsLoaded = false; state.mfaLoaded = false; state.mfaOk = true; if (location.pathname.startsWith('/app')) navigate('/login', { replace: true }); } });
 
 // روابط البريد (تأكيد الحساب أو استعادة كلمة المرور)
 const fromEmail = configured ? auth.consumeUrlTokens() : null;

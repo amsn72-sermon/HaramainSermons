@@ -133,6 +133,43 @@ export const auth = {
     const u = await request('/auth/v1/user');
     writeSession({ ...session, user: u });
     return u;
+  },
+
+  // -------------------------------------------------------------------
+  // التحقق بخطوتين: رمز من تطبيق المصادقة (Google أو Microsoft) — ملاحظة ١٠٣
+  // -------------------------------------------------------------------
+  // مستوى التوثيق في رمز الجلسة: aal1 كلمة مرور، aal2 كلمة مرور ورمز
+  get aal() {
+    try {
+      const p = JSON.parse(atob((session?.access_token || '').split('.')[1] || ''));
+      return p.aal || 'aal1';
+    } catch { return 'aal1'; }
+  },
+  mfa: {
+    // عوامل التحقق المسجّلة للمستخدم، والمؤكَّد منها هو المعتمد
+    async factors() {
+      const u = await request('/auth/v1/user');
+      writeSession({ ...session, user: u });
+      return (u?.factors || []).filter(f => f.factor_type === 'totp');
+    },
+    verified(list) { return (list || []).filter(f => f.status === 'verified'); },
+    // تسجيل عامل جديد: يعيد رمز QR ومفتاحًا نصيًّا يُدخل يدويًّا
+    enroll(name = 'تطبيق المصادقة') {
+      return request('/auth/v1/factors', { method: 'POST', body: { factor_type: 'totp', friendly_name: name } });
+    },
+    challenge(factorId) {
+      return request(`/auth/v1/factors/${factorId}/challenge`, { method: 'POST', body: {} });
+    },
+    async verify(factorId, challengeId, code) {
+      const d = await request(`/auth/v1/factors/${factorId}/verify`, {
+        method: 'POST', body: { challenge_id: challengeId, code: String(code).trim() }
+      });
+      if (d?.access_token) writeSession(fromTokenResponse(d));
+      return d;
+    },
+    unenroll(factorId) {
+      return request(`/auth/v1/factors/${factorId}`, { method: 'DELETE' });
+    }
   }
 };
 

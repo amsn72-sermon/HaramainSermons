@@ -11,7 +11,11 @@ export const state = {
   policySigned: false,   // وقّع العضو نسخة سياسة السرية الحالية
   policyLoaded: false,
   blockingCirculars: 0,  // تعاميم ملزمة لم يوقّع عليها (ملاحظة ٨٩)
-  circularsLoaded: false
+  circularsLoaded: false,
+  mfaOk: true,           // التحقق بخطوتين: مستوفًى أو غير لازم (ملاحظة ١٠٣)
+  mfaEnrolled: false,
+  mfaRequired: true,     // إلزامه على حسابات الإدارة — مفتاح بيد مدير المشروع
+  mfaLoaded: false
 };
 
 export const ROLE_LABEL = { manager: 'مدير المشروع', coordinator: 'منسق', translator: 'مترجم' };
@@ -117,4 +121,25 @@ export function isLateNow(track) {
 }
 export function hadLateness(track) {
   return (track.receipt_late_seconds || 0) > 0 || (track.stages || []).some(s => (s.late_seconds || 0) > 0);
+}
+
+// ---------------------------------------------------------------------
+// التحقق بخطوتين: إلزامي على مدير المشروع والمنسقين، ومن فعّله طوعًا لزمه (ملاحظة ١٠٣)
+// ---------------------------------------------------------------------
+export async function loadMfaState(force = false) {
+  if (state.mfaLoaded && !force) return state.mfaOk;
+  let ok = true, enrolled = false;
+  try {
+    const [list, rows] = await Promise.all([
+      auth.mfa.factors(),
+      db.select('platform_settings', { select: 'mfa_required_admins' }).catch(() => [])
+    ]);
+    state.mfaRequired = rows[0] ? rows[0].mfa_required_admins !== false : true;
+    enrolled = list.some(f => f.status === 'verified');
+    ok = enrolled ? auth.aal === 'aal2' : !(isAdmin() && state.mfaRequired);
+  } catch { ok = true; }   // تعذّر الفحص لا يُقفل الباب على العضو
+  state.mfaEnrolled = enrolled;
+  state.mfaOk = ok;
+  state.mfaLoaded = true;
+  return ok;
 }
