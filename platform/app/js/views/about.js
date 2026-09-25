@@ -206,17 +206,19 @@ function codeBtn(key) {
   return btn;
 }
 
-async function view({ key, title, login = false, wide = false }) {
+async function view({ key, title, login = false, wide = false, back = false }) {
   // الصفحة عامة، فالملف الشخصي لا يُحمَّل تلقائيًّا: نحمّله ليظهر زر الرمز للمدير
   if (auth.session && !state.profile) await loadProfile().catch(() => {});
   const printBtn = h('button.btn.sm', { type: 'button', onclick: () => window.print() }, 'طباعة أو حفظ PDF');
   const loginBtn = h('a.btn.sm.primary', { href: '/login' }, 'تسجيل الدخول');
+  // العودة: إلى المنصة لمن دخل، وإلى شاشة الدخول لغيره
+  const backBtn = h('a.btn.sm', { href: auth.session ? '/app' : '/login' }, 'العودة');
   const tools = h('div.row');
 
   const draw = data => {
     tools.replaceChildren(...[
       login && !auth.session ? loginBtn : null,
-      printBtn,
+      back ? backBtn : printBtn,
       auth.session && isManager() ? codeBtn(key) : null
     ].filter(Boolean));
     return page(data);
@@ -237,7 +239,7 @@ async function view({ key, title, login = false, wide = false }) {
 }
 
 // /about — تعريف موجز بالمنصة، مفتوح
-export const render = () => view({ key: 'about', title: 'عن المنصة' });
+export const render = () => view({ key: 'about', title: 'عن المنصة', back: true });
 
 // /initiative — عرض المبادرة كاملًا، رابط مستقل بزر دخول وخط أكبر
 export const initiative = () => view({ key: 'initiative', title: 'عن المبادرة', login: true, wide: true });

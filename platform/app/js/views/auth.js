@@ -2,6 +2,7 @@ import { h, fill, toast, busy, dialog } from '../ui.js';
 import { auth, db, storage } from '../sb.js';
 import { state, loadProfile, STATUS_LABEL } from '../store.js';
 import { PHOTO_RULES, preparePhoto, stashPhoto, dataUrlToBlob } from '../photo.js';
+import { nationalitySelect } from '../nationalities.js';
 import { brand, themeToggle, footer } from './shell.js';
 
 function frame(...children) {
@@ -75,7 +76,7 @@ export async function register(ctx) {
     full_name: h('input', { autocomplete: 'name', required: true }),
     email: h('input', { type: 'email', autocomplete: 'email', required: true, dir: 'ltr' }),
     whatsapp: h('input', { type: 'tel', autocomplete: 'tel', dir: 'ltr', placeholder: '+9665XXXXXXXX' }),
-    nationality: h('input'),
+    nationality: nationalitySelect(h),
     id_type: h('select',
       h('option', { value: 'national' }, 'هوية وطنية أو إقامة'),
       h('option', { value: 'passport' }, 'جواز سفر (لمن خارج المملكة)')),
@@ -87,7 +88,8 @@ export async function register(ctx) {
     // المنسقون يسجّلون بنفس الرابط وأكثرهم لا يترجم (ملاحظة ٦٣)
     applied_as: h('select',
       h('option', { value: 'translator' }, 'مترجم أو مراجع'),
-      h('option', { value: 'coordinator' }, 'منسق أو إداري (لا أترجم)')),
+      h('option', { value: 'coordinator' }, 'منسق أو إداري (لا أترجم)'),
+      h('option', { value: 'field' }, 'مترجم ميداني — الإرشاد المكاني')),
     iqama: h('input', { type: 'file', accept: 'image/*,application/pdf' }),  // صورة الهوية أو الإقامة (ملاحظة ٥١)
     photo: h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp' })   // الصورة الشخصية ٤×٦ (ملاحظة ٨٥)
   };
@@ -121,7 +123,9 @@ export async function register(ctx) {
     const tr = f.applied_as.value === 'translator';
     langsHint.textContent = tr
       ? 'اختر اللغات التي تترجم إليها — لغة واحدة على الأقل.'
-      : 'اختياري للمنسقين والإداريين: اتركها فارغة إن كنت لا تترجم.';
+      : f.applied_as.value === 'field'
+        ? 'اختر اللغات التي ترشد بها الزوّار ميدانيًّا — لغة واحدة على الأقل.'
+        : 'اختياري للمنسقين والإداريين: اتركها فارغة إن كنت لا تترجم.';
   };
   f.applied_as.addEventListener('change', drawLangsBox);
   drawLangsBox();
@@ -166,6 +170,7 @@ export async function register(ctx) {
     }
     if (!photoReady) e.push('أرفق صورة شخصية ٤×٦ بشروط الصور الرسمية');
     if (f.applied_as.value === 'translator' && !chosen.size) e.push('اختر لغة ترجمة واحدة على الأقل');
+    if (f.applied_as.value === 'field' && !chosen.size) e.push('اختر لغة واحدة على الأقل ترشد بها ميدانيًّا');
     if (f.password.value.length < 8) e.push('كلمة المرور ٨ أحرف على الأقل');
     if (f.password.value !== f.confirm.value) e.push('كلمتا المرور غير متطابقتين');
     if (!f.consent.checked) e.push('يلزم الإقرار بصحة المعلومات');

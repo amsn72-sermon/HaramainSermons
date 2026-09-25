@@ -62,17 +62,20 @@ export function staffShell(view, path) {
          link('/app/archive', 'أرشيف الترجمة'),
          link('/app/stats', 'دليل الإنتاج')]),
        group('الفريق', [
-         link('/app/team', 'فريق العمل'),
+         link('/app/staff', 'شؤون الفريق'),
+         link('/app/field', 'الإرشاد المكاني'),
          link('/app/cards', 'بطاقات العمل'),
-         link('/app/bank-accounts', 'الحسابات البنكية'),
          mail]),
        group('الإعدادات', [
          link('/app/languages', 'اللغات'),
          link('/app/khateebs', 'الخطباء'),
          link('/app/workflow', 'إعداد سير العمل')]),
        group('حسابي', [mine, link('/about', 'عن المنصة')])]
-    : [group('عملي', [link('/app/tasks', 'مهامي'), mail]),
-       group('حسابي', [mine, link('/about', 'عن المنصة')])];
+    : p.track === 'field'
+      // الإرشاد المكاني: لا تُسنَد إليه أعمال ترجمة، فلا قائمة مهام (ملاحظة ٩٩)
+      ? [group('حسابي', [mine, mail, link('/about', 'عن المنصة')])]
+      : [group('عملي', [link('/app/tasks', 'مهامي'), mail]),
+         group('حسابي', [mine, link('/about', 'عن المنصة')])];
   // شارة ما لم يُوقَّع عليه بالعلم
   db.rpc('my_pending_circulars').then(n => {
     const count = Number(Array.isArray(n) ? n[0] : n) || 0;

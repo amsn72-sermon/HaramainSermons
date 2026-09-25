@@ -137,9 +137,8 @@ export async function render(ctx) {
 
   for (const el of Object.values(f)) el.addEventListener('change', draw);
 
-  // ---------------- تصدير ----------------
-  const xlsBtn = h('button.btn.sm', { type: 'button' }, 'تصدير Excel');
-  xlsBtn.onclick = () => busy(xlsBtn, async () => {
+  // ---------------- تصدير: Excel وWord وPDF على كليشة الهيئة (ملاحظة ٩٨) ----------------
+  const sheetRows = () => {
     const list = rows.filter(match);
     const out = [['النوع', 'العنوان', 'التاريخ', 'اللغة', 'الكلمات', 'الصفحات', 'الدقائق الصوتية']];
     for (const t of [...TYPE_ORDER, 'مواد أخرى']) {
@@ -152,9 +151,32 @@ export async function render(ctx) {
     }
     const { words, pages, sec } = sums(list);
     out.push(['المجموع', '', '', '', String(words), String(pages), String(minutes(sec))]);
-    downloadBlob(buildXlsx(out, { sheetName: 'دليل الإنتاج', allText: true }),
-      `دليل الإنتاج ${new Date().toISOString().slice(0, 10)}.xlsx`);
-    toast('جرى التصدير.', 'ok');
+    return { out, list, words, pages, sec };
+  };
+  const stamp = () => `دليل الإنتاج ${new Date().toISOString().slice(0, 10)}`;
+  const noteOf = (list, words, pages, sec) =>
+    `${ar(list.length)} عملًا مترجَمًا · ${ar(words)} كلمة · ${ar(pages)} صفحة · ${ar(minutes(sec))} دقيقة صوتية — ${fmtDate(new Date())}`;
+
+  const fmtSel = h('select', { 'aria-label': 'صيغة التصدير' },
+    h('option', { value: 'xlsx' }, 'Excel — جدول بيانات'),
+    h('option', { value: 'docx' }, 'Word على كليشة الهيئة'),
+    h('option', { value: 'pdf' }, 'PDF على كليشة الهيئة'));
+  const xlsBtn = h('button.btn.sm', { type: 'button' }, 'تصدير الدليل');
+  xlsBtn.onclick = () => busy(xlsBtn, async () => {
+    const { out, list, words, pages, sec } = sheetRows();
+    const note = noteOf(list, words, pages, sec);
+    try {
+      if (fmtSel.value === 'xlsx') {
+        downloadBlob(buildXlsx(out, { sheetName: 'دليل الإنتاج', allText: true }), `${stamp()}.xlsx`);
+      } else {
+        // في المستندات تُكتب الأرقام بفواصل الآلاف لتسهل قراءتها
+        const pretty = out.map((r, i) => i === 0 ? r : r.map((v, c) => (c >= 4 && /^[0-9]+$/.test(v) ? ar(v) : v)));
+        const { exportWord, exportPdf } = await import('../teamexport.js');
+        if (fmtSel.value === 'docx') await exportWord(pretty, 'دليل الإنتاج', { note });
+        else if (!exportPdf(pretty, 'دليل الإنتاج', { note })) return toast('اسمح بالنوافذ المنبثقة.', 'bad');
+      }
+      toast('جرى التصدير.', 'ok');
+    } catch (err) { toast(err.message, 'bad'); }
   });
 
   // تحديث مستمر: المجموع يتحدّث كلما أُنجز عمل
@@ -176,7 +198,7 @@ export async function render(ctx) {
 
   return h('div',
     h('div.page-head',
-      h('div.row', { style: { marginInlineStart: 'auto', order: 2 } }, xlsBtn),
+      h('div.row', { style: { marginInlineStart: 'auto', order: 2 } }, fmtSel, xlsBtn),
       h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'دليل الإنتاج'),
         h('p.muted', 'كل عمل مترجَم بعدد كلماته وصفحاته، مرتَّبًا بنوع المادة، والمجموع يتحدّث كلما أُنجز عمل.'))),
     counter,

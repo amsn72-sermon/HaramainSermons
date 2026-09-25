@@ -10,9 +10,11 @@ const DRAFT = 'hs.material-draft';
 const PRIORITY_DAYS = { emergency: 1, urgent: 2, normal: 3 };
 
 export async function render(ctx) {
-  const members = await db.select('profiles', {
-    select: 'id,full_name,role,member_languages(language_code)', status: 'eq.active', order: 'full_name.asc'
+  const everyone = await db.select('profiles', {
+    select: 'id,full_name,role,track,member_languages(language_code)', status: 'eq.active', order: 'full_name.asc'
   });
+  // فريق الإرشاد المكاني لا تُسنَد إليه أعمال ترجمة (ملاحظة ٩٩)
+  const members = everyone.filter(m => m.track !== 'field');
   const langsOf = m => new Set((m.member_languages || []).map(x => x.language_code));
   const activeStages = state.stages.filter(s => s.is_active);
   const slaStages = activeStages.filter(s => !s.outside_sla);

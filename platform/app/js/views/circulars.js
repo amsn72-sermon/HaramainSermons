@@ -22,12 +22,11 @@ function readerCard(c, mine, onDone) {
   if (c.pdf_path) {
     const box = h('div.circular-doc', h('p.muted', 'جارٍ تحميل المرفق…'));
     const who = auth.user?.email || state.profile?.full_name || '';
-    const stamp = new Date().toLocaleString('ar-SA-u-ca-gregory-nu-latn');
     db.rpc('log_circular_view', { p_circular: c.id }).catch(() => {});
     storage.signedUrl('circulars', c.pdf_path, 900)
       .then(url => box.replaceChildren(
         h('p.small.muted', 'المرفق يُعرض داخل المنصة فقط: لا تنزيل ولا طباعة، وعليه علامة مائية تحمل هويتك، وكل فتح يُسجَّل.'),
-        pdfViewer({ url, lines: [`${state.profile?.full_name || ''} — ${who}`, `سري — ${stamp}`],
+        pdfViewer({ url, lines: [who],
           onPage: (page, total) => {
             if (page >= total) { seenAll = true; ackBtn.disabled = false; seenNote.hidden = true; }
           } })))
@@ -106,6 +105,7 @@ export async function render(ctx) {
       audience: h('select',
         h('option', { value: 'all' }, 'كل الفريق'),
         h('option', { value: 'translators' }, 'المترجمون والمراجعون'),
+        h('option', { value: 'field' }, 'فريق الإرشاد المكاني'),
         h('option', { value: 'coordinators' }, 'المنسقون ومدير المشروع'),
         h('option', { value: 'selected' }, 'أعضاء أحددهم')),
       body: h('textarea', { rows: 6, placeholder: 'نص الرسالة — يمكن تركه إذا أرفقت ملف PDF' }),
@@ -118,7 +118,7 @@ export async function render(ctx) {
       if (!f.require_ack.checked) f.blocking.checked = false;
       f.blocking.disabled = !f.require_ack.checked;
     });
-    const members = await db.select('profiles', { select: 'id,full_name,role', status: 'eq.active', order: 'full_name.asc' });
+    const members = await db.select('profiles', { select: 'id,full_name,role,track', status: 'eq.active', order: 'full_name.asc' });
     const picked = new Set();
     const pickBox = h('div.pick-list', members.map(m => {
       const cb = h('input', { type: 'checkbox' });
@@ -199,8 +199,7 @@ export async function render(ctx) {
     h('div.page-head',
       isAdmin() && h('div.row', { style: { marginInlineStart: 'auto', order: 2 } },
         h('button.btn.sm.primary', { type: 'button', onclick: compose }, '＋ رسالة جديدة')),
-      h('div.grow', h('div.eyebrow', 'المراسلات'), h('h1', 'مراسلات الفريق'),
-        h('p.muted', 'تعاميم وتوجيهات وتحذيرات ودعوات. ما يلزمه توقيع بالعلم يبقى معلّمًا حتى توقّع عليه.'))),
+      h('div.grow', h('div.eyebrow', 'المراسلات'), h('h1', 'مراسلات الفريق'))),
     state.blockingCirculars > 0 && h('div.policy-state.unsigned.gate-note',
       `لديك ${state.blockingCirculars} تعميمًا ملزمًا بانتظار توقيعك — لا تتابع مهامك قبل الاطّلاع عليه والتوقيع بالعلم.`),
     list);

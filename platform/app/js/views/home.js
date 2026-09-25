@@ -110,8 +110,10 @@ export async function render(ctx) {
 
   const details = h('div', { style: { marginTop: '16px' } });
   let members = null;
-  const loadMembers = async () => members || (members = await db.select('profiles', {
-    select: 'id,full_name,role,member_languages(language_code)', status: 'eq.active', order: 'full_name.asc' }));
+  // فريق الإرشاد المكاني لا تُسنَد إليه مراحل ترجمة (ملاحظة ٩٩)
+  const loadMembers = async () => members || (members = (await db.select('profiles', {
+    select: 'id,full_name,role,track,member_languages(language_code)', status: 'eq.active', order: 'full_name.asc' }))
+    .filter(m => m.track !== 'field'));
   const reload = () => ctx.navigate(location.pathname + location.search, { replace: true });
 
   // تغيير مسؤول مرحلة لم تكتمل (ومنها المترجم قبل الاستلام أو أثناءه)

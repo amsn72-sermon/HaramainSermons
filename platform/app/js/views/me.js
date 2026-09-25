@@ -5,6 +5,7 @@ import { state, ROLE_LABEL, STATUS_LABEL, langName } from '../store.js';
 import { PHOTO_RULES, preparePhoto, readStashed, clearStashed, dataUrlToBlob, urlToDataUrl } from '../photo.js';
 import { bankSection } from './bank.js';
 import { normalizeLayout, staticCard, HARAMAIN_LOGO, CARD } from '../carddesign.js';
+import { nationalitySelect } from '../nationalities.js';
 
 const ID_LABEL = { national: 'رقم الهوية أو الإقامة', passport: 'رقم جواز السفر' };
 
@@ -26,6 +27,16 @@ export async function render(ctx) {
   const rules = h('details.photo-rules',
     h('summary', 'شروط الصورة الشخصية'),
     h('ul', PHOTO_RULES.map(t => h('li', t))));
+
+  // حالة اعتماد المستندات: تُعتمد من الإدارة أو تُعاد بسبب مكتوب (ملاحظة ٩٨)
+  const docState = (status, note, kind) => {
+    const s = status || 'pending';
+    if (!priv[kind === 'photo' ? 'photo_path' : 'iqama_path']) return null;
+    if (s === 'approved') return h('div.policy-state.signed', h('span.tick', { 'aria-hidden': 'true' }, '✓'), 'معتمَدة من الإدارة');
+    if (s === 'rejected') return h('div.policy-state.unsigned',
+      h('b', 'أُعيدت إليك — ارفع بديلًا'), note ? h('div.small', 'السبب: ', note) : null);
+    return h('div.policy-state.unsigned', 'تحت المراجعة');
+  };
 
   const upload = async blob => {
     const path = `${me.id}/photo-${Date.now()}.jpg`;
@@ -78,6 +89,9 @@ export async function render(ctx) {
       h('div', h('dt', 'رقم العضوية'), h('dd', { dir: 'ltr' }, me.member_no ?? '—')),
       h('div', h('dt', 'البريد الإلكتروني'), h('dd', { dir: 'ltr' }, me.email)),
       h('div', h('dt', 'الصفة'), h('dd', ROLE_LABEL[me.role] || me.role)),
+      h('div', h('dt', 'الفريق'), h('dd', me.track === 'field' ? 'الإرشاد المكاني' : 'الترجمة التخصصية')),
+      priv.iqama_path ? h('div', h('dt', 'صورة الهوية أو الإقامة'),
+        h('dd', docState(priv.iqama_status, priv.iqama_note, 'iqama'))) : null,
       h('div', h('dt', 'حالة الحساب'), h('dd', STATUS_LABEL[me.status] || me.status)),
       h('div', h('dt', 'تاريخ التسجيل'), h('dd', fmtDate(me.created_at))),
       h('div', h('dt', 'اللغات'),
@@ -90,7 +104,7 @@ export async function render(ctx) {
   // ------------------------------------------------------------------
   const f = {
     whatsapp: h('input', { dir: 'ltr', value: priv.whatsapp || '', placeholder: '05xxxxxxxx', maxlength: 24 }),
-    nationality: h('input', { value: priv.nationality || '', maxlength: 60 }),
+    nationality: nationalitySelect(h, priv.nationality),
     residence: h('input', { value: priv.residence || '', maxlength: 120, placeholder: 'المدينة والحي' })
   };
   const err = h('div.form-errors', { hidden: true, role: 'alert' });
@@ -131,6 +145,7 @@ export async function render(ctx) {
       h('div.card.photo-card',
         h('h3', 'الصورة الشخصية'),
         photoBox,
+        docState(priv.photo_status, priv.photo_note, 'photo'),
         h('label.field', 'رفع الصورة أو تغييرها', h('small', 'تُقصّ تلقائيًّا إلى مقاس ٤×٦'), picker),
         rules),
       fixed),

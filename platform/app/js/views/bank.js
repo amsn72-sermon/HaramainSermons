@@ -144,17 +144,22 @@ export async function bankSection(ctx) {
   };
   drawDoc();
 
+  // الحساب تحت المراجعة حتى يطابقه المنسق بخطاب البنك فيعتمده (ملاحظة ٩٨)
   const status = acc
     ? (acc.verified_at
-        ? h('div.policy-state.signed', `موثّق في ${fmtDateTime(acc.verified_at)}`)
-        : h('div.policy-state.unsigned', 'بانتظار التوثيق من إدارة المشروع'))
+        ? h('div.policy-state.signed', h('span.tick', { 'aria-hidden': 'true' }, '✓'), `معتمَد — موثّق في ${fmtDateTime(acc.verified_at)}`)
+        : h('div.policy-state.unsigned', 'تحت المراجعة'))
     : h('p.small.muted', 'لم تُسجّل حسابك البنكي بعد.');
+  const statusNote = acc && !acc.verified_at
+    ? h('p.small.muted', 'بياناتك محفوظة، ويطابقها المنسق بخطاب البنك المرفق ثم يعتمدها. الصرف بعد الاعتماد.')
+    : null;
 
   sync();
   return h('div.stack',
     h('div.card.stack',
       h('div.row.between', h('h3', 'الحساب البنكي'), status),
       h('p.small.muted', 'تُستخدم هذه البيانات لصرف مستحقات الترجمة، ولا يطّلع عليها إلا المنسق ومدير المشروع.'),
+      statusNote,
       err),
     h('div.card.stack',
       h('label.field', 'مكان الحساب', f.scope),
@@ -170,13 +175,15 @@ export async function bankSection(ctx) {
 }
 
 // شاشة الإدارة: حسابات الفريق وتوثيقها
-export async function adminList(ctx) {
-  const [accounts, members] = await Promise.all([
+export async function adminList(ctx, opts = {}) {
+  const [all, members] = await Promise.all([
     db.select('bank_accounts', { select: '*' }),
     db.select('profiles', { select: 'id,full_name,role,email', order: 'full_name.asc' })
   ]);
+  // كل فريق وحساباته على حدة (ملاحظة ٩٩)
+  const accounts = opts.only ? all.filter(a => opts.only.has(a.member_id)) : all;
   const byId = Object.fromEntries(members.map(m => [m.id, m]));
-  const reload = () => ctx.navigate('/app/bank-accounts', { replace: true });
+  const reload = () => ctx.navigate(opts.reloadPath || '/app/bank-accounts', { replace: true });
 
   const rowEl = a => {
     const m = byId[a.member_id] || {};
@@ -186,7 +193,8 @@ export async function adminList(ctx) {
       h('td', { 'data-label': 'الآيبان' }, h('span', { dir: 'ltr' }, a.iban ? ibanPretty(a.iban) : (a.account_number || '—')),
         a.swift && h('span.sub', { dir: 'ltr' }, a.swift)),
       h('td', { 'data-label': 'التوثيق' }, a.verified_at
-        ? h('span.badge.ok', 'موثّق') : h('span.badge.warn', 'غير موثّق')),
+        ? h('span.badge.ok', h('span.tick', { 'aria-hidden': 'true' }, '✓'), 'معتمَد')
+        : h('span.badge.warn', 'تحت المراجعة')),
       h('td', h('div.row',
         a.doc_path && h('button.btn.sm', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
           try { window.open(await storage.signedUrl('bank-docs', a.doc_path, 600), '_blank', 'noopener'); }
@@ -200,11 +208,22 @@ export async function adminList(ctx) {
         }) }, a.verified_at ? 'إلغاء التوثيق' : 'توثيق'))));
   };
 
+  const body = accounts.length ? h('div.table-wrap', h('table.responsive',
+    h('thead', h('tr', ['العضو', 'البنك', 'الآيبان / رقم الحساب', 'التوثيق', ''].map(t => h('th', t)))),
+    h('tbody', accounts.map(rowEl))))
+    : h('p.muted', 'لم يسجّل أحد حسابه البنكي بعد.');
+
+  // جزء داخل شاشة «شؤون الفريق» الموحّدة (ملاحظة ٩٨)
+  if (opts.parts) {
+    return h('div.card.stack',
+      h('div.row.between', h('h3', 'الحسابات البنكية'),
+        h('span.badge', `${accounts.filter(a => !a.verified_at).length} تحت المراجعة`)),
+      h('p.small.muted', 'يسجّل كل عضو حسابه بنفسه، ويعتمده مدير المشروع بعد مطابقته بخطاب البنك المرفق.'),
+      body);
+  }
+
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'الحسابات البنكية'),
       h('p.muted', 'يسجّل كل عضو حسابه بنفسه، ويوثّقه مدير المشروع بعد مطابقته بخطاب البنك.'))),
-    accounts.length ? h('div.table-wrap', h('table.responsive',
-      h('thead', h('tr', ['العضو', 'البنك', 'الآيبان / رقم الحساب', 'التوثيق', ''].map(t => h('th', t)))),
-      h('tbody', accounts.map(rowEl))))
-      : h('p.muted', 'لم يسجّل أحد حسابه البنكي بعد.'));
+    body);
 }

@@ -6,7 +6,7 @@ import { urlToDataUrl } from '../photo.js';
 import {
   CARD, HARAMAIN_LOGO, ITEM_LABEL, ITEM_ORDER, COLORS, PRESETS, PRESET_LAYOUT,
   DEFAULT_LAYOUT, normalizeLayout, clampLayout, photoH, itemText, itemStyle,
-  bandStyle, ruleStyle, scaleStyle, logoExtra, newCustom, customLabel
+  bandStyle, ruleStyle, scaleStyle, logoExtra, newCustom, customLabel, CARD_FONTS, fontStack
 } from '../carddesign.js';
 
 const SCALE = 6;                           // بكسل لكل مليمتر على الشاشة
@@ -15,7 +15,7 @@ const round = v => Math.round(v * 10) / 10;
 
 export async function render(ctx) {
   const [members, priv, langRows, settingsRows, cardRows] = await Promise.all([
-    db.select('profiles', { select: 'id,full_name,role,status,member_no,email', order: 'full_name.asc' }),
+    db.select('profiles', { select: 'id,full_name,role,status,member_no,email,track', order: 'full_name.asc' }),
     db.select('profile_private', { select: 'id,photo_path' }).catch(() => []),
     db.select('member_languages', { select: 'member_id,language_code' }).catch(() => []),
     db.select('card_settings', { select: '*' }).catch(() => []),
@@ -41,7 +41,7 @@ export async function render(ctx) {
   };
 
   const pool = members.filter(m => m.status === 'active');
-  const picked = new Set(pool.filter(m => m.role === 'translator').map(m => m.id));
+  const picked = new Set(pool.filter(m => m.role === 'translator' && m.track !== 'field').map(m => m.id));
 
   const f = {
     title: h('input', { value: saved.title || 'بطاقة عمل', maxlength: 60 }),
@@ -109,6 +109,7 @@ export async function render(ctx) {
     stage.style.height = px(CARD.h);
     stage.style.background = layout.card.bg;
     stage.style.borderColor = layout.card.border;
+    stage.style.fontFamily = fontStack(layout.font);   // نوع الخط العام للبطاقة (ملاحظة ١٠٠)
     const kids = [];
     const bs = scaleStyle(bandStyle(band), SCALE);
     if (bs) kids.push(h('div.cd-band', { style: bs }));
@@ -203,6 +204,17 @@ export async function render(ctx) {
       return b;
     }));
   }
+  // اختيار نوع الخط: للبطاقة كلها، أو لعنصر بعينه مع خيار «كخط البطاقة»
+  function fontSelect(current, set, allowInherit) {
+    // تسمية صريحة: اسم القائمة لا يجرّ معه أسماء الخطوط فيلتبس البحث
+    const sel = h('select', { 'aria-label': allowInherit ? 'خط هذا العنصر' : 'نوع خط البطاقة' },
+      allowInherit ? h('option', { value: '', selected: !current ? true : null }, 'كخط البطاقة') : null,
+      CARD_FONTS.map(([k, label, stack]) =>
+        h('option', { value: k, selected: k === current ? true : null, style: { fontFamily: stack } }, label)));
+    sel.onchange = () => { set(sel.value); drawStage(); };
+    return sel;
+  }
+
   const chip = (label, on, fn) => {
     const b = h('button.btn.sm', { type: 'button', 'aria-pressed': on ? 'true' : 'false' }, label);
     if (on) b.classList.add('primary');
@@ -278,7 +290,8 @@ export async function render(ctx) {
           chip('يمين', it.align === 'right', () => { it.align = 'right'; }),
           chip('وسط', it.align === 'center', () => { it.align = 'center'; }),
           chip('يسار', it.align === 'left', () => { it.align = 'left'; })),
-        h('label.field', 'اللون', colorRow(it.color, v => { it.color = v; })));
+        h('label.field', 'اللون', colorRow(it.color, v => { it.color = v; })),
+        h('label.field', 'خط هذا العنصر', fontSelect(it.font || '', v => { it.font = v; }, true)));
     }
 
     // إضافة عنصر جديد وحذف المضاف
@@ -336,6 +349,8 @@ export async function render(ctx) {
     };
 
     bandBox.replaceChildren(
+      h('label.field', 'نوع خط البطاقة', h('small', 'يسري على كل النصوص ما لم يُخصَّص عنصر بخط آخر'),
+        fontSelect(layout.font || 'haramain', v => { layout.font = v; drawBand(); }, false)),
       h('div.row', toggle),
       h('label.field', 'مكان الشريط', side),
       h('label.field', `${b.side === 'right' ? 'عرض' : 'ارتفاع'} الشريط (${round(b.h)} مم)`,
@@ -417,6 +432,7 @@ export async function render(ctx) {
       cb.onchange = () => { cb.checked ? picked.add(m.id) : picked.delete(m.id); count(); drawStage(); };
       return h('label.check', cb, h('span', m.full_name,
         h('span.small.muted', ` — ${ROLE_LABEL[m.role]}`),
+        m.track === 'field' && h('span.badge', 'إرشاد مكاني'),
         !photoOf[m.id] && h('span.badge.warn', 'بلا صورة'),
         issuedOf[m.id] && h('span.badge.ok', 'بطاقته معتمَدة')));
     }));
@@ -424,7 +440,7 @@ export async function render(ctx) {
   allBox.onchange = () => { picked.clear(); if (allBox.checked) pool.forEach(m => picked.add(m.id)); drawList(); count(); drawStage(); };
   const onlyTranslators = h('button.btn.sm.ghost', { type: 'button' }, 'المترجمون فقط');
   onlyTranslators.onclick = () => {
-    picked.clear(); pool.filter(m => m.role === 'translator').forEach(m => picked.add(m.id));
+    picked.clear(); pool.filter(m => m.role === 'translator' && m.track !== 'field').forEach(m => picked.add(m.id));
     drawList(); count(); drawStage();
   };
 
@@ -613,7 +629,8 @@ function printCards(rows, cfg, layout, logoData, customData = {}) {
            display: grid; grid-template-columns: repeat(2, ${CARD.w}mm); gap: 4mm 6mm;
            justify-content: center; align-content: start; }
   .wcard { position: relative; width: ${CARD.w}mm; height: ${CARD.h}mm; overflow: hidden;
-           background: ${layout.card.bg}; border: .3mm solid ${layout.card.border}; border-radius: 2.5mm; }
+           background: ${layout.card.bg}; border: .3mm solid ${layout.card.border}; border-radius: 2.5mm;
+           font-family: ${fontStack(layout.font)}; }
   .cd-item { position: absolute; }
   .cd-photo { border: .3mm solid #ded5c5; border-radius: 1mm; background: #f6f3ee; overflow: hidden;
               display: flex; align-items: center; justify-content: center; }
