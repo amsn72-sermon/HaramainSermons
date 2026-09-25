@@ -134,6 +134,16 @@ export async function render(ctx) {
     h('label.field', 'مكان الإقامة', f.residence),
     h('div.row', saveBtn));
 
+  // التحقق بخطوتين: حالته ورابط تفعيله (ملاحظة ١٠٣)
+  const mfaCard = h('div.card.stack',
+    h('div.row.between', h('h3', 'التحقق بخطوتين'),
+      state.mfaEnrolled ? h('span.badge.ok', h('span.tick', { 'aria-hidden': 'true' }, '✓'), 'مفعَّل')
+                        : h('span.badge.warn', 'غير مفعَّل')),
+    h('p.small.muted', state.mfaEnrolled
+      ? 'يُطلب منك رمز من تطبيق المصادقة عند كل دخول، فلا يدخل حسابك أحد بكلمة المرور وحدها.'
+      : 'أضف رمزًا من تطبيق المصادقة على جوالك إلى كلمة المرور. وهو إلزامي على حسابات الإدارة.'),
+    h('div.row', h('a.btn', { href: '/mfa' }, state.mfaEnrolled ? 'إدارة التحقق بخطوتين' : 'تفعيل التحقق بخطوتين')));
+
   const card = await cardSection(me, privRows[0] || {}, langRows.map(r => r.language_code),
     cardRows[0] || null, settingsRows[0] || null);
   const bank = await bankSection(ctx);
@@ -150,6 +160,7 @@ export async function render(ctx) {
         rules),
       fixed),
     editable,
+    mfaCard,
     card,
     bank);
 }

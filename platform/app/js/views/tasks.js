@@ -5,11 +5,11 @@ import { state, isManager, isAdmin, TRACK_SELECT, MOSQUE, MOSQUE_ANY, PRIORITY, 
   langName, langDir, stageName } from '../store.js';
 import { statusBadge, trackTimer, progressBar, stageStrip, lateSummary } from './parts.js';
 import { createEditor } from '../editor.js';
-import { setSafeHtml } from '../sanitize.js';
 import { downloadDocx, printTranslation } from '../export.js';
 import { pdfViewer } from '../pdfview.js';
+import { textViewer } from '../textview.js';
 import { openRevision, revisionCard } from './revise.js';
-import { dataCard, letterheadPage, heading, fileName } from '../page.js';
+import { dataCard, heading, fileName } from '../page.js';
 
 const FULL = `${TRACK_SELECT},material:materials(*,khateeb:khateebs(name))`;
 const myStages = t => t.stages.filter(s => s.assignee_id === state.profile.id);
@@ -137,11 +137,9 @@ export async function workspace(ctx) {
         marks: rev?.marks || [] }));
     }).catch(err => sourceEl.replaceChildren(h('p.err', err.message)));
   } else {
-    // الأصل يُعرض كما هو دون أي إضافة (ملاحظة ٢٠)
-    const { page, body } = letterheadPage(setSafeHtml(h('div.src', { dir: 'rtl', lang: 'ar' }), m.source_html || ''));
-    page.classList.add('src-page');
-    body.addEventListener('copy', e => e.preventDefault());
-    sourceEl = page;
+    // الأصل المكتوب نصًّا: على الكليشة صفحةً صفحة كملف PDF، بعلامة مائية (ملاحظة ١٠٢)
+    const who = auth.user?.email || state.profile.full_name || '';
+    sourceEl = textViewer({ html: m.source_html || '', lines: [who], dir: 'rtl', lang: 'ar' });
   }
 
   // ----- الترجمة: صفحة الكليشة بمساحة الكتابة الثابتة -----

@@ -10,8 +10,15 @@ import { nationalitySelect } from '../nationalities.js';
 export const TRACK_LABEL = { translation: 'الترجمة التخصصية', field: 'الإرشاد المكاني' };
 export const trackOf = m => (m.track === 'field' ? 'field' : 'translation');
 
+// ثلاث قوائم مستقلة تحت «الفريق»: الحسابات الإدارية، والمترجمون المتخصصون،
+// والمرشدون المكانيون — لكلٍّ بياناته واعتماداته (ملاحظة ١٠١)
+export const GROUP_LABEL = {
+  admins: 'الحسابات الإدارية', translators: 'المترجمون المتخصصون', field: 'المرشدون المكانيون'
+};
+
 export async function render(ctx, opts = {}) {
-  const track = opts.track === 'field' ? 'field' : 'translation';
+  const group = GROUP_LABEL[opts.group] ? opts.group : (opts.track === 'field' ? 'field' : 'translators');
+  const track = group === 'field' ? 'field' : 'translation';
   const [all, priv, perf, rateSum, signed, bank] = await Promise.all([
     db.select('profiles', { select: '*,member_languages(language_code)', order: 'created_at.desc' }),
     db.select('profile_private', { select: '*' }),
@@ -20,9 +27,21 @@ export async function render(ctx, opts = {}) {
     db.select('policy_acceptances', { select: 'member_id,policy_version,signed_name,accepted_at', policy_key: `eq.${POLICY_KEY}` }).catch(() => []),
     db.select('bank_accounts', { select: '*' }).catch(() => [])
   ]);
-  const members = all.filter(m => trackOf(m) === track);
   const bankOf = Object.fromEntries(bank.map(b => [b.member_id, b]));
   const privOf = Object.fromEntries(priv.map(p => [p.id, p]));
+  // الطلب الجديد يُصنَّف بالصفة التي تقدّم بها، والعضو المفعَّل بدوره وفريقه
+  const belongs = m => {
+    if (m.status === 'pending') {
+      const as = (privOf[m.id] || {}).applied_as;
+      if (group === 'admins') return as === 'coordinator';
+      if (group === 'field') return as === 'field' || trackOf(m) === 'field';
+      return as !== 'coordinator' && as !== 'field' && trackOf(m) !== 'field';
+    }
+    if (group === 'admins') return m.role === 'manager' || m.role === 'coordinator';
+    if (group === 'field') return trackOf(m) === 'field';
+    return m.role === 'translator' && trackOf(m) === 'translation';
+  };
+  const members = all.filter(belongs);
   const perfOf = Object.fromEntries(perf.map(r => [r.member_id, r]));
   const rateOf = Object.fromEntries(rateSum.map(r => [r.member_id, r]));
   const signOf = {};
@@ -172,7 +191,8 @@ export async function render(ctx, opts = {}) {
       email: h('input', { type: 'email', dir: 'ltr', autocomplete: 'off' }),
       password: h('input', { type: 'text', dir: 'ltr', autocomplete: 'off',
         value: 'Haramain-' + Math.random().toString(36).slice(2, 8) }),
-      role: h('select', Object.entries(ROLE_LABEL).map(([k, v]) => h('option', { value: k }, v))),
+      role: h('select', Object.entries(ROLE_LABEL).map(([k, v]) =>
+        h('option', { value: k, selected: k === (group === 'admins' ? 'coordinator' : 'translator') ? true : null }, v))),
       whatsapp: h('input', { dir: 'ltr', placeholder: '+9665XXXXXXXX' }),
       nationality: nationalitySelect(h),
       national_id: h('input', { dir: 'ltr', inputmode: 'numeric', maxlength: 10, placeholder: '1XXXXXXXXX' }),
@@ -381,7 +401,7 @@ export async function render(ctx, opts = {}) {
     });
   }
 
-  const showPerf = track === 'translation';
+  const showPerf = group === 'translators';
   function draw() {
     const list = members.filter(m => m.status !== 'pending')
       .filter(m => !filterLang.value || langsOf(m).includes(filterLang.value))
@@ -433,7 +453,7 @@ export async function render(ctx, opts = {}) {
     h('label.field', 'بحث', q), h('label.field', 'اللغة', filterLang), h('label.field', 'الحالة', filterStatus));
 
   // أجزاء تُركَّب داخل شاشة «شؤون الفريق» الموحّدة (ملاحظة ٩٨)
-  if (opts.parts) return { tools, joins: joinsCard, filters: filtersRow, table, pendingCount: pending.length, members, privOf, bankOf, reload, track };
+  if (opts.parts) return { tools, joins: joinsCard, filters: filtersRow, table, pendingCount: pending.length, members, privOf, bankOf, reload, track, group };
 
   return h('div',
     h('div.page-head', tools,

@@ -1,8 +1,10 @@
 // شؤون الفريق: الانضمام والأعضاء، وتدقيق المستندات، والحسابات البنكية في شاشة واحدة (ملاحظة ٩٨)
-// وللمشروع فريقان مستقلّان تمامًا: الترجمة التخصصية، والإرشاد المكاني (ملاحظة ٩٩)
+// وتحت «الفريق» ثلاث قوائم مستقلة: الإداريون، والمترجمون المتخصصون،
+// والمرشدون المكانيون (ملاحظتا ٩٩ و١٠١)
 import { h, toast, busy, dialog, fmtDateTime } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { render as teamRender, trackOf } from './team.js';
+import { state, isManager } from '../store.js';
+import { render as teamRender } from './team.js';
 import { adminList as bankAdmin } from './bank.js';
 
 export const DOC_LABEL = { photo: 'الصورة الشخصية', iqama: 'صورة الهوية أو الإقامة' };
@@ -13,24 +15,29 @@ export const DOC_STATE = {
 };
 
 const SCREEN = {
-  translation: {
-    path: '/app/staff', eyebrow: 'الإدارة', title: 'شؤون الفريق', tab: 'فريق الترجمة',
-    lead: 'قبول الانضمام، وتدقيق المستندات واعتمادها، والحسابات البنكية، وبيانات أعضاء الترجمة التخصصية وتصديرها — في مكان واحد.'
+  admins: {
+    path: '/app/staff/admins', title: 'الحسابات الإدارية', tab: 'الإداريون',
+    lead: 'مديرو المشروع والمنسقون: قبول الانضمام، وتدقيق المستندات، والحسابات البنكية، والبيانات وتصديرها.'
+  },
+  translators: {
+    path: '/app/staff', title: 'المترجمون المتخصصون', tab: 'المترجمون',
+    lead: 'فريق الترجمة التخصصية: قبول الانضمام، وتدقيق المستندات واعتمادها، والحسابات البنكية، والبيانات وتصديرها.'
   },
   field: {
-    path: '/app/field', eyebrow: 'الإدارة', title: 'الإرشاد المكاني', tab: 'المترجمون الميدانيون',
-    lead: 'فريق المترجمين الميدانيين: تسجيل وتوثيق بيانات ومستندات وحسابات بنكية، بلا إسناد أعمال ترجمة. ومن تميّز منهم يُنقل إلى الترجمة التخصصية.'
+    path: '/app/field', title: 'المرشدون المكانيون', tab: 'المرشدون',
+    lead: 'فريق الإرشاد المكاني: تسجيل وتوثيق بيانات ومستندات وحسابات بنكية، بلا إسناد أعمال ترجمة. ومن تميّز منهم يُنقل إلى الترجمة التخصصية.'
   }
 };
 
+export const admins = ctx => render(ctx, 'admins');
 export const field = ctx => render(ctx, 'field');
 
-export async function render(ctx, track = 'translation') {
-  const scr = SCREEN[track] || SCREEN.translation;
+export async function render(ctx, group = 'translators') {
+  const scr = SCREEN[group] || SCREEN.translators;
   const want = ctx.query?.get('tab') || (location.pathname === '/app/bank-accounts' ? 'bank' : 'team');
 
   const [team, counts] = await Promise.all([
-    teamRender(ctx, { parts: true, track, reloadPath: scr.path + (want === 'team' ? '' : `?tab=${want}`) }),
+    teamRender(ctx, { parts: true, group, reloadPath: scr.path + (want === 'team' ? '' : `?tab=${want}`) }),
     db.rpc('pending_reviews').then(r => (Array.isArray(r) ? r[0] : r) || {}).catch(() => ({}))
   ]);
 
@@ -41,8 +48,8 @@ export async function render(ctx, track = 'translation') {
     ['docs', 'تدقيق المستندات', 0],
     ['bank', 'الحسابات البنكية', 0]
   ];
-  // العدّادات العامة تُعرض على شاشة الترجمة فقط حتى لا تختلط أرقام الفريقين
-  if (track === 'translation') {
+  // العدّادات العامة تُعرض على شاشة المترجمين فقط حتى لا تختلط أرقام القوائم
+  if (group === 'translators') {
     TABS[1][2] = Number(counts.photos || 0) + Number(counts.iqamas || 0);
     TABS[2][2] = Number(counts.banks || 0);
   }
@@ -65,7 +72,8 @@ export async function render(ctx, track = 'translation') {
     history.replaceState(null, '', key === 'team' ? scr.path : `${scr.path}?tab=${key}`);
     panel.replaceChildren(h('p.muted.small', 'جارٍ التحميل…'));
     try {
-      if (key === 'team') panel.replaceChildren(team.joins, team.filters, team.table);
+      if (key === 'team') panel.replaceChildren(...[
+        group === 'admins' ? securityCard(ctx) : null, team.joins, team.filters, team.table].filter(Boolean));
       else if (key === 'docs') panel.replaceChildren(await docsSection(ctx, team, scr));
       else panel.replaceChildren(await bankAdmin(ctx, { parts: true, only: ids, reloadPath: `${scr.path}?tab=bank` }));
     } catch (err) { panel.replaceChildren(h('p.small.bad', err.message)); }
@@ -75,9 +83,31 @@ export async function render(ctx, track = 'translation') {
 
   return h('div',
     h('div.page-head', team.tools,
-      h('div.grow', h('div.eyebrow', scr.eyebrow), h('h1', scr.title), h('p.muted', scr.lead))),
+      h('div.grow', h('div.eyebrow', 'الفريق'), h('h1', scr.title), h('p.muted', scr.lead))),
     h('div.tabs', { role: 'tablist' }, btns),
     panel);
+}
+
+// ---------------------------------------------------------------------
+// حماية حسابات الإدارة: إلزام التحقق بخطوتين — بيد مدير المشروع (ملاحظة ١٠٣)
+// ---------------------------------------------------------------------
+function securityCard(ctx0) {
+  const on = state.mfaRequired !== false;
+  const btn = h('button.btn.sm', { type: 'button' }, on ? 'إلغاء الإلزام' : 'إلزام التحقق');
+  const badge = h('span.badge', { class: on ? 'ok' : 'warn' }, on ? 'إلزامي' : 'اختياري');
+  btn.onclick = () => busy(btn, async () => {
+    if (!isManager()) return toast('تغيير إعدادات الحماية لمدير المشروع وحده.', 'bad');
+    try {
+      await db.rpc('set_mfa_required', { p_required: !on });
+      state.mfaRequired = !on;
+      toast(!on ? 'صار التحقق بخطوتين إلزاميًّا على حسابات الإدارة.' : 'رُفع الإلزام.', 'ok');
+      ctx0 && ctx0.navigate(`${SCREEN.admins.path}`, { replace: true });
+    } catch (err) { toast(err.message, 'bad'); }
+  });
+  return h('div.card.stack',
+    h('div.row.between', h('h3', 'التحقق بخطوتين لحسابات الإدارة'), badge),
+    h('p.small.muted', 'مدير المشروع والمنسقون لا يدخلون بكلمة المرور وحدها، بل برمز من تطبيق المصادقة على أجهزتهم (Google Authenticator أو Microsoft Authenticator). ومن لم يفعّله يُطالَب بتفعيله عند أول دخول.'),
+    isManager() ? h('div.row', btn) : h('p.small.muted', 'تغيير هذا الإعداد بيد مدير المشروع.'));
 }
 
 // ---------------------------------------------------------------------
@@ -181,5 +211,3 @@ async function docsSection(ctx, team, scr) {
     h('p.small.muted', 'تُعتمد الصورة الشخصية وصورة الهوية قبل إصدار بطاقة العمل. وما لا يطابق الشروط يُعاد للعضو بسبب مكتوب.'),
     box);
 }
-
-export { trackOf };

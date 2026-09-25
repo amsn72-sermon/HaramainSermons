@@ -54,6 +54,15 @@ export function staffShell(view, path) {
   const mail = link('/app/circulars', 'المراسلات');
   const mine = link('/app/me', 'بياناتي');
   const group = (title, links) => h('div.nav-group', h('span.nav-head', title), links);
+  // روابط موقع البث العام داخل المنصة: تُفتح في صفحة جديدة (ملاحظة ١٠٤)
+  const cfg = window.HS_CONFIG || {};
+  const pub = cfg.publicHost ? `https://${cfg.publicHost}` : '';
+  const out = (to, text) => h('a.nav-out', { href: pub + to, target: '_blank', rel: 'noopener' },
+    text, h('span.ext', { 'aria-hidden': 'true' }, '↗'));
+  const broadcast = group('موقع البث', [
+    out('/', 'بث الخطب'),
+    out('/?tab=archive', 'أرشيف الخطب والمجالس'),
+    out('/arafah', 'خطب عرفة')]);
   const nav = isAdmin()
     ? [group('سير العمل', [
          link('/app', 'المتابعة'),
@@ -62,19 +71,22 @@ export function staffShell(view, path) {
          link('/app/archive', 'أرشيف الترجمة'),
          link('/app/stats', 'دليل الإنتاج')]),
        group('الفريق', [
-         link('/app/staff', 'شؤون الفريق'),
-         link('/app/field', 'الإرشاد المكاني'),
+         link('/app/staff/admins', 'الحسابات الإدارية'),
+         link('/app/staff', 'المترجمون المتخصصون'),
+         link('/app/field', 'المرشدون المكانيون'),
          link('/app/cards', 'بطاقات العمل'),
          mail]),
        group('الإعدادات', [
          link('/app/languages', 'اللغات'),
          link('/app/khateebs', 'الخطباء'),
          link('/app/workflow', 'إعداد سير العمل')]),
+       broadcast,
        group('حسابي', [mine, link('/about', 'عن المنصة')])]
     : p.track === 'field'
       // الإرشاد المكاني: لا تُسنَد إليه أعمال ترجمة، فلا قائمة مهام (ملاحظة ٩٩)
-      ? [group('حسابي', [mine, mail, link('/about', 'عن المنصة')])]
+      ? [broadcast, group('حسابي', [mine, mail, link('/about', 'عن المنصة')])]
       : [group('عملي', [link('/app/tasks', 'مهامي'), mail]),
+         broadcast,
          group('حسابي', [mine, link('/about', 'عن المنصة')])];
   // شارة ما لم يُوقَّع عليه بالعلم
   db.rpc('my_pending_circulars').then(n => {
