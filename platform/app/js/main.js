@@ -113,10 +113,10 @@ async function render() {
         return navigate('/mfa?next=' + encodeURIComponent(path), { replace: true });
       }
       // لا وصول إلى مساحة العمل قبل التوقيع على سياسة السرية (ملاحظة ٥٧)
-      if (path !== '/policy' && !(await loadPolicyState())) return navigate('/policy', { replace: true });
+      if (path !== '/policy' && path !== '/mfa' && !(await loadPolicyState())) return navigate('/policy', { replace: true });
       if (path === '/policy' && state.policySigned) return navigate('/app', { replace: true });
       // تعميم ملزم لم يُوقَّع: لا متابعة للمهام قبل الاطّلاع والتوقيع (ملاحظة ٨٩)
-      if (path !== '/app/circulars' && path !== '/policy' && await loadCircularState()) {
+      if (path !== '/app/circulars' && path !== '/policy' && path !== '/mfa' && await loadCircularState()) {
         toast('لديك تعميم ملزم بانتظار اطّلاعك وتوقيعك.', 'bad');
         return navigate('/app/circulars', { replace: true });
       }
