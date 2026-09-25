@@ -36,7 +36,7 @@ export const PRESETS = [
 export const PRESET_LAYOUT = {
   // ١) شريط داكن أعلى البطاقة، والصورة إلى اليمين
   classic: () => ({
-    v: 1,
+    v: 1, custom: [],
     card: { bg: '#ffffff', border: '#d8cfbd' },
     band: { show: true, side: 'top', h: 12.5, bg: '#1a232d', line: '#bc9661', lineH: 0.8 },
     rules: {
@@ -58,7 +58,7 @@ export const PRESET_LAYOUT = {
   }),
   // ٢) شريط رأسي على يمين البطاقة يجمع الشعار والصورة
   sidebar: () => ({
-    v: 1,
+    v: 1, custom: [],
     card: { bg: '#ffffff', border: '#d8cfbd' },
     band: { show: true, side: 'right', h: 26, bg: '#1a232d', line: '#bc9661', lineH: 0.8 },
     rules: {
@@ -80,7 +80,7 @@ export const PRESET_LAYOUT = {
   }),
   // ٣) بطاقة فاتحة بخطين ذهبيين بلا شريط داكن
   light: () => ({
-    v: 1,
+    v: 1, custom: [],
     card: { bg: '#fffdf9', border: '#bc9661' },
     band: { show: false, side: 'top', h: 12.5, bg: '#1a232d', line: '#bc9661', lineH: 0.8 },
     rules: {
@@ -104,6 +104,30 @@ export const PRESET_LAYOUT = {
 
 export const DEFAULT_LAYOUT = () => PRESET_LAYOUT.classic();
 
+// عنصر مضاف من المصمِّم: نص أو صورة (والشعار صورة) — (ملاحظة ٩٥)
+export const newCustom = (type, i) => ({
+  id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`,
+  type: type === 'image' ? 'image' : 'text',
+  text: type === 'image' ? '' : `نص ${i}`,
+  path: null,
+  x: 8, y: 20 + (i % 4) * 5, w: type === 'image' ? 16 : 40,
+  size: 8, bold: false, align: 'right', color: '#1c1a17', show: true, badge: false
+});
+
+const normCustom = c => ({
+  id: String(c.id || ''),
+  type: c.type === 'image' ? 'image' : 'text',
+  text: typeof c.text === 'string' ? c.text.slice(0, 300) : '',
+  path: c.path || null,
+  x: Number(c.x) || 0, y: Number(c.y) || 0, w: Number(c.w) || 20,
+  size: Number(c.size) || 8, bold: c.bold === true,
+  align: ['right', 'center', 'left'].includes(c.align) ? c.align : 'right',
+  color: typeof c.color === 'string' ? c.color : '#1c1a17',
+  show: c.show !== false, badge: c.badge === true
+});
+
+export const customLabel = (c, i) => (c.type === 'image' ? `صورة ${i + 1}` : `نص: ${(c.text || '').slice(0, 14) || i + 1}`);
+
 // دمج تصميم محفوظ مع الافتراضي: كل مفتاح ناقص يأخذ قيمته الافتراضية
 export function normalizeLayout(saved) {
   const base = DEFAULT_LAYOUT();
@@ -116,6 +140,7 @@ export function normalizeLayout(saved) {
       top: { ...base.rules.top, ...((saved.rules || {}).top || {}) },
       bottom: { ...base.rules.bottom, ...((saved.rules || {}).bottom || {}) }
     },
+    custom: Array.isArray(saved.custom) ? saved.custom.filter(c => c && c.id).map(normCustom).slice(0, 12) : [],
     items: {}
   };
   for (const key of ITEM_ORDER) out.items[key] = { ...base.items[key], ...((saved.items || {})[key] || {}) };
@@ -129,6 +154,12 @@ const num = (v, min, max, dflt) => {
 
 export function clampLayout(l) {
   const d = DEFAULT_LAYOUT();
+  for (const c of (l.custom || [])) {
+    c.w = num(c.w, 3, CARD.w, 20);
+    c.x = num(c.x, -2, CARD.w - 2, 8);
+    c.y = num(c.y, -2, CARD.h - 2, 20);
+    c.size = num(c.size, 4, 24, 8);
+  }
   l.band.h = num(l.band.h, 0, CARD.w, d.band.h);
   l.band.lineH = num(l.band.lineH, 0, 3, d.band.lineH);
   if (l.band.side !== 'right') l.band.side = 'top';
@@ -226,7 +257,7 @@ export { scaleStyle };
 
 // بطاقة جاهزة للعرض (لا للتحرير): يستعملها المترجم في «بياناتي»
 // h: دالة بناء العناصر تُمرَّر من الشاشة، scale: بكسل لكل مليمتر
-export function staticCard(h, { layout, member, cfg, roleLabel, langsText, logoSrc, photoUrl, scale = 6 }) {
+export function staticCard(h, { layout, member, cfg, roleLabel, langsText, logoSrc, photoUrl, customUrls, scale = 6 }) {
   const px = mm => `${mm * scale}px`;
   const kids = [];
   const bs = scaleStyle(bandStyle(layout.band), scale);
@@ -254,6 +285,21 @@ export function staticCard(h, { layout, member, cfg, roleLabel, langsText, logoS
       if (text) kids.push(h('div.cd-item', { style }, text));
     }
   }
+  for (const c of (layout.custom || [])) {
+    if (!c.show) continue;
+    const st = { ...itemStyle(c, c.type === 'image' ? 'custom-image' : 'custom-text'),
+      left: px(c.x), top: px(c.y), width: px(c.w) };
+    if (c.size) st.fontSize = `${c.size * scale * 25.4 / 72}px`;
+    if (c.type === 'image') {
+      const src = (customUrls || {})[c.id];
+      if (!src) continue;
+      kids.push(h('div.cd-item', { style: { ...st, ...logoExtra(c) } },
+        h('img', { src, alt: '', style: { width: '100%', height: 'auto', display: 'block' } })));
+    } else if (c.text) {
+      kids.push(h('div.cd-item', { style: st }, c.text));
+    }
+  }
+
   return h('div.card-stage.view', { style: {
     width: px(CARD.w), height: px(CARD.h), background: layout.card.bg, borderColor: layout.card.border } }, kids);
 }

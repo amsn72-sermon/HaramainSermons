@@ -10,6 +10,7 @@ const routes = [
   ['/', () => import('./views/public.js'), false],
   ['/arafah', () => import('./views/public.js').then(m => ({ render: m.arafah })), false],
   ['/about', () => import('./views/about.js'), false],
+  ['/initiative', () => import('./views/about.js').then(m => ({ render: m.initiative })), false],
   ['/policy', () => import('./views/policy.js'), true],
   ['/login', () => import('./views/auth.js').then(m => ({ render: m.login })), false],
   ['/register', () => import('./views/auth.js').then(m => ({ render: m.register })), false],
