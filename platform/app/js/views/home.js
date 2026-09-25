@@ -159,9 +159,14 @@ export async function render(ctx) {
   }
 
   draw();
+  // عدّاد الإنتاج في صدر الشاشة — يفتح دليل الإنتاج (ملاحظة ٩٠)
+  const chipBox = h('div');
+  import('./stats.js').then(m => m.counterChip()).then(el => el && chipBox.replaceChildren(el)).catch(() => {});
+
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'متابعة التنفيذ'), h('h1', 'لوحة أعمال الترجمة'),
       h('p.muted', 'من الإسناد إلى قبول المنسق، ثم اعتماد المدير والنشر.')),
+      chipBox,
       h('a.btn.primary', { href: '/app/new' }, '＋ إضافة مادة')),
     h('div.grid', { style: { marginBottom: '16px' } }, h('label.field', 'البحث', filters.q), h('label.field', 'الموقع', filters.mosque),
       h('label.field', 'اللغة', filters.lang), h('label.field', 'الحالة', filters.status)),

@@ -49,16 +49,30 @@ export function policyChip() {
 export function staffShell(view, path) {
   const p = state.profile;
   const link = (href, text) => h('a', { href, 'aria-current': (href === path || (href !== '/app' && path.startsWith(href + '/'))) ? 'page' : null }, text);
-  // ترتيب القائمة كما في النسخة الأولى
+  // القائمة مرتَّبة بمسار العمل: من إدخال المادة إلى أرشفتها، ثم الفريق،
+  // ثم المراسلات، ثم الإعدادات المرجعية، وآخرها حساب العضو نفسه (ملاحظة ٩٢)
   const mail = link('/app/circulars', 'المراسلات');
   const mine = link('/app/me', 'بياناتي');
+  const group = (title, links) => h('div.nav-group', h('span.nav-head', title), links);
   const nav = isAdmin()
-    ? [link('/app', 'المتابعة'), link('/app/new', 'إضافة مادة'), link('/app/team', 'فريق العمل'),
-       link('/app/cards', 'بطاقات العمل'), link('/app/bank-accounts', 'الحسابات البنكية'),
-       link('/app/languages', 'اللغات'), link('/app/archive', 'أرشيف الترجمة'),
-       link('/app/workflow', 'إعداد سير العمل'), link('/app/tasks', 'مهامي'), mail, mine,
-       link('/app/khateebs', 'الخطباء')]
-    : [link('/app/tasks', 'مهامي'), mail, mine];
+    ? [group('سير العمل', [
+         link('/app', 'المتابعة'),
+         link('/app/new', 'إضافة مادة'),
+         link('/app/tasks', 'مهامي'),
+         link('/app/archive', 'أرشيف الترجمة'),
+         link('/app/stats', 'دليل الإنتاج')]),
+       group('الفريق', [
+         link('/app/team', 'فريق العمل'),
+         link('/app/cards', 'بطاقات العمل'),
+         link('/app/bank-accounts', 'الحسابات البنكية'),
+         mail]),
+       group('الإعدادات', [
+         link('/app/languages', 'اللغات'),
+         link('/app/khateebs', 'الخطباء'),
+         link('/app/workflow', 'إعداد سير العمل')]),
+       group('حسابي', [mine])]
+    : [group('عملي', [link('/app/tasks', 'مهامي'), mail]),
+       group('حسابي', [mine])];
   // شارة ما لم يُوقَّع عليه بالعلم
   db.rpc('my_pending_circulars').then(n => {
     const count = Number(Array.isArray(n) ? n[0] : n) || 0;

@@ -6,7 +6,10 @@ import { brand, themeToggle, footer } from './shell.js';
 
 function frame(...children) {
   return h('div',
-    h('header.topbar', h('div.inner', brand(undefined, undefined, '/app'), h('div.spacer'), themeToggle())),
+    h('header.topbar', h('div.inner', brand(undefined, undefined, '/app'), h('div.spacer'),
+      // يطّلع المسؤولون على تعريف المنصة دون تسجيل (ملاحظة ٩١)
+      h('a.btn.sm.ghost', { href: '/about' }, 'عن المنصة'),
+      themeToggle())),
     h('main#main.auth-wrap', children),
     footer());
 }

@@ -92,6 +92,19 @@ export async function list() {
 }
 
 // ---------------------------------------------------------------------
+// مدة ملف صوتي بالثواني من المتصفح نفسه
+function audioSeconds(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const a = new Audio();
+    const done = v => { URL.revokeObjectURL(url); resolve(v); };
+    a.onloadedmetadata = () => done(Number.isFinite(a.duration) ? Math.round(a.duration) : null);
+    a.onerror = () => { URL.revokeObjectURL(url); reject(new Error('تعذّر قراءة مدة التسجيل')); };
+    setTimeout(() => done(null), 8000);
+    a.src = url;
+  });
+}
+
 export async function workspace(ctx) {
   const [t] = await db.select('tracks', { select: FULL, id: `eq.${ctx.params.id}` });
   if (!t) return emptyState('المهمة غير متاحة', 'أُغلقت بعد إتمام دورك فيها، أو لم تعد مسندة إليك. يبقى إنجازك في سجل أعمالك.', h('a.btn', { href: '/app/tasks' }, 'مهامي'));
@@ -213,8 +226,10 @@ export async function workspace(ctx) {
         if (f.size > 200 * 1024 * 1024) return toast('الحد الأقصى ٢٠٠ ميغابايت.', 'bad');
         try {
           const ext = (f.name.split('.').pop() || 'mp3').toLowerCase().replace(/[^a-z0-9]/g, '');
+          // مدة التسجيل تُقاس هنا لتُحسب الدقائق في دليل الإنتاج (ملاحظة ٩٠)
+          const seconds = await audioSeconds(f).catch(() => null);
           const path = await storage.upload('audio', `${t.id}/${crypto.randomUUID()}.${ext}`, f);
-          await db.rpc('set_track_audio', { p_track: t.id, p_path: path });
+          await db.rpc('set_track_audio', { p_track: t.id, p_path: path, p_seconds: seconds });
           t.audio_path = path; await loadTakes(); drawAudio(); blockersBox.hidden = true;
           toast('أُضيف تسجيل جديد، والسابق محفوظ.', 'ok');
         } catch (err) { toast(err.message, 'bad'); }

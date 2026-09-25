@@ -53,6 +53,11 @@ export async function render(ctx) {
     if (playingBtn === btn && !player.paused) { player.pause(); return; }
     if (playingBtn) playingBtn.replaceChildren(icon('play'));
     player.src = storage.publicUrl('audio', t.audio_path);
+    // استكمال مدة التسجيلات القديمة لتُحسب في دليل الإنتاج (ملاحظة ٩٠)
+    player.onloadedmetadata = () => {
+      const sec = Number.isFinite(player.duration) ? Math.round(player.duration) : 0;
+      if (sec > 0) db.rpc('set_audio_duration', { p_track: t.id, p_path: t.audio_path, p_seconds: sec }).catch(() => {});
+    };
     player.play().catch(err => toast(err.message, 'bad'));
     playingBtn = btn; btn.replaceChildren(icon('pause'));
     player.onpause = player.onended = () => { btn.replaceChildren(icon('play')); };
