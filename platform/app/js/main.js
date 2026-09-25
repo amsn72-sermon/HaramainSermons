@@ -22,6 +22,10 @@ const routes = [
   ['/app/khateebs', () => import('./views/khateebs.js'), true, true],
   ['/app/workflow', () => import('./views/workflow.js'), true, true],
   ['/app/archive', () => import('./views/archive.js'), true, true],
+  ['/app/circulars', () => import('./views/circulars.js'), true],
+  ['/app/me', () => import('./views/me.js'), true],
+  ['/app/bank-accounts', () => import('./views/bank.js').then(m => ({ render: m.adminList })), true, true],
+  ['/app/cards', () => import('./views/cards.js'), true, true],
   ['/app/revise/:material', () => import('./views/revise.js'), true, true]
 ];
 

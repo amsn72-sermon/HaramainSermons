@@ -7,6 +7,7 @@ import { ROLE_LABEL, STATUS_LABEL, langName } from './store.js';
 // الحقول المتاحة: [المفتاح، التسمية، كيف تُستخرج]
 export const TEAM_FIELDS = [
   ['full_name',   'الاسم',                m => m.full_name],
+  ['member_no',   'رقم العضوية',          m => m.member_no],
   ['role',        'الدور',                m => ROLE_LABEL[m.role] || m.role],
   ['status',      'الحالة',               m => STATUS_LABEL[m.status] || m.status],
   ['email',       'البريد الإلكتروني',     m => m.email],
@@ -16,26 +17,41 @@ export const TEAM_FIELDS = [
   ['residence',   'مكان الإقامة',         (m, p) => p.residence],
   ['languages',   'اللغات',               m => (m.member_languages || []).map(x => langName(x.language_code)).join('، ')],
   ['policy',      'سياسة السرية',         (m, p, x) => x.signed ? 'موقّعة' : 'لم توقّع'],
+  // الحساب البنكي (ملاحظة ٨٤) — لا يظهر إلا لمن يرى البيانات المالية
+  ['bank_name',   'اسم البنك',            (m, p, x) => x.bank?.bank_name],
+  ['iban',        'الآيبان (IBAN)',        (m, p, x) => groupIban(x.bank?.iban) || x.bank?.account_number],
+  ['swift',       'سويفت (BIC)',          (m, p, x) => x.bank?.swift],
+  ['bank_holder', 'اسم صاحب الحساب',      (m, p, x) => x.bank?.account_holder],
+  ['bank_state',  'توثيق الحساب',         (m, p, x) => !x.bank ? 'لم يُسجَّل' : (x.bank.verified_at ? 'موثّق' : 'غير موثّق')],
   ['created_at',  'تاريخ التسجيل',        m => fmtDate(m.created_at)]
 ];
 
+// الآيبان في أربعات ليسهل نسخه ومراجعته
+const groupIban = v => (v ? String(v).replace(/\s+/g, '').toUpperCase().replace(/(.{4})/g, '$1 ').trim() : '');
+
 export const fieldLabel = key => (TEAM_FIELDS.find(f => f[0] === key) || [, key])[1];
 
-// جدول: أول صف رؤوس الأعمدة
+// جدول: أول صف رؤوس الأعمدة. extra أعمدة فارغة بأسماء يكتبها المستخدم (ملاحظة ٨٠)
 export function teamRows(members, keys, ctx = {}) {
   const chosen = TEAM_FIELDS.filter(f => keys.includes(f[0]));
-  const head = chosen.map(f => f[1]);
-  const body = members.map(m => chosen.map(f => String(f[2](m, ctx.privOf?.[m.id] || {}, { signed: !!ctx.signOf?.[m.id] }) ?? '')));
+  const extra = (ctx.extraColumns || []).map(t => String(t).trim()).filter(Boolean);
+  const head = [...chosen.map(f => f[1]), ...extra];
+  const body = members.map(m => [
+    ...chosen.map(f => String(f[2](m, ctx.privOf?.[m.id] || {},
+      { signed: !!ctx.signOf?.[m.id], bank: ctx.bankOf?.[m.id] || null }) ?? '')),
+    ...extra.map(() => '')
+  ]);
   return [head, ...body];
 }
 
 const STAMP = () => new Date().toISOString().slice(0, 10);
 
-export function exportExcel(rows) {
-  downloadBlob(buildXlsx(rows, { sheetName: 'فريق العمل', allText: true }), `فريق العمل ${STAMP()}.xlsx`);
+export function exportExcel(rows, title = 'فريق العمل') {
+  const name = (title || 'فريق العمل').replace(/[\\/:*?"<>|]/g, ' ').trim().slice(0, 80) || 'فريق العمل';
+  downloadBlob(buildXlsx(rows, { sheetName: name, allText: true }), `${name} ${STAMP()}.xlsx`);
 }
 
-export async function exportWord(rows) {
+export async function exportWord(rows, title = 'فريق الترجمة') {
   const { loadDocx } = await import('./export.js');
   const docx = await loadDocx();
   const { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun, AlignmentType, WidthType, HeadingLevel } = docx;
@@ -56,7 +72,7 @@ export async function exportWord(rows) {
         margin: { top: `${PAGE.top}mm`, bottom: `${PAGE.bottom}mm`, left: `${PAGE.side}mm`, right: `${PAGE.side}mm` } } },
       children: [
         new Paragraph({ alignment: AlignmentType.CENTER, bidirectional: true, heading: HeadingLevel.HEADING_2,
-          children: [new TextRun({ text: 'فريق الترجمة', bold: true, rightToLeft: true })] }),
+          children: [new TextRun({ text: title, bold: true, rightToLeft: true })] }),
         new Paragraph({ alignment: AlignmentType.CENTER, bidirectional: true,
           children: [new TextRun({ text: `عدد الأعضاء: ${rows.length - 1} — ${fmtDate(new Date())}`, rightToLeft: true, size: 18 })] }),
         new Paragraph({ text: '' }),
@@ -64,11 +80,12 @@ export async function exportWord(rows) {
       ]
     }]
   });
-  downloadBlob(await Packer.toBlob(doc), `فريق العمل ${STAMP()}.docx`);
+  const name = (title || 'فريق العمل').replace(/[\\/:*?"<>|]/g, ' ').trim().slice(0, 80) || 'فريق العمل';
+  downloadBlob(await Packer.toBlob(doc), `${name} ${STAMP()}.docx`);
 }
 
 // PDF: نافذة طباعة على كليشة الهيئة — المتصفح يحفظها PDF
-export function exportPdf(rows) {
+export function exportPdf(rows, title = 'فريق الترجمة') {
   const w = window.open('', '_blank');
   if (!w) return false;
   const head = rows[0].map(v => `<th>${escapeHtml(v)}</th>`).join('');
@@ -93,7 +110,7 @@ export function exportPdf(rows) {
   @media print { .sheet { page-break-after: always; } }
 </style></head><body>
 <div class="sheet"><img class="lh" src="${LETTERHEAD}" alt=""><div class="win">
-  <h1>فريق الترجمة</h1>
+  <h1>${escapeHtml(title)}</h1>
   <p class="sub">عدد الأعضاء: ${rows.length - 1} — ${escapeHtml(fmtDate(new Date()))}</p>
   <table><thead><tr><th>م</th>${head}</tr></thead><tbody>${body}</tbody></table>
 </div></div>

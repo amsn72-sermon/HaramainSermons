@@ -148,7 +148,7 @@ export function printTranslation({ material, track, khateeb }, { autoPrint = tru
   const BOX_H = P.h - P.top - P.bottom;      // ارتفاع صندوق الكتابة بالمليمتر
   const BOX_W = P.w - P.side * 2;
   const NUM_H = 8;                          // شريط رقم الصفحة أسفل صندوق الكتابة
-  const SAFE_H = 5;                         // فسحة أمان تمنع قصّ السطر الأخير (ملاحظة ٧١)
+  const SAFE_H = 9;                         // فسحة أمان تمنع قصّ السطر الأخير (ملاحظتا ٧١ و٧٩)
   const WIN_H = BOX_H - NUM_H - SAFE_H;
   w.document.write(`<!doctype html><html lang="${track.language_code}" dir="${dir}" data-theme="light"><head><meta charset="utf-8"><title></title>
 <link rel="stylesheet" href="${location.origin}/css/app.css"><style>
@@ -160,7 +160,7 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 .sheet img.lh { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
 .win { position: absolute; top: ${P.top}mm; inset-inline-start: ${P.side}mm; width: ${BOX_W}mm; height: ${WIN_H}mm; overflow: hidden; }
 .pageno { position: absolute; top: ${P.top + WIN_H}mm; inset-inline-start: ${P.side}mm; width: ${BOX_W}mm; height: ${NUM_H}mm;
-  display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #6b6257; letter-spacing: .5px; }
+  display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #6b6257; letter-spacing: .5px; direction: ltr; }
 .flow { position: absolute; top: 0; inset-inline-start: 0; width: ${BOX_W}mm; }
 .print-body { --pt: 1pt; font-size: 12pt; line-height: 1.8; }
 .print-body .data-card { font-size: 11pt; }
@@ -227,15 +227,17 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 
     const pages = d.getElementById('pages');
     const lhUrl = new URL(LETTERHEAD, location.origin).href;
-    const nfmt = new Intl.NumberFormat('ar-SA-u-nu-arab');
     pages.replaceChildren(...starts.map((start, i) => {
       const img = d.createElement('img'); img.className = 'lh'; img.alt = ''; img.src = lhUrl;
       const clone = flow.cloneNode(true);
       clone.style.top = `${-start}px`;
       const win = d.createElement('div'); win.className = 'win'; win.append(clone);
-      // ترقيم الصفحات أسفل صندوق الكتابة (ملاحظة ٤٩)
+      // ارتفاع النافذة إلى موضع القطع بالضبط، فلا يظهر نصف السطر التالي (ملاحظة ٧٩)
+      const end = i + 1 < starts.length ? starts[i + 1] : Math.min(total, start + boxPx);
+      win.style.height = `${Math.max(0, Math.min(end - start, boxPx))}px`;
+      // ترقيم الصفحات بأرقام لاتينية أسفل صندوق الكتابة (ملاحظتا ٤٩ و٧٩)
       const num = d.createElement('div'); num.className = 'pageno';
-      num.textContent = `${nfmt.format(i + 1)} / ${nfmt.format(starts.length)}`;
+      num.textContent = `${i + 1} / ${starts.length}`;
       const sheet = d.createElement('div'); sheet.className = 'sheet'; sheet.append(img, win, num);
       return sheet;
     }));
