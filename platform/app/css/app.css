@@ -641,10 +641,10 @@ dialog:has(.card-show) { width: min(760px, calc(100vw - 24px)); }
 .counter-num { font-size: 3rem; line-height: 1.1; color: var(--accent-text); letter-spacing: .02em;
   font-variant-numeric: tabular-nums; }
 .counter-sub { font-size: .82rem; color: var(--muted); }
-.counter-side { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+.counter-side { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .counter-cell { border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: var(--surface);
   display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.counter-cell b { font-size: 1.5rem; color: var(--text); }
+.counter-cell b { font-size: 3rem; line-height: 1.1; color: var(--accent-text); font-variant-numeric: tabular-nums; }
 .counter-cell span { font-size: .76rem; color: var(--muted); }
 .prod-table tfoot .total-row td { font-weight: 700; background: rgba(188, 150, 97, .10); border-top: 2px solid var(--gold); }
 .grand-total { border-color: var(--gold); font-size: 1.02rem; }
@@ -754,3 +754,23 @@ dialog:has(.card-show) { width: min(760px, calc(100vw - 24px)); }
   display: inline-flex; align-items: center; justify-content: center; font-size: .78rem; font-weight: 700; }
 .cd-panel .field { display: grid; gap: 6px; font-weight: 600; font-size: .92rem; }
 .field-head { color: var(--muted); font-size: .84rem; }
+
+/* تنبيه خمول الجلسة (ملاحظة ٩٧) */
+dialog.idle-dlg { width: min(460px, calc(100vw - 32px)); }
+dialog.idle-dlg h3 { margin: 0 0 8px; }
+dialog.idle-dlg p { margin: 0 0 14px; line-height: 1.9; }
+dialog.idle-dlg b { color: var(--accent-text); font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------------
+   شؤون الفريق: تبويبات الشاشة الموحّدة وبطاقات تدقيق المستندات (ملاحظة ٩٨)
+------------------------------------------------------------------- */
+.tabs .tab .nav-badge { margin-inline-start: 8px; }
+.staff-panel { margin-top: 4px; }
+.doc-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.doc-card { display: flex; gap: 12px; align-items: flex-start; border: 1px solid var(--border);
+  border-radius: 12px; padding: 12px; background: var(--surface); }
+.doc-card .doc-view { flex: 0 0 auto; }
+.doc-card .doc-view img.photo-4x6 { width: 72px; height: 108px; object-fit: cover; border-radius: 6px; }
+.doc-card .doc-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.doc-card .doc-body .row { margin-top: 4px; }
+@media (max-width: 560px) { .doc-card { flex-direction: column; align-items: stretch; } }
