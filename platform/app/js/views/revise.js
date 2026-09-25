@@ -1,6 +1,6 @@
 // إعادة تنشيط الخطبة للتعديل على أصلها (ملاحظة ٢٨)
 // التعديل يأتي غالبًا من الشيخ على نصه العربي، فيُحدَّد على الأصل لا على الترجمة.
-import { h, toast, busy, dialog, fmtDateTime } from '../ui.js';
+import { h, toast, busy, dialog, confirm, fmtDateTime } from '../ui.js';
 import { db, storage, auth } from '../sb.js';
 import { state, langName, isAdmin, stageName } from '../store.js';
 import { heading } from '../page.js';
@@ -10,11 +10,21 @@ const REV_SELECT = '*,marks:revision_marks(*),by:profiles!material_revisions_cre
 
 export const kindTag = k => h('span.kind-tag', { 'data-kind': k }, MARK_KINDS[k] || k);
 
-// آخر جولة تعديل مفتوحة على الخطبة، بتحديداتها
+// آخر جولة تعديل مفتوحة على الخطبة، بتحديداتها — هذه التي يراها المترجم
 export async function openRevision(materialId) {
   const rows = await db.select('material_revisions', {
     select: REV_SELECT, material_id: `eq.${materialId}`, closed_at: 'is.null',
     order: 'round.desc', limit: '1'
+  }).catch(() => []);
+  const r = rows[0];
+  if (r) r.marks = (r.marks || []).sort((a, b) => a.page - b.page || a.y - b.y);
+  return r || null;
+}
+
+// آخر جولة ولو أُغلقت — للمنسق، ليرى حالتها ويعيد فتحها إن أغلقها مبكرًا
+export async function latestRevision(materialId) {
+  const rows = await db.select('material_revisions', {
+    select: REV_SELECT, material_id: `eq.${materialId}`, order: 'round.desc', limit: '1'
   }).catch(() => []);
   const r = rows[0];
   if (r) r.marks = (r.marks || []).sort((a, b) => a.page - b.page || a.y - b.y);
@@ -108,19 +118,27 @@ export async function render(ctx) {
   const id = ctx.params.material;
   const [material] = await db.select('materials', { select: '*,khateeb:khateebs(name)', id: `eq.${id}`, limit: '1' });
   if (!material) return h('p.err', 'الخطبة غير موجودة.');
-  let rev = await openRevision(id);
+  let rev = await latestRevision(id);
   if (!rev) return h('div.stack',
-    h('p.muted', 'لا توجد جولة تعديل مفتوحة على هذه الخطبة.'),
+    h('p.muted', 'لا توجد جولة تعديل على هذه الخطبة.'),
     h('a.btn', { href: '/app/archive' }, 'رجوع إلى الأرشيف'));
 
   const list = h('div');
+  const headRow = h('div.row');
   const viewerBox = h('div', h('p.muted', 'جارٍ تحميل الأصل…'));
   let viewer = null;
 
   async function refresh() {
-    rev = await openRevision(id);
+    rev = await latestRevision(id);
     viewer && viewer.setMarks(rev.marks || []);
     draw();
+    drawState();
+    headRow.replaceChildren(h('a.btn.sm', { href: '/app/archive' }, 'رجوع'),
+      isAdmin() ? closeBtn() : null,
+      isAdmin() ? h('button.btn.sm.primary', { type: 'button', onclick: () => {
+        toast('التحديدات محفوظة ويراها المترجمون الآن.', 'ok');
+        ctx.navigate('/app/archive');
+      } }, 'إرسال التحديد إلى المترجمين') : null);
   }
   function draw() {
     list.replaceChildren(rev.marks?.length
@@ -131,6 +149,31 @@ export async function render(ctx) {
           await refresh();
         }).catch(err => toast(err.message, 'bad')) }, 'حذف'))))
       : h('p.muted', 'لم تُحدَّد مواضع بعد. اسحب بالمؤشر على الأصل لتحديد موضع التعديل.'));
+  }
+
+  const state_ = h('div');
+  function drawState() {
+    state_.replaceChildren(rev.closed_at
+      ? h('div.policy-state.unsigned',
+          `أُغلقت هذه الجولة في ${fmtDateTime(rev.closed_at)} — لا يراها المترجمون. أعِد فتحها ليروا التحديدات.`)
+      : h('div.policy-state.signed', 'الجولة مفتوحة — يرى المترجمون التحديدات على الأصل.'));
+  }
+  function closeBtn() {
+    if (rev.closed_at) {
+      return h('button.btn.sm', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
+        await db.rpc('reopen_revision', { p_revision: rev.id });
+        toast('أُعيد فتح الجولة.', 'ok');
+        await refresh();
+      }).catch(err => toast(err.message, 'bad')) }, 'إعادة فتح الجولة');
+    }
+    return h('button.btn.sm', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
+      const ok = await confirm('إنهاء جولة التعديل',
+        'بعد الإنهاء لا يرى المترجمون هذه التحديدات. أنهِها بعد تنفيذ التعديل لا قبله.', 'إنهاء الجولة');
+      if (!ok) return;
+      await db.rpc('close_revision', { p_revision: rev.id });
+      toast('أُغلقت جولة التعديل.', 'ok');
+      await refresh();
+    }).catch(err => toast(err.message, 'bad')) }, 'إنهاء الجولة');
   }
 
   async function askKind(rect) {
@@ -159,19 +202,20 @@ export async function render(ctx) {
   } else {
     viewerBox.replaceChildren(h('p.muted', 'هذه الخطبة أصلها نص مكتوب لا ملف PDF — استخدم الملاحظة النصية.'));
   }
-  draw();
+  draw(); drawState();
+  headRow.replaceChildren(h('a.btn.sm', { href: '/app/archive' }, 'رجوع'),
+    isAdmin() ? closeBtn() : null,
+    isAdmin() ? h('button.btn.sm.primary', { type: 'button', onclick: () => {
+      toast('التحديدات محفوظة ويراها المترجمون الآن.', 'ok');
+      ctx.navigate('/app/archive');
+    } }, 'إرسال التحديد إلى المترجمين') : null);
 
   return h('div',
     h('div.page-head',
       h('div.grow', h('div.eyebrow', `تحديد التعديل على الأصل — الجولة ${rev.round}`),
         h('h1', `${heading(material)} (${material.title})`)),
-      h('div.row',
-        h('a.btn.sm', { href: '/app/archive' }, 'رجوع'),
-        isAdmin() ? h('button.btn.sm.primary', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
-          await db.rpc('close_revision', { p_revision: rev.id });
-          toast('أُغلقت جولة التعديل.', 'ok');
-          ctx.navigate('/app/archive');
-        }).catch(err => toast(err.message, 'bad')) }, 'إنهاء التحديد') : null)),
-    h('p.small.muted', 'اسحب بالمؤشر على موضع التعديل في الأصل، ثم اختر نوعه. يرى المترجم هذه التحديدات فوق الأصل نفسه.'),
+      headRow),
+    state_,
+    h('p.small.muted', 'اسحب بالمؤشر على موضع التعديل في الأصل، ثم اختر نوعه. يُحفظ كل تحديد فور اختياره، ويراه المترجم فوق الأصل نفسه ما دامت الجولة مفتوحة.'),
     h('div.workspace', h('div.ws-col', viewerBox), h('div.ws-col', h('h3', 'التعديلات المحدَّدة'), list)));
 }

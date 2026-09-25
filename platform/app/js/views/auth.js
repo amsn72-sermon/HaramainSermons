@@ -1,6 +1,7 @@
 import { h, fill, toast, busy, dialog } from '../ui.js';
 import { auth, db, storage } from '../sb.js';
 import { state, loadProfile, STATUS_LABEL } from '../store.js';
+import { PHOTO_RULES, preparePhoto, stashPhoto, dataUrlToBlob } from '../photo.js';
 import { brand, themeToggle, footer } from './shell.js';
 
 function frame(...children) {
@@ -72,7 +73,10 @@ export async function register(ctx) {
     email: h('input', { type: 'email', autocomplete: 'email', required: true, dir: 'ltr' }),
     whatsapp: h('input', { type: 'tel', autocomplete: 'tel', dir: 'ltr', placeholder: '+9665XXXXXXXX' }),
     nationality: h('input'),
-    national_id: h('input', { inputmode: 'numeric', dir: 'ltr', maxlength: 10, placeholder: '1XXXXXXXXX أو 2XXXXXXXXX' }),
+    id_type: h('select',
+      h('option', { value: 'national' }, 'هوية وطنية أو إقامة'),
+      h('option', { value: 'passport' }, 'جواز سفر (لمن خارج المملكة)')),
+    national_id: h('input', { inputmode: 'numeric', dir: 'ltr', maxlength: 15, placeholder: '1XXXXXXXXX أو 2XXXXXXXXX' }),
     residence: h('input', { placeholder: 'المدينة والحي، أو الدولة لمن يعمل عن بُعد' }),
     password: h('input', { type: 'password', autocomplete: 'new-password', dir: 'ltr', minlength: 8 }),
     confirm: h('input', { type: 'password', autocomplete: 'new-password', dir: 'ltr' }),
@@ -81,7 +85,8 @@ export async function register(ctx) {
     applied_as: h('select',
       h('option', { value: 'translator' }, 'مترجم أو مراجع'),
       h('option', { value: 'coordinator' }, 'منسق أو إداري (لا أترجم)')),
-    iqama: h('input', { type: 'file', accept: 'image/*,application/pdf' })   // صورة الهوية أو الإقامة (ملاحظة ٥١)
+    iqama: h('input', { type: 'file', accept: 'image/*,application/pdf' }),  // صورة الهوية أو الإقامة (ملاحظة ٥١)
+    photo: h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp' })   // الصورة الشخصية ٤×٦ (ملاحظة ٨٥)
   };
   // اختيار اللغات من قائمة منسدلة، والمختارة تظهر رقائق تُحذف بضغطة (ملاحظة ٥٠)
   const chosen = new Set();
@@ -117,6 +122,30 @@ export async function register(ctx) {
   };
   f.applied_as.addEventListener('change', drawLangsBox);
   drawLangsBox();
+
+  // الصورة الشخصية ٤×٦: تُعاين وتُقصّ في المتصفح قبل الإرسال (ملاحظة ٨٥)
+  let photoReady = null;
+  const photoPrev = h('div.photo-box.sm', h('div.photo-empty', h('b', '٤ × ٦'), h('span', 'لم تُرفق بعد')));
+  f.photo.onchange = () => busy(f.photo, async () => {
+    const file = f.photo.files[0];
+    if (!file) { photoReady = null; return; }
+    try {
+      const { dataUrl } = await preparePhoto(file);
+      photoReady = dataUrl;
+      photoPrev.replaceChildren(h('img.photo-4x6', { src: dataUrl, alt: 'معاينة صورتك الشخصية' }));
+    } catch (e) {
+      photoReady = null;
+      photoPrev.replaceChildren(h('div.photo-empty', h('span', e.message)));
+      toast(e.message, 'bad');
+    }
+  });
+  const photoBox = h('fieldset',
+    h('legend', 'الصورة الشخصية'),
+    h('div.photo-pick',
+      photoPrev,
+      h('div.stack',
+        h('label.field', 'إرفاق صورة ٤×٦', h('small', 'تُقصّ تلقائيًّا إلى المقاس المطلوب'), f.photo),
+        h('ul.small.muted.tight', PHOTO_RULES.map(t => h('li', t))))));
   const errs = errorsBox();
   const submit = h('button.btn.primary', { type: 'submit' }, 'إرسال طلب التسجيل');
 
@@ -125,8 +154,14 @@ export async function register(ctx) {
     if (f.full_name.value.trim().length < 3) e.push('اكتب الاسم الكامل');
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.value.trim())) e.push('البريد الإلكتروني غير صحيح');
     if (f.whatsapp.value && !/^\+?[0-9\s-]{8,16}$/.test(f.whatsapp.value.trim())) e.push('رقم واتس آب غير صحيح');
-    const nid = f.national_id.value.trim();
-    if (nid && !/^[12][0-9]{9}$/.test(nid)) e.push('رقم الهوية أو الإقامة: ١٠ أرقام تبدأ بـ١ (هوية) أو ٢ (إقامة)');
+    const nid = f.national_id.value.trim().toUpperCase();
+    if (!nid) e.push('رقم الهوية أو الإقامة أو الجواز بيان أساسي');
+    else if (f.id_type.value === 'passport') {
+      if (!/^[A-Z0-9]{5,15}$/.test(nid)) e.push('رقم الجواز من خمسة إلى خمسة عشر حرفًا ورقمًا');
+    } else if (!/^[12][0-9]{9}$/.test(nid)) {
+      e.push('رقم الهوية أو الإقامة: ١٠ أرقام تبدأ بـ١ (هوية) أو ٢ (إقامة)');
+    }
+    if (!photoReady) e.push('أرفق صورة شخصية ٤×٦ بشروط الصور الرسمية');
     if (f.applied_as.value === 'translator' && !chosen.size) e.push('اختر لغة ترجمة واحدة على الأقل');
     if (f.password.value.length < 8) e.push('كلمة المرور ٨ أحرف على الأقل');
     if (f.password.value !== f.confirm.value) e.push('كلمتا المرور غير متطابقتين');
@@ -143,10 +178,22 @@ export async function register(ctx) {
       try {
         await auth.signUp(f.email.value.trim(), f.password.value, {
           full_name: f.full_name.value.trim(), whatsapp: f.whatsapp.value.trim() || null,
-          nationality: f.nationality.value.trim() || null, national_id: f.national_id.value.trim() || null,
+          nationality: f.nationality.value.trim() || null,
+          national_id: f.national_id.value.trim().toUpperCase() || null,
+          id_type: f.id_type.value,
           residence: f.residence.value.trim() || null, languages: [...chosen],
           applied_as: f.applied_as.value
         });
+        // الصورة الشخصية: تُرفع فور وجود جلسة، وإلا تُحفظ في المتصفح وتُرفع عند أول دخول
+        if (photoReady) {
+          if (auth.session?.user?.id) {
+            try {
+              const path = `${auth.session.user.id}/photo-${Date.now()}.jpg`;
+              await storage.upload('member-photos', path, dataUrlToBlob(photoReady));
+              await db.rpc('set_member_photo', { p_path: path });
+            } catch { stashPhoto(f.email.value.trim(), photoReady); }
+          } else stashPhoto(f.email.value.trim(), photoReady);
+        }
         // صورة الهوية: تُرفع فورًا إن فُتحت الجلسة، وإلا فعند أول دخول
         let note = '';
         const file = f.iqama.files[0];
@@ -173,18 +220,22 @@ export async function register(ctx) {
     errs,
     h('label.field', 'أتقدّم بصفة', f.applied_as),
     h('div.grid-2',
-      h('label.field', 'الاسم الكامل', f.full_name),
+      h('label.field', 'الاسم الكامل', h('small', 'كما في الهوية — بيان أساسي لا يُعدَّل لاحقًا إلا من المنسق'), f.full_name),
       h('label.field', 'البريد الإلكتروني', h('small', 'تدخل به إلى المنصة'), f.email),
       h('label.field', 'رقم واتس آب', f.whatsapp),
       h('label.field', 'الجنسية', f.nationality),
-      h('label.field', 'رقم الهوية أو الإقامة', h('small', 'اختياري لمن يعمل من خارج المملكة'), f.national_id),
+      h('label.field', 'نوع الهوية', f.id_type),
+      h('label.field', 'رقم الهوية أو الإقامة', h('small', 'بيان أساسي لا يُعدَّل لاحقًا إلا من المنسق'), f.national_id),
       h('label.field', 'مكان الإقامة', f.residence)),
     langsBox,
     h('div.grid-2',
       h('label.field', 'كلمة المرور', h('small', '٨ أحرف على الأقل'), f.password),
       h('label.field', 'تأكيد كلمة المرور', f.confirm)),
+    photoBox,
     h('label.field', 'صورة الهوية أو الإقامة', h('small', 'اختياري — صورة أو ملف PDF، ولا يطّلع عليها إلا المنسق ومدير المشروع'), f.iqama),
-    h('label.check.top', f.consent, 'أقرّ بأن المعلومات التي أدخلتها صحيحة، وأن بياناتي تُستخدم لإدارة أعمال الترجمة في المشروع فقط، ولا يطّلع على الهوية والإقامة إلا المنسق ومدير المشروع.'),
+    // الإقرار بصحة المعلومات وحده، وإشعار الخصوصية بيان لا شرط (ملاحظة ٧٥)
+    h('label.check.top', f.consent, 'أقرّ بأن جميع المعلومات التي أدخلتها صحيحة، وأتحمّل مسؤولية صحتها.'),
+    h('p.small.muted', 'تُستخدم بياناتك لإدارة أعمال الترجمة في المشروع فقط، ولا يطّلع على الهوية والإقامة إلا المنسق ومدير المشروع.'),
     submit,
     h('a', { href: '/login' }, 'لديك حساب؟ الدخول'));
   return frame(h('div.card.auth-card.wide', form));

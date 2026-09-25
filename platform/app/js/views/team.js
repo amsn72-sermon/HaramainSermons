@@ -6,13 +6,15 @@ import { POLICY_KEY, POLICY_VERSION } from '../policy.js';
 import { TEAM_FIELDS, teamRows, exportExcel, exportWord, exportPdf } from '../teamexport.js';
 
 export async function render(ctx) {
-  const [members, priv, perf, rateSum, signed] = await Promise.all([
+  const [members, priv, perf, rateSum, signed, bank] = await Promise.all([
     db.select('profiles', { select: '*,member_languages(language_code)', order: 'created_at.desc' }),
     db.select('profile_private', { select: '*' }),
     db.select('member_performance', { select: '*' }).catch(() => []),
     db.select('member_rating_summary', { select: '*' }).catch(() => []),
-    db.select('policy_acceptances', { select: 'member_id,policy_version,signed_name,accepted_at', policy_key: `eq.${POLICY_KEY}` }).catch(() => [])
+    db.select('policy_acceptances', { select: 'member_id,policy_version,signed_name,accepted_at', policy_key: `eq.${POLICY_KEY}` }).catch(() => []),
+    db.select('bank_accounts', { select: '*' }).catch(() => [])
   ]);
+  const bankOf = Object.fromEntries(bank.map(b => [b.member_id, b]));
   const privOf = Object.fromEntries(priv.map(p => [p.id, p]));
   const perfOf = Object.fromEntries(perf.map(r => [r.member_id, r]));
   const rateOf = Object.fromEntries(rateSum.map(r => [r.member_id, r]));
@@ -68,9 +70,13 @@ export async function render(ctx) {
       full_name: h('input', { value: m.full_name || '' }),
       whatsapp: h('input', { dir: 'ltr', value: p.whatsapp || '', placeholder: '+9665XXXXXXXX' }),
       nationality: h('input', { value: p.nationality || '' }),
-      national_id: h('input', { dir: 'ltr', inputmode: 'numeric', maxlength: 10, value: p.national_id || '', placeholder: '1XXXXXXXXX' }),
+      national_id: h('input', { dir: 'ltr', maxlength: 15, value: p.national_id || '', placeholder: '1XXXXXXXXX' }),
+      id_type: h('select',
+        h('option', { value: 'national' }, 'هوية وطنية أو إقامة'),
+        h('option', { value: 'passport' }, 'جواز سفر')),
       residence: h('input', { value: p.residence || '' })
     };
+    fld.id_type.value = p.id_type || 'national';
 
     const iqama = h('div.stack', { style: { gap: '8px' } });
     const drawIqama = () => {
@@ -105,20 +111,25 @@ export async function render(ctx) {
           h('label.field', 'الاسم الكامل', fld.full_name),
           h('label.field', 'رقم واتس آب', fld.whatsapp),
           h('label.field', 'الجنسية', fld.nationality),
-          h('label.field', 'رقم الهوية أو الإقامة', fld.national_id),
+          h('label.field', 'نوع الهوية', fld.id_type),
+          h('label.field', 'رقم الهوية أو الإقامة أو الجواز', fld.national_id),
           h('label.field', 'مكان الإقامة', fld.residence)),
         iqama,
         h('label.field', 'الدور', role, !isManager() && h('small', 'تغيير الأدوار الإدارية بيد مدير المشروع')),
         h('fieldset', h('legend', 'اللغات المؤهل فيها'), h('div.stack', { style: { gap: '10px' } }, langSelect, langChips))),
       buttons: [
         { label: 'حفظ', kind: 'primary', validate: () => {
-          const nid = fld.national_id.value.trim();
-          if (nid && !/^[12][0-9]{9}$/.test(nid)) { toast('رقم الهوية أو الإقامة: ١٠ أرقام تبدأ بـ١ أو ٢.', 'bad'); return false; }
+          const nid = fld.national_id.value.trim().toUpperCase();
+          if (nid && fld.id_type.value === 'passport' && !/^[A-Z0-9]{5,15}$/.test(nid)) {
+            toast('رقم الجواز من خمسة إلى خمسة عشر حرفًا ورقمًا.', 'bad'); return false; }
+          if (nid && fld.id_type.value === 'national' && !/^[12][0-9]{9}$/.test(nid)) {
+            toast('رقم الهوية أو الإقامة: ١٠ أرقام تبدأ بـ١ أو ٢.', 'bad'); return false; }
           if (fld.full_name.value.trim().length < 3) { toast('اكتب الاسم الكامل.', 'bad'); return false; }
           return true;
         }, value: () => ({ role: role.value, languages: [...chosen],
           contact: { full_name: fld.full_name.value.trim(), whatsapp: fld.whatsapp.value.trim(),
-            nationality: fld.nationality.value.trim(), national_id: fld.national_id.value.trim(), residence: fld.residence.value.trim() } }) },
+            nationality: fld.nationality.value.trim(), national_id: fld.national_id.value.trim().toUpperCase(),
+            id_type: fld.id_type.value, residence: fld.residence.value.trim() } }) },
         { label: 'إلغاء', value: null }
       ]
     });
@@ -127,7 +138,8 @@ export async function render(ctx) {
       await db.rpc('admin_update_member', { p_member: m.id, p_status: null, p_role: result.role === m.role ? null : result.role, p_languages: result.languages });
       await db.rpc('admin_update_contact', { p_member: m.id, p_full_name: result.contact.full_name || null,
         p_whatsapp: result.contact.whatsapp || null, p_nationality: result.contact.nationality || null,
-        p_national_id: result.contact.national_id || null, p_residence: result.contact.residence || null });
+        p_national_id: result.contact.national_id || null, p_residence: result.contact.residence || null,
+        p_id_type: result.contact.id_type || null });
       toast('حُفظت بيانات العضو.', 'ok'); reload();
     } catch (err) { toast(err.message, 'bad'); }
   }
@@ -181,8 +193,11 @@ export async function render(ctx) {
           if (fld.full_name.value.trim().length < 3) { toast('اكتب الاسم الكامل.', 'bad'); return false; }
           if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fld.email.value.trim())) { toast('البريد الإلكتروني غير صحيح.', 'bad'); return false; }
           if (fld.password.value.length < 8) { toast('كلمة المرور ٨ أحرف على الأقل.', 'bad'); return false; }
-          const nid = fld.national_id.value.trim();
-          if (nid && !/^[12][0-9]{9}$/.test(nid)) { toast('رقم الهوية أو الإقامة: ١٠ أرقام تبدأ بـ١ أو ٢.', 'bad'); return false; }
+          const nid = fld.national_id.value.trim().toUpperCase();
+          if (nid && fld.id_type.value === 'passport' && !/^[A-Z0-9]{5,15}$/.test(nid)) {
+            toast('رقم الجواز من خمسة إلى خمسة عشر حرفًا ورقمًا.', 'bad'); return false; }
+          if (nid && fld.id_type.value === 'national' && !/^[12][0-9]{9}$/.test(nid)) {
+            toast('رقم الهوية أو الإقامة: ١٠ أرقام تبدأ بـ١ أو ٢.', 'bad'); return false; }
           if (fld.role.value === 'translator' && !chosen.size) { toast('اختر لغة واحدة على الأقل للمترجم.', 'bad'); return false; }
           return true;
         }, value: () => ({ ...Object.fromEntries(Object.entries(fld).map(([k, el]) => [k, el.value.trim()])), languages: [...chosen] }) },
@@ -230,6 +245,10 @@ export async function render(ctx) {
     const count = () => { counter.textContent = `المحدد: ${picked.size} عضوًا و${fields.size} حقلًا`; };
     drawMembers(); count();
 
+    // عنوان الكشف وأعمدة إضافية فارغة بأسماء يختارها المستخدم (ملاحظة ٨٠)
+    const title = h('input', { value: 'فريق الترجمة', maxlength: 80 });
+    const extra = [h('input', { placeholder: 'مثال: التوقيع' }), h('input', { placeholder: 'مثال: التاريخ' }),
+      h('input', { placeholder: 'مثال: ملاحظات' })];
     const fmt = h('select', { 'aria-label': 'صيغة الملف' },
       h('option', { value: 'xlsx' }, 'Excel — جدول بيانات'),
       h('option', { value: 'docx' }, 'Word — مستند'),
@@ -238,7 +257,13 @@ export async function render(ctx) {
     const res = await dialog({
       title: 'تصدير بيانات فريق العمل',
       body: h('div.stack',
-        h('div.row', h('label.field', { style: { flex: 1 } }, 'الصيغة', fmt), counter),
+        h('div.grid-2',
+          h('label.field', 'عنوان الكشف', title),
+          h('label.field', 'الصيغة', fmt)),
+        h('fieldset', h('legend', 'أعمدة إضافية فارغة (اختياري)'),
+          h('p.small.muted', 'اكتب اسم العمود ليظهر في الكشف فارغًا للتعبئة باليد — مثل كشف حضور أو استلام.'),
+          h('div.grid-2', extra.map((el, i) => h('label.field', `العمود ${i + 1}`, el)))),
+        h('div.row', counter),
         h('div.grid-2',
           h('fieldset', h('legend', 'الأعضاء'), h('label.check', allBox, h('b', 'تحديد الكل')), memberBox),
           h('fieldset', h('legend', 'البيانات المطلوبة'), fieldBox))),
@@ -247,17 +272,18 @@ export async function render(ctx) {
           if (!picked.size) { toast('اختر عضوًا واحدًا على الأقل.', 'bad'); return false; }
           if (!fields.size) { toast('اختر حقلًا واحدًا على الأقل.', 'bad'); return false; }
           return true;
-        }, value: () => fmt.value },
+        }, value: () => ({ fmt: fmt.value, title: title.value.trim() || 'فريق الترجمة',
+          extraColumns: extra.map(el => el.value.trim()).filter(Boolean) }) },
         { label: 'إلغاء', value: null }
       ]
     });
     if (!res) return;
     const keys = TEAM_FIELDS.map(f => f[0]).filter(k => fields.has(k));
-    const rows = teamRows(pool.filter(m => picked.has(m.id)), keys, { privOf, signOf });
+    const rows = teamRows(pool.filter(m => picked.has(m.id)), keys, { privOf, signOf, bankOf, extraColumns: res.extraColumns });
     try {
-      if (res === 'xlsx') exportExcel(rows);
-      else if (res === 'docx') await exportWord(rows);
-      else if (!exportPdf(rows)) return toast('اسمح بالنوافذ المنبثقة.', 'bad');
+      if (res.fmt === 'xlsx') exportExcel(rows, res.title);
+      else if (res.fmt === 'docx') await exportWord(rows, res.title);
+      else if (!exportPdf(rows, res.title)) return toast('اسمح بالنوافذ المنبثقة.', 'bad');
       toast('جرى التصدير.', 'ok');
     } catch (err) { toast(err.message, 'bad'); }
   }

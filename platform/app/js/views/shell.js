@@ -1,5 +1,5 @@
 import { h } from '../ui.js';
-import { auth } from '../sb.js';
+import { auth, db } from '../sb.js';
 import { state, isAdmin, isManager, ROLE_LABEL } from '../store.js';
 
 export function themeToggle() {
@@ -50,10 +50,20 @@ export function staffShell(view, path) {
   const p = state.profile;
   const link = (href, text) => h('a', { href, 'aria-current': (href === path || (href !== '/app' && path.startsWith(href + '/'))) ? 'page' : null }, text);
   // ترتيب القائمة كما في النسخة الأولى
+  const mail = link('/app/circulars', 'المراسلات');
+  const mine = link('/app/me', 'بياناتي');
   const nav = isAdmin()
-    ? [link('/app', 'المتابعة'), link('/app/new', 'إضافة مادة'), link('/app/team', 'فريق العمل'), link('/app/languages', 'اللغات'),
-       link('/app/archive', 'أرشيف الترجمة'), link('/app/workflow', 'إعداد سير العمل'), link('/app/tasks', 'مهامي'), link('/app/khateebs', 'الخطباء')]
-    : [link('/app/tasks', 'مهامي')];
+    ? [link('/app', 'المتابعة'), link('/app/new', 'إضافة مادة'), link('/app/team', 'فريق العمل'),
+       link('/app/cards', 'بطاقات العمل'), link('/app/bank-accounts', 'الحسابات البنكية'),
+       link('/app/languages', 'اللغات'), link('/app/archive', 'أرشيف الترجمة'),
+       link('/app/workflow', 'إعداد سير العمل'), link('/app/tasks', 'مهامي'), mail, mine,
+       link('/app/khateebs', 'الخطباء')]
+    : [link('/app/tasks', 'مهامي'), mail, mine];
+  // شارة ما لم يُوقَّع عليه بالعلم
+  db.rpc('my_pending_circulars').then(n => {
+    const count = Number(Array.isArray(n) ? n[0] : n) || 0;
+    if (count > 0) mail.append(h('span.nav-badge', String(count)));
+  }).catch(() => {});
 
   return h('div',
     h('header.topbar', h('div.inner',

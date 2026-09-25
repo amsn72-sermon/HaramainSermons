@@ -20,7 +20,8 @@ const ICONS = {
   log: '<path d="M4 6h16M4 12h16M4 18h10"/>',
   redo: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
   trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
-  undo: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>'
+  undo: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
+  marks: '<path d="M4 4h16v16H4z"/><path d="M7 9h10M7 13h6"/><path d="M15 17l2 2 4-4"/>'
 };
 function icon(name) {
   const s = h('span.ico', { 'aria-hidden': 'true' });
@@ -116,6 +117,10 @@ export async function render(ctx) {
           t.audio_path ? iconBtn('play', 'تشغيل التسجيل', e => play(e.currentTarget, t)) : h('span.icon-btn.off', { title: 'لا تسجيل' }, icon('audio')),
           t.audio_path ? iconBtn('dl', 'تنزيل التسجيل', e => busy(e.currentTarget, () => downloadAudio(t, name).catch(err => toast(err.message, 'bad'))))
             : h('span.icon-btn.off', { 'aria-hidden': 'true' }, icon('dl')),
+          t.material.source_pdf_path
+            ? h('a.icon-btn', { href: `/app/revise/${t.material.id}`, title: 'التحديدات على الأصل',
+                'aria-label': 'التحديدات على الأصل' }, icon('marks'))
+            : null,
           iconBtn('redo', 'إعادة تنشيط الخطبة للتعديل على أصلها', e => busy(e.currentTarget,
             () => reopenDialog(t.material, mode => { if (mode === 'annotate') ctx.navigate(`/app/revise/${t.material.id}`); else ctx.navigate('/app/archive', { replace: true }); }))
             .catch(err => toast(err.message, 'bad'))),
