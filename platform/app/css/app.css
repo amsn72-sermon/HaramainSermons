@@ -774,3 +774,31 @@ dialog.idle-dlg b { color: var(--accent-text); font-variant-numeric: tabular-num
 .doc-card .doc-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
 .doc-card .doc-body .row { margin-top: 4px; }
 @media (max-width: 560px) { .doc-card { flex-direction: column; align-items: stretch; } }
+
+/* ------------------------------------------------------------------
+   الأصل المكتوب نصًّا يُعرض على الكليشة صفحةً صفحة كملف PDF (ملاحظة ١٠٢)
+------------------------------------------------------------------- */
+.text-viewer .tv-page { background: #fff; }
+.text-viewer .tv-body { overflow: hidden; }
+.text-viewer .tv-flow { will-change: transform; }
+.text-viewer .tv-flow .src { font-family: var(--font); }
+.text-viewer .tv-wm { position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+  display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: 6% 8%;
+  transform: rotate(-24deg); }
+.text-viewer .tv-wm span { color: #b3261e; opacity: .12; font-weight: 600; white-space: nowrap;
+  font-size: calc(100cqw / 30); }
+
+/* ------------------------------------------------------------------
+   التحقق بخطوتين: رمز التسجيل وخطواته (ملاحظة ١٠٣)
+------------------------------------------------------------------- */
+.mfa-steps { margin: 0; padding-inline-start: 1.2em; line-height: 1.9; }
+.mfa-qr { display: flex; justify-content: center; padding: 14px; background: #fff; border-radius: 12px; }
+.mfa-qr svg, .mfa-qr img { width: 210px; height: 210px; display: block; }
+.mfa-secret code { display: inline-block; margin-top: 4px; padding: 6px 10px; border-radius: 8px;
+  background: var(--surface-2, rgb(255 255 255 / 6%)); letter-spacing: 2px; word-break: break-all; }
+.mfa-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* رابط خارجي في القائمة الجانبية: موقع البث العام (ملاحظة ١٠٤) */
+.sidenav .nav-out { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sidenav .nav-out .ext { opacity: .55; font-size: .85em; }
+.sidenav .nav-out:hover .ext { opacity: 1; }
