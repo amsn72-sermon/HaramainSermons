@@ -20,6 +20,18 @@ export const ITEM_LABEL = {
 export const ITEM_ORDER = ['logo', 'title', 'subtitle', 'photo', 'name', 'role', 'langs', 'member_no', 'official', 'valid'];
 export const TEXT_ITEMS = ITEM_ORDER.filter(k => k !== 'logo' && k !== 'photo');
 
+// خطوط البطاقة: خط المنصة المرفق، وخطوط النظام الشائعة في الطباعة (ملاحظة ١٠٠)
+export const CARD_FONTS = [
+  ['haramain', 'خط المنصة',  "'Haramain Arabic', 'HS', 'Segoe UI', Tahoma, sans-serif"],
+  ['naskh',    'نسخ',        "'Noto Naskh Arabic', 'Traditional Arabic', 'Amiri', serif"],
+  ['kufi',     'كوفي',       "'Noto Kufi Arabic', 'Segoe UI', Tahoma, sans-serif"],
+  ['tahoma',   'تاهوما',     "Tahoma, 'Segoe UI', Arial, sans-serif"],
+  ['arial',    'أريال',      "Arial, Helvetica, sans-serif"],
+  ['times',    'تايمز',      "'Times New Roman', 'Traditional Arabic', serif"]
+];
+export const FONT_KEYS = CARD_FONTS.map(f => f[0]);
+export const fontStack = key => (CARD_FONTS.find(f => f[0] === key) || CARD_FONTS[0])[2];
+
 export const COLORS = [
   ['#ffffff', 'أبيض'], ['#1c1a17', 'أسود'], ['#1a232d', 'كحلي'],
   ['#8a6f3c', 'ذهبي داكن'], ['#bc9661', 'ذهبي'], ['#d5bd87', 'ذهبي فاتح'],
@@ -123,6 +135,7 @@ const normCustom = c => ({
   size: Number(c.size) || 8, bold: c.bold === true,
   align: ['right', 'center', 'left'].includes(c.align) ? c.align : 'right',
   color: typeof c.color === 'string' ? c.color : '#1c1a17',
+  font: FONT_KEYS.includes(c.font) ? c.font : '',
   show: c.show !== false, badge: c.badge === true
 });
 
@@ -134,6 +147,7 @@ export function normalizeLayout(saved) {
   if (!saved || typeof saved !== 'object') return base;
   const out = {
     v: 1,
+    font: FONT_KEYS.includes(saved.font) ? saved.font : 'haramain',
     card: { ...base.card, ...(saved.card || {}) },
     band: { ...base.band, ...(saved.band || {}) },
     rules: {
@@ -218,6 +232,7 @@ export function itemStyle(it, key) {
     s.textAlign = it.align || 'right';
     s.color = it.color || '#1c1a17';
     s.whiteSpace = 'pre-line';
+    if (it.font && FONT_KEYS.includes(it.font)) s.fontFamily = fontStack(it.font);
   }
   return s;
 }
@@ -301,5 +316,6 @@ export function staticCard(h, { layout, member, cfg, roleLabel, langsText, logoS
   }
 
   return h('div.card-stage.view', { style: {
-    width: px(CARD.w), height: px(CARD.h), background: layout.card.bg, borderColor: layout.card.border } }, kids);
+    width: px(CARD.w), height: px(CARD.h), background: layout.card.bg, borderColor: layout.card.border,
+    fontFamily: fontStack(layout.font) } }, kids);
 }

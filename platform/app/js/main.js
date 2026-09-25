@@ -2,6 +2,7 @@ import { auth, configured } from './sb.js';
 import { h, toast } from './ui.js';
 import { state, loadProfile, loadReference, loadPolicyState, loadCircularState, isAdmin, isActive } from './store.js';
 import { staffShell } from './views/shell.js';
+import { start as idleStart, stop as idleStop } from './idle.js';
 
 const DEFAULT_TITLE = document.title;
 
@@ -19,14 +20,16 @@ const routes = [
   ['/app/tasks', () => import('./views/tasks.js').then(m => ({ render: m.list })), true],
   ['/app/tasks/:id', () => import('./views/tasks.js').then(m => ({ render: m.workspace })), true],
   ['/app/new', () => import('./views/new-material.js'), true, true],
-  ['/app/team', () => import('./views/team.js'), true, true],
+  ['/app/staff', () => import('./views/staff.js'), true, true],
+  ['/app/team', () => import('./views/staff.js'), true, true],
+  ['/app/field', () => import('./views/staff.js').then(m => ({ render: m.field })), true, true],
   ['/app/languages', () => import('./views/languages.js'), true, true],
   ['/app/khateebs', () => import('./views/khateebs.js'), true, true],
   ['/app/workflow', () => import('./views/workflow.js'), true, true],
   ['/app/archive', () => import('./views/archive.js'), true, true],
   ['/app/circulars', () => import('./views/circulars.js'), true],
   ['/app/me', () => import('./views/me.js'), true],
-  ['/app/bank-accounts', () => import('./views/bank.js').then(m => ({ render: m.adminList })), true, true],
+  ['/app/bank-accounts', () => import('./views/staff.js'), true, true],
   ['/app/cards', () => import('./views/cards.js'), true, true],
   ['/app/stats', () => import('./views/stats.js'), true, true],
   ['/app/revise/:material', () => import('./views/revise.js'), true, true]
@@ -44,7 +47,8 @@ function match(path) {
 
 export function navigate(path, { replace = false } = {}) {
   if (replace) history.replaceState(null, '', path); else history.pushState(null, '', path);
-  render();
+  if (auth.session) idleStart();
+render();
 }
 window.addEventListener('popstate', () => render());
 document.addEventListener('click', e => {
@@ -146,7 +150,8 @@ function errorView(err) {
 try { const t = localStorage.getItem('hs.theme'); if (t) document.documentElement.dataset.theme = t; } catch { /* */ }
 
 // تغيّر الجلسة (خروج، انتهاء) يعيد التحقق
-auth.onChange(s => { if (!s) { state.profile = null; state.policySigned = false; state.policyLoaded = false;
+auth.onChange(s => { if (s) idleStart(); else idleStop();
+  if (!s) { state.profile = null; state.policySigned = false; state.policyLoaded = false;
   state.blockingCirculars = 0; state.circularsLoaded = false; if (location.pathname.startsWith('/app')) navigate('/login', { replace: true }); } });
 
 // روابط البريد (تأكيد الحساب أو استعادة كلمة المرور)
@@ -155,5 +160,6 @@ if (fromEmail?.error) setTimeout(() => toast(fromEmail.error, 'bad'), 300);
 if (fromEmail?.type === 'recovery') history.replaceState(null, '', '/reset');
 else if (fromEmail?.type === 'signup') { history.replaceState(null, '', '/app'); setTimeout(() => toast('تم تأكيد بريدك.', 'ok'), 300); }
 
+if (auth.session) idleStart();
 render();
 export { render };

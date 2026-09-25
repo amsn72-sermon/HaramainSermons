@@ -9,6 +9,7 @@ export const TEAM_FIELDS = [
   ['full_name',   'الاسم',                m => m.full_name],
   ['member_no',   'رقم العضوية',          m => m.member_no],
   ['role',        'الدور',                m => ROLE_LABEL[m.role] || m.role],
+  ['track',       'الفريق',               m => (m.track === 'field' ? 'الإرشاد المكاني' : 'الترجمة التخصصية')],
   ['status',      'الحالة',               m => STATUS_LABEL[m.status] || m.status],
   ['email',       'البريد الإلكتروني',     m => m.email],
   ['whatsapp',    'رقم الجوال',           (m, p) => p.whatsapp],
@@ -51,7 +52,7 @@ export function exportExcel(rows, title = 'فريق العمل') {
   downloadBlob(buildXlsx(rows, { sheetName: name, allText: true }), `${name} ${STAMP()}.xlsx`);
 }
 
-export async function exportWord(rows, title = 'فريق الترجمة') {
+export async function exportWord(rows, title = 'فريق الترجمة', opts = {}) {
   const { loadDocx } = await import('./export.js');
   const docx = await loadDocx();
   const { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun, AlignmentType, WidthType, HeadingLevel } = docx;
@@ -74,7 +75,7 @@ export async function exportWord(rows, title = 'فريق الترجمة') {
         new Paragraph({ alignment: AlignmentType.CENTER, bidirectional: true, heading: HeadingLevel.HEADING_2,
           children: [new TextRun({ text: title, bold: true, rightToLeft: true })] }),
         new Paragraph({ alignment: AlignmentType.CENTER, bidirectional: true,
-          children: [new TextRun({ text: `عدد الأعضاء: ${rows.length - 1} — ${fmtDate(new Date())}`, rightToLeft: true, size: 18 })] }),
+          children: [new TextRun({ text: opts.note || `عدد الأعضاء: ${rows.length - 1} — ${fmtDate(new Date())}`, rightToLeft: true, size: 18 })] }),
         new Paragraph({ text: '' }),
         table
       ]
@@ -85,7 +86,7 @@ export async function exportWord(rows, title = 'فريق الترجمة') {
 }
 
 // PDF: نافذة طباعة على كليشة الهيئة — المتصفح يحفظها PDF
-export function exportPdf(rows, title = 'فريق الترجمة') {
+export function exportPdf(rows, title = 'فريق الترجمة', opts = {}) {
   const w = window.open('', '_blank');
   if (!w) return false;
   const head = rows[0].map(v => `<th>${escapeHtml(v)}</th>`).join('');
@@ -111,7 +112,7 @@ export function exportPdf(rows, title = 'فريق الترجمة') {
 </style></head><body>
 <div class="sheet"><img class="lh" src="${LETTERHEAD}" alt=""><div class="win">
   <h1>${escapeHtml(title)}</h1>
-  <p class="sub">عدد الأعضاء: ${rows.length - 1} — ${escapeHtml(fmtDate(new Date()))}</p>
+  <p class="sub">${escapeHtml(opts.note || `عدد الأعضاء: ${rows.length - 1} — ${fmtDate(new Date())}`)}</p>
   <table><thead><tr><th>م</th>${head}</tr></thead><tbody>${body}</tbody></table>
 </div></div>
 <script>window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 350); });<\/script>
