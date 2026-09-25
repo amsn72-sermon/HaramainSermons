@@ -7,6 +7,30 @@ import { brand, themeToggle, footer } from './shell.js';
 
 const APPS = 'Google Authenticator أو Microsoft Authenticator أو أي تطبيق يدعم رموز TOTP';
 
+// رموز التطبيق تُحسب بالوقت: فارق يتجاوز نصف دقيقة يُبطلها كلها.
+// يُقاس الفارق من ترويسة Date في رد الخادم نفسه (ملاحظة ١٠٣)
+async function clockSkew() {
+  try {
+    const base = (window.HS_CONFIG || {}).supabaseUrl;
+    if (!base) return null;
+    const t0 = Date.now();
+    const res = await fetch(`${base}/auth/v1/settings`, { cache: 'no-store' });
+    const head = res.headers.get('date');
+    if (!head) return null;
+    const rtt = (Date.now() - t0) / 2;
+    return Math.round((Date.parse(head) + rtt - Date.now()) / 1000);
+  } catch { return null; }
+}
+
+function skewWarning(sec) {
+  if (sec === null || Math.abs(sec) < 25) return null;
+  return h('div.form-errors', { role: 'alert' },
+    h('ul', h('li', h('b', 'فرق في الساعة: '),
+      `ساعة هذا الجهاز تسبق ساعة الخادم أو تتأخر عنها بنحو ${Math.abs(sec)} ثانية، `,
+      'ورموز التطبيق تُحسب بالوقت فلن تُقبل حتى يُضبط. اضبط ساعة الجهاز تلقائيًّا، ',
+      'وإن بقي الفارق فالخلل في ساعة الخادم.')));
+}
+
 // حالة التحقق للمستخدم الحالي: هل له عامل مؤكَّد، وهل بلغت الجلسة مستوى aal2
 export async function mfaState() {
   try {
@@ -62,7 +86,9 @@ async function askCode(ctx, factor) {
       toast('تم التحقق.', 'ok');
       ctx.navigate(ctx.query?.get('next') || '/app', { replace: true });
     } catch (e) {
-      err.replaceChildren(h('ul', h('li', /invalid|expired/i.test(e.message) ? 'رمز غير صحيح أو انتهت صلاحيته — جرّب الرمز الجديد.' : e.message)));
+      err.replaceChildren(h('ul',
+        h('li', /invalid|expired/i.test(e.message) ? 'رمز غير صحيح أو انتهت صلاحيته — جرّب الرمز الجديد.' : e.message),
+        h('li.small.muted', { dir: 'ltr' }, e.message)));
       err.hidden = false;
       code.value = ''; code.focus();
     }
@@ -71,8 +97,12 @@ async function askCode(ctx, factor) {
   code.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
   setTimeout(() => code.focus(), 60);
 
+  const skewBox = h('div');
+  clockSkew().then(sec => { const w = skewWarning(sec); if (w) skewBox.replaceChildren(w); });
+
   return h('div.stack',
     h('p.muted', `افتح تطبيق المصادقة على جوالك واكتب الرمز الظاهر لحساب «${state.profile?.full_name || auth.user?.email || ''}».`),
+    skewBox,
     err,
     h('label.field', 'الرمز (ستة أرقام)', code),
     h('div.row', go,
@@ -101,6 +131,8 @@ async function enrollBox(ctx) {
 
     const code = codeInput('رمز التأكيد');
     const err = h('div.form-errors', { hidden: true, role: 'alert' });
+    const skewBox = h('div');
+    clockSkew().then(sec => { const w = skewWarning(sec); if (w) skewBox.replaceChildren(w); });
     const go = h('button.btn.primary', { type: 'button' }, 'تأكيد وتفعيل');
     const submit = () => busy(go, async () => {
       if (code.value.length !== 6) { err.replaceChildren(h('ul', h('li', 'الرمز ستة أرقام'))); err.hidden = false; return; }
@@ -111,7 +143,13 @@ async function enrollBox(ctx) {
         toast('فُعّل التحقق بخطوتين.', 'ok');
         ctx.navigate(ctx.query?.get('next') || '/app', { replace: true });
       } catch (e) {
-        err.replaceChildren(h('ul', h('li', /invalid|expired/i.test(e.message) ? 'رمز غير صحيح — جرّب الرمز الجديد في التطبيق.' : e.message)));
+        const skew = await clockSkew();
+        err.replaceChildren(h('ul',
+          h('li', /invalid|expired/i.test(e.message) ? 'رمز غير صحيح — جرّب الرمز الجديد في التطبيق.' : e.message),
+          skew !== null && Math.abs(skew) >= 25
+            ? h('li', h('b', 'والسبب على الأرجح: '), `فرق ${Math.abs(skew)} ثانية بين ساعة هذا الجهاز وساعة الخادم.`)
+            : null,
+          h('li.small.muted', { dir: 'ltr' }, e.message)));
         err.hidden = false; code.value = ''; code.focus();
       }
     });
@@ -126,10 +164,14 @@ async function enrollBox(ctx) {
         h('li', `ثبّت على جوالك ${APPS}.`),
         h('li', 'افتح التطبيق واختر «مسح رمز QR»، ثم وجّه الكاميرا إلى الرمز أدناه.'),
         h('li', 'اكتب الرمز السداسي الظاهر في التطبيق هنا، واضغط «تأكيد وتفعيل».')),
+      h('p.small.muted',
+        'لكل فتحة لهذه الصفحة رمز جديد: إن حدّثتها أو عدت إليها، فاحذف السجل القديم من التطبيق وامسح الرمز الظاهر الآن، ',
+        'ثم أدخل الرمز فور ظهوره فهو يتغيّر كل ثلاثين ثانية. وتأكّد أن ساعة جوالك مضبوطة تلقائيًّا.'),
       img,
       secret ? h('details.mfa-secret', h('summary', 'تعذّر مسح الرمز؟ أدخل المفتاح يدويًّا'),
         h('p.small', 'في التطبيق اختر «إدخال مفتاح الإعداد» ثم الصق:'),
         h('code', { dir: 'ltr' }, secret)) : null,
+      skewBox,
       err,
       h('label.field', 'الرمز من التطبيق', code),
       h('div.row', go,
