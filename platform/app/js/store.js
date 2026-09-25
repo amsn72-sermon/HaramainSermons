@@ -9,7 +9,9 @@ export const state = {
   khateebs: [],
   loadedRef: false,
   policySigned: false,   // وقّع العضو نسخة سياسة السرية الحالية
-  policyLoaded: false
+  policyLoaded: false,
+  blockingCirculars: 0,  // تعاميم ملزمة لم يوقّع عليها (ملاحظة ٨٩)
+  circularsLoaded: false
 };
 
 export const ROLE_LABEL = { manager: 'مدير المشروع', coordinator: 'منسق', translator: 'مترجم' };
@@ -64,6 +66,21 @@ export async function loadPolicyState(force = false) {
   }
   state.policyLoaded = true;
   return state.policySigned;
+}
+
+// التعاميم الملزمة: تُفحص عند كل دخول، ولا يتابع العضو مهامه قبل التوقيع (ملاحظة ٨٩)
+export async function loadCircularState(force = false) {
+  if (state.circularsLoaded && !force) return state.blockingCirculars;
+  if (!state.profile) return 0;
+  try {
+    const n = await db.rpc('my_blocking_circulars');
+    state.blockingCirculars = Number(Array.isArray(n) ? n[0] : n) || 0;
+  } catch {
+    // تعذّر الفحص لا يحجب العمل
+    state.blockingCirculars = 0;
+  }
+  state.circularsLoaded = true;
+  return state.blockingCirculars;
 }
 
 export async function loadReference(force = false) {

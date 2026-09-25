@@ -1,6 +1,6 @@
 import { auth, configured } from './sb.js';
 import { h, toast } from './ui.js';
-import { state, loadProfile, loadReference, loadPolicyState, isAdmin, isActive } from './store.js';
+import { state, loadProfile, loadReference, loadPolicyState, loadCircularState, isAdmin, isActive } from './store.js';
 import { staffShell } from './views/shell.js';
 
 const DEFAULT_TITLE = document.title;
@@ -9,6 +9,7 @@ const routes = [
   // [النمط، الاستيراد، يتطلب دخولًا، للإدارة فقط]
   ['/', () => import('./views/public.js'), false],
   ['/arafah', () => import('./views/public.js').then(m => ({ render: m.arafah })), false],
+  ['/about', () => import('./views/about.js'), false],
   ['/policy', () => import('./views/policy.js'), true],
   ['/login', () => import('./views/auth.js').then(m => ({ render: m.login })), false],
   ['/register', () => import('./views/auth.js').then(m => ({ render: m.register })), false],
@@ -26,6 +27,7 @@ const routes = [
   ['/app/me', () => import('./views/me.js'), true],
   ['/app/bank-accounts', () => import('./views/bank.js').then(m => ({ render: m.adminList })), true, true],
   ['/app/cards', () => import('./views/cards.js'), true, true],
+  ['/app/stats', () => import('./views/stats.js'), true, true],
   ['/app/revise/:material', () => import('./views/revise.js'), true, true]
 ];
 
@@ -49,6 +51,18 @@ document.addEventListener('click', e => {
   if (!a || a.target || a.hasAttribute('download') || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
   const url = new URL(a.href, location.href);
   if (url.origin !== location.origin || url.pathname.startsWith('/assets') || url.pathname.startsWith('/vendor')) return;
+  // رابط داخل الصفحة نفسها (#قسم): تمرير إليه بلا إعادة رسم
+  if (url.hash && url.pathname === location.pathname) {
+    const el = document.getElementById(decodeURIComponent(url.hash.slice(1)));
+    if (el) {
+      e.preventDefault();
+      history.replaceState(null, '', url.pathname + url.search + url.hash);
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      el.setAttribute('tabindex', '-1');
+      el.focus({ preventScroll: true });
+    }
+    return;
+  }
   e.preventDefault();
   navigate(url.pathname + url.search);
 });
@@ -90,6 +104,11 @@ async function render() {
       // لا وصول إلى مساحة العمل قبل التوقيع على سياسة السرية (ملاحظة ٥٧)
       if (path !== '/policy' && !(await loadPolicyState())) return navigate('/policy', { replace: true });
       if (path === '/policy' && state.policySigned) return navigate('/app', { replace: true });
+      // تعميم ملزم لم يُوقَّع: لا متابعة للمهام قبل الاطّلاع والتوقيع (ملاحظة ٨٩)
+      if (path !== '/app/circulars' && path !== '/policy' && await loadCircularState()) {
+        toast('لديك تعميم ملزم بانتظار اطّلاعك وتوقيعك.', 'bad');
+        return navigate('/app/circulars', { replace: true });
+      }
       if (route.adminOnly && !isAdmin()) return navigate('/app', { replace: true });
     }
     const mod = await route.load();
@@ -126,7 +145,8 @@ function errorView(err) {
 try { const t = localStorage.getItem('hs.theme'); if (t) document.documentElement.dataset.theme = t; } catch { /* */ }
 
 // تغيّر الجلسة (خروج، انتهاء) يعيد التحقق
-auth.onChange(s => { if (!s) { state.profile = null; state.policySigned = false; state.policyLoaded = false; if (location.pathname.startsWith('/app')) navigate('/login', { replace: true }); } });
+auth.onChange(s => { if (!s) { state.profile = null; state.policySigned = false; state.policyLoaded = false;
+  state.blockingCirculars = 0; state.circularsLoaded = false; if (location.pathname.startsWith('/app')) navigate('/login', { replace: true }); } });
 
 // روابط البريد (تأكيد الحساب أو استعادة كلمة المرور)
 const fromEmail = configured ? auth.consumeUrlTokens() : null;

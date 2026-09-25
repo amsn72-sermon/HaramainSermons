@@ -35,7 +35,7 @@ export const MARK_KINDS = { delete: 'حذف', add: 'إضافة', rephrase: 'إع
 
 // url: رابط موقّع مؤقت — لا يُعرض للمستخدم. lines: نص العلامة المائية
 // marks: مواضع التعديل المطلوبة على الأصل. onDraw: تفعيل التحديد بالسحب (للمنسق)
-export function pdfViewer({ url, lines, marks = [], onDraw = null }) {
+export function pdfViewer({ url, lines, marks = [], onDraw = null, onPage = null }) {
   const canvas = h('canvas.pdf-canvas', { 'aria-label': 'صفحة من الأصل العربي' });
   const layer = h('div.pdf-marks', { 'aria-hidden': 'true' });
   const status = h('span.pdf-count', '…');
@@ -66,6 +66,7 @@ export function pdfViewer({ url, lines, marks = [], onDraw = null }) {
     status.textContent = `صفحة ${page} من ${doc.numPages}`;
     prev.disabled = page <= 1; next.disabled = page >= doc.numPages;
     drawMarks();
+    onPage && onPage(page, doc.numPages);
   }
 
   // ----- طبقة التحديدات فوق الصفحة -----
