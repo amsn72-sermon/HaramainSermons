@@ -802,3 +802,23 @@ dialog.idle-dlg b { color: var(--accent-text); font-variant-numeric: tabular-num
 .sidenav .nav-out { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .sidenav .nav-out .ext { opacity: .55; font-size: .85em; }
 .sidenav .nav-out:hover .ext { opacity: 1; }
+
+/* ------------------------------------------------------------------
+   الجوال: القائمة تُطوى خلف زر وتُعرض مرتّبة بمجموعاتها (ملاحظة ١٠٦)
+------------------------------------------------------------------- */
+.nav-toggle { display: none; }
+.nav-toggle .bars { margin-inline-end: 6px; font-size: 1.05em; }
+@media (max-width: 900px) {
+  .nav-toggle { display: inline-flex; align-items: center; order: -1; }
+  .sidenav { display: none; }
+  .sidenav.open { display: block; padding: 12px; border-bottom: 1px solid var(--border); }
+  .sidenav.open .nav-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .sidenav.open .nav-head { display: block; grid-column: 1 / -1; padding: 8px 4px 2px; font-weight: 600; }
+  .sidenav.open .nav-group + .nav-group { margin-top: 10px; padding-top: 8px;
+    border-top: 1px solid var(--border); border-inline-start: 0; padding-inline-start: 0; margin-inline-start: 0; }
+  .sidenav.open a { text-align: start; border-inline-start-width: 3px; min-height: 44px; display: flex; align-items: center; }
+  .sidenav.open .nav-out { justify-content: space-between; }
+}
+@media (max-width: 480px) {
+  .sidenav.open .nav-group { grid-template-columns: 1fr; }
+}
