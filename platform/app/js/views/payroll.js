@@ -3,8 +3,8 @@
 // (ملاحظتا ١١٦ و١١٨)
 import { h, toast, busy, confirm, dialog, fmtDate, fmtDateTime } from '../ui.js';
 import { db } from '../sb.js';
-import { isManager, ROLE_LABEL } from '../store.js';
-import { PAY_TYPE, PAYROLL_STATUS, WORK_KIND, WORK_KINDS, kindName, money, monthLabel, monthStart, thisMonth, today } from '../pay.js';
+import { isManager, ROLE_LABEL, langName } from '../store.js';
+import { PAY_TYPE, PAYROLL_STATUS, WORK_KIND, WORK_KINDS, RATE_BASIS, kindName, basisName, money, monthLabel, monthStart, thisMonth, today } from '../pay.js';
 import { exportExcel, exportPdf } from '../teamexport.js';
 
 const groupOf = m => (['manager', 'coordinator'].includes(m.role) ? 'إداري'
@@ -29,8 +29,8 @@ export async function render(ctx) {
     db.select('member_pay_rates', { select: '*' }).catch(() => [])
   ]);
   const payOf = new Map(pays.map(p => [p.member_id, p]));
-  const priceOf = new Map(prices.map(p => [p.work_kind, num(p.amount)]));
-  const overOf = new Map(overrides.map(r => [`${r.member_id}|${r.work_kind}`, num(r.amount)]));
+  const priceOf = new Map(prices.map(p => [p.work_kind, { amount: num(p.amount), basis: p.basis || 'work' }]));
+  const overOf = new Map(overrides.map(r => [`${r.member_id}|${r.work_kind}`, { amount: num(r.amount), basis: r.basis || 'work' }]));
 
   const panel = h('div.staff-panel');
   const btns = TABS.map(([key, label]) => {
@@ -72,27 +72,41 @@ export async function render(ctx) {
 function pricesSection(priceOf) {
   const mine = isManager();
   const rows = WORK_KINDS.map(k => {
+    const cur = priceOf.get(k) || { amount: 0, basis: 'work' };
+    const basis = h('select', { 'aria-label': `أساس احتساب ${kindName(k)}`, disabled: !mine },
+      Object.entries(RATE_BASIS).map(([v, l]) => h('option', { value: v }, l)));
+    basis.value = cur.basis || 'work';
     const input = h('input', { type: 'number', min: '0', step: '0.01', dir: 'ltr', disabled: !mine,
-      'aria-label': `سعر ${kindName(k)}`, value: priceOf.get(k) || '' });
+      'aria-label': `سعر ${kindName(k)}`, value: cur.amount || '' });
+    const hint = h('span.small.muted');
+    const paint = () => {
+      hint.textContent = basis.value === 'word' ? 'المبلغ عن كل كلمة مترجَمة'
+        : basis.value === 'minute' ? 'المبلغ عن كل دقيقة من التسجيل الصوتي'
+        : 'مبلغ مقطوع للعمل كله';
+    };
+    basis.addEventListener('change', paint);
+    paint();
+
     const save = h('button.btn.sm.primary', { type: 'button' }, 'حفظ');
     save.onclick = () => busy(save, async () => {
-      await db.rpc('set_pay_rate', { p_kind: k, p_amount: Number(input.value || 0) });
-      priceOf.set(k, Number(input.value || 0));
+      await db.rpc('set_pay_rate', { p_kind: k, p_amount: Number(input.value || 0), p_basis: basis.value });
+      priceOf.set(k, { amount: Number(input.value || 0), basis: basis.value });
       toast('حُفظ سعر ' + kindName(k), 'ok');
     });
     return h('tr',
       h('td', { 'data-label': 'نوع العمل' }, h('b', kindName(k))),
-      h('td', { 'data-label': 'المبلغ المقطوع' }, input),
+      h('td', { 'data-label': 'أساس الاحتساب' }, basis, h('div', hint)),
+      h('td', { 'data-label': 'المبلغ' }, input),
       h('td', { 'data-label': '' }, mine ? save : h('span.small.muted', 'للمدير')));
   });
 
   return h('div.stack',
     h('div.card.stack',
       h('h3', 'تسعيرة الأعمال بالمقطوع'),
-      h('p.small.muted', 'مبلغ كل نوع عمل، يسري على كل من أجره بالمقطوع. ويمكن تخصيص سعر مختلف لعضو بعينه من تبويب «أجور الأعضاء».'),
-      h('p.small.muted', 'الخطبة نوعان بحسب ما طُلب تسليمه: كتابية فقط، أو كتابية مع تسجيل صوتي — وكذلك الدرس العلمي.'),
+      h('p.small.muted', 'لكل نوع عمل أساسه ومبلغه: مقطوع للعمل كله، أو بعدد كلماته، أو بدقائق تسجيله. ويسري على كل من أجره بالمقطوع، ويُخصَّص لعضو بعينه من تبويب «أجور الأعضاء».'),
+      h('p.small.muted', 'وأنواع الأعمال هي أنواع المواد نفسها في الإسناد: الخطبة كتابيةً أو مع تسجيل، والدرس العلمي كذلك، والكتاب والمطوية والمنشور والإعلان والتوجيه.'),
       h('div.table-wrap', h('table.responsive',
-        h('thead', h('tr', ['نوع العمل', 'المبلغ المقطوع', ''].map(t => h('th', t)))),
+        h('thead', h('tr', ['نوع العمل', 'أساس الاحتساب', 'المبلغ', ''].map(t => h('th', t)))),
         h('tbody', rows)))));
 }
 
@@ -161,20 +175,25 @@ function ratesSection(members, payOf, priceOf, overOf) {
 // تسعيرة خاصة بعضو: الفارغ يعني «يأخذ التسعيرة العامة»
 async function memberPrices(m, priceOf, overOf, onDone) {
   const mine = isManager();
-  const inputs = new Map();
+  const fields = new Map();
   const body = h('div.stack',
-    h('p.small.muted', 'اترك الخانة فارغة ليأخذ العضو السعر العام. والمكتوب هنا يخصّه وحده.'),
+    h('p.small.muted', 'اترك المبلغ فارغًا ليأخذ العضو السعر العام. والمكتوب هنا يخصّه وحده، بأساسه.'),
     h('div.table-wrap', h('table.responsive',
-      h('thead', h('tr', ['نوع العمل', 'السعر العام', 'سعر خاص'].map(t => h('th', t)))),
+      h('thead', h('tr', ['نوع العمل', 'السعر العام', 'أساس خاص', 'مبلغ خاص'].map(t => h('th', t)))),
       h('tbody', WORK_KINDS.map(k => {
+        const gen = priceOf.get(k) || { amount: 0, basis: 'work' };
         const cur = overOf.get(`${m.id}|${k}`);
+        const basis = h('select', { 'aria-label': `أساس ${kindName(k)} الخاص`, disabled: !mine },
+          Object.entries(RATE_BASIS).map(([v, l]) => h('option', { value: v }, l)));
+        basis.value = (cur && cur.basis) || gen.basis || 'work';
         const input = h('input', { type: 'number', min: '0', step: '0.01', dir: 'ltr', disabled: !mine,
-          'aria-label': `سعر ${kindName(k)} الخاص`, value: cur === undefined ? '' : cur });
-        inputs.set(k, input);
+          'aria-label': `سعر ${kindName(k)} الخاص`, value: cur ? cur.amount : '' });
+        fields.set(k, { basis, input });
         return h('tr',
           h('td', { 'data-label': 'نوع العمل' }, kindName(k)),
-          h('td', { 'data-label': 'السعر العام' }, money(priceOf.get(k) || 0)),
-          h('td', { 'data-label': 'سعر خاص' }, input));
+          h('td', { 'data-label': 'السعر العام' }, money(gen.amount), h('div.small.muted', basisName(gen.basis))),
+          h('td', { 'data-label': 'أساس خاص' }, basis),
+          h('td', { 'data-label': 'مبلغ خاص' }, input));
       })))));
 
   const ok = await dialog({
@@ -188,14 +207,15 @@ async function memberPrices(m, priceOf, overOf, onDone) {
 
   try {
     for (const k of WORK_KINDS) {
-      const raw = inputs.get(k).value.trim();
+      const { basis, input } = fields.get(k);
+      const raw = input.value.trim();
       const key = `${m.id}|${k}`;
-      const had = overOf.has(key);
+      const had = overOf.get(key);
       if (raw === '') {
         if (had) { await db.rpc('set_member_rate', { p_member: m.id, p_kind: k, p_amount: null }); overOf.delete(key); }
-      } else if (!had || overOf.get(key) !== Number(raw)) {
-        await db.rpc('set_member_rate', { p_member: m.id, p_kind: k, p_amount: Number(raw) });
-        overOf.set(key, Number(raw));
+      } else if (!had || had.amount !== Number(raw) || had.basis !== basis.value) {
+        await db.rpc('set_member_rate', { p_member: m.id, p_kind: k, p_amount: Number(raw), p_basis: basis.value });
+        overOf.set(key, { amount: Number(raw), basis: basis.value });
       }
     }
     toast('حُفظت تسعيرة ' + m.full_name, 'ok');
@@ -232,29 +252,38 @@ async function reportSection() {
       byMember.get(r.member_id).kinds.push(r);
     }
 
-    const cards = [...byMember.values()].map(m => {
+    const cards = [...byMember.entries()].map(([id, m]) => {
       const works = m.kinds.reduce((s, r) => s + num(r.works), 0);
       const total = m.kinds.reduce((s, r) => s + num(r.amount), 0);
+      const detail = h('button.btn.sm', { type: 'button' }, 'تفصيل الأعمال');
+      detail.onclick = () => busy(detail, () => worksDialog(id, m, from, toStr));
       return h('div.card.stack',
         h('div.row.between.wrap',
           h('div', h('h3', m.name), h('div.small.muted', [m.no, PAY_TYPE[m.pay] || ''].filter(Boolean).join(' · '))),
           h('div.row',
             h('span.badge', `${works} عملًا`),
-            m.pay === 'per_work' ? h('span.badge.gold', money(total) + ' ر.س') : null)),
+            m.pay === 'per_work' ? h('span.badge.gold', money(total) + ' ر.س') : null,
+            detail)),
         h('div.table-wrap', h('table.responsive',
-          h('thead', h('tr', ['نوع العمل', 'العدد', 'السعر', 'المبلغ'].map(t => h('th', t)))),
+          h('thead', h('tr', ['نوع العمل', 'العدد', 'الكلمات', 'دقائق التسجيل', 'السعر وأساسه', 'المبلغ'].map(t => h('th', t)))),
           h('tbody', m.kinds.map(r => h('tr',
             h('td', { 'data-label': 'نوع العمل' }, kindName(r.work_kind)),
             h('td', { 'data-label': 'العدد' }, h('b', String(r.works))),
-            h('td', { 'data-label': 'السعر' }, m.pay === 'per_work' ? money(r.rate) : '—'),
+            h('td', { 'data-label': 'الكلمات' }, num(r.words).toLocaleString('en-US')),
+            h('td', { 'data-label': 'الدقائق' }, String(num(r.minutes))),
+            h('td', { 'data-label': 'السعر' }, m.pay === 'per_work'
+              ? h('span', money(r.rate), h('div.small.muted', basisName(r.basis))) : '—'),
             h('td', { 'data-label': 'المبلغ' }, m.pay === 'per_work' ? money(r.amount) : '—')))))));
     });
 
     const sheetRows = () => [
-      ['العضو', 'الرقم', 'نوع الأجر', 'نوع العمل', 'العدد', 'السعر', 'المبلغ'],
+      ['العضو', 'الرقم', 'نوع الأجر', 'نوع العمل', 'العدد', 'الكلمات', 'دقائق التسجيل', 'الأساس', 'السعر', 'المبلغ'],
       ...list.map(r => [r.full_name, r.member_no || '', PAY_TYPE[r.pay_type] || r.pay_type,
-        kindName(r.work_kind), String(r.works), money(r.rate), money(r.amount)]),
-      ['الإجمالي', '', '', '', String(list.reduce((s, r) => s + num(r.works), 0)), '',
+        kindName(r.work_kind), String(r.works), String(num(r.words)), String(num(r.minutes)),
+        basisName(r.basis), money(r.rate), money(r.amount)]),
+      ['الإجمالي', '', '', '', String(list.reduce((s, r) => s + num(r.works), 0)),
+        String(list.reduce((s, r) => s + num(r.words), 0)),
+        String(list.reduce((s, r) => s + num(r.minutes), 0)), '', '',
         money(list.reduce((s, r) => s + num(r.amount), 0))]
     ];
     const title = `تقرير الإنجاز — ${monthLabel(from)}`;
@@ -275,6 +304,65 @@ async function reportSection() {
     body);
   await load();
   return box;
+}
+
+
+// أعمال العضو عملًا عملًا ببياناتها: الكلمات والصفحات ودقائق التسجيل (ملاحظة ١٢١)
+async function worksDialog(memberId, m, from, to) {
+  let rows = [];
+  try { rows = await db.rpc('member_work_list', { p_member: memberId, p_from: from, p_to: to }); }
+  catch (err) { return toast(err.message, 'bad'); }
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return toast('لا أعمال مكتملة لهذا العضو في المدة', 'bad');
+
+  const minutes = sec => Math.round(num(sec) / 60);
+  const sum = k => list.reduce((s, r) => s + num(r[k]), 0);
+  const totalAmount = m.pay === 'per_work' ? list.reduce((s, r) => s + num(r.amount), 0) : 0;
+
+  const sheetRows = () => [
+    ['نوع العمل', 'العنوان', 'اللغة', 'المرحلة التي أنجزها', 'تاريخ الاكتمال', 'الكلمات', 'الصفحات', 'دقائق التسجيل', 'المبلغ'],
+    ...list.map(r => [kindName(r.work_kind), r.title, langName(r.language_code), r.stages || '—',
+      fmtDate(r.completed_at), String(r.words || 0), String(r.pages || 0), String(minutes(r.audio_seconds)),
+      m.pay === 'per_work' ? money(r.amount) : '']),
+    ['الإجمالي', `${list.length} عملًا`, '', '', '', String(sum('words')), String(sum('pages')),
+      String(Math.round(sum('audio_seconds') / 60)), m.pay === 'per_work' ? money(totalAmount) : '']
+  ];
+  const title = `أعمال ${m.name} — ${monthLabel(from)}`;
+
+  const v = await dialog({
+    title,
+    body: h('div.stack',
+      h('div.pay-sum',
+        h('div.pay-cell', h('span', 'عدد الأعمال'), h('b', String(list.length))),
+        h('div.pay-cell', h('span', 'مجموع الكلمات'), h('b', sum('words').toLocaleString('en-US'))),
+        h('div.pay-cell', h('span', 'دقائق التسجيل'), h('b', String(Math.round(sum('audio_seconds') / 60))))),
+      h('div.table-wrap', h('table.responsive',
+        h('thead', h('tr', ['نوع العمل', 'العنوان', 'اللغة', 'المرحلة', 'الاكتمال', 'الكلمات', 'الصفحات', 'دقائق', 'المبلغ'].map(t => h('th', t)))),
+        h('tbody', list.map(r => h('tr',
+          h('td', { 'data-label': 'نوع العمل' }, kindName(r.work_kind)),
+          h('td', { 'data-label': 'العنوان' }, h('b', r.title), r.sermon_type ? h('div.small.muted', r.sermon_type) : null),
+          h('td', { 'data-label': 'اللغة' }, langName(r.language_code)),
+          h('td', { 'data-label': 'المرحلة' }, r.stages || '—'),
+          h('td', { 'data-label': 'الاكتمال' }, fmtDate(r.completed_at)),
+          h('td', { 'data-label': 'الكلمات' }, String(r.words || 0)),
+          h('td', { 'data-label': 'الصفحات' }, String(r.pages || 0)),
+          h('td', { 'data-label': 'دقائق' }, String(minutes(r.audio_seconds))),
+          h('td', { 'data-label': 'المبلغ' }, m.pay === 'per_work'
+            ? h('span', money(r.amount), h('div.small.muted', basisName(r.basis))) : '—')))),
+        h('tfoot', h('tr',
+          h('th', 'الإجمالي'), h('th', `${list.length} عملًا`), h('th', ''), h('th', ''), h('th', ''),
+          h('th', String(sum('words'))), h('th', String(sum('pages'))),
+          h('th', String(Math.round(sum('audio_seconds') / 60))),
+          h('th', m.pay === 'per_work' ? money(totalAmount) : '—')))))),
+    buttons: [
+      { label: 'تصدير الكشف', value: 'export' },
+      { label: 'إغلاق', value: null }
+    ]
+  });
+  if (v !== 'export') return;
+  if (!exportPdf(sheetRows(), title, { note: `${list.length} عملًا — ${fmtDate(new Date())}` })) {
+    toast('اسمح بالنوافذ المنبثقة لتصدير الكشف', 'bad');
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -369,13 +457,17 @@ function cycleCard(cycle, sheet, kinds, reload, members) {
       btn.onclick = () => dialog({
         title: `أعمال ${r.full_name} — ${monthLabel(cycle.period)}`,
         body: h('div.table-wrap', h('table.responsive',
-          h('thead', h('tr', ['نوع العمل', 'العدد', 'السعر', 'المبلغ'].map(t => h('th', t)))),
+          h('thead', h('tr', ['نوع العمل', 'العدد', 'الكلمات', 'الدقائق', 'السعر وأساسه', 'المبلغ'].map(t => h('th', t)))),
           h('tbody', detail.map(k => h('tr',
             h('td', { 'data-label': 'نوع العمل' }, kindName(k.work_kind)),
             h('td', { 'data-label': 'العدد' }, String(k.works)),
-            h('td', { 'data-label': 'السعر' }, money(k.rate)),
+            h('td', { 'data-label': 'الكلمات' }, num(k.words).toLocaleString('en-US')),
+            h('td', { 'data-label': 'الدقائق' }, String(num(k.minutes))),
+            h('td', { 'data-label': 'السعر' }, money(k.rate), h('div.small.muted', basisName(k.basis))),
             h('td', { 'data-label': 'المبلغ' }, money(k.amount))))),
           h('tfoot', h('tr', h('th', 'المجموع'), h('th', String(detail.reduce((s, k) => s + num(k.works), 0))),
+            h('th', String(detail.reduce((s, k) => s + num(k.words), 0))),
+            h('th', String(detail.reduce((s, k) => s + num(k.minutes), 0))),
             h('th', ''), h('th', money(detail.reduce((s, k) => s + num(k.amount), 0)))))))
       });
       works.append(btn, h('div.small.muted', kindsText(r.member_id)));
