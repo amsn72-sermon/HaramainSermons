@@ -937,3 +937,15 @@ table.responsive input[type="number"] { width: 100%; min-width: 88px; }
 .shift-now + .shift-now { margin-top: 10px; }
 .next-shifts { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
 .next-shifts li { font-size: .9rem; border-inline-start: 3px solid var(--border); padding-inline-start: 10px; }
+
+/* ------------------------------------------------------------------
+   المراسلات: بطاقة الرسالة بحالها وتاريخها وسجل تواقيعها (ملاحظة ١١٩)
+------------------------------------------------------------------- */
+.circ-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 2px 0 6px; }
+.circ-meta > span { white-space: nowrap; }
+.circ-sign { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 6px 0 2px; }
+.circ-sign .progress { flex: 1; min-width: 140px; }
+.circ-sign .badge { margin-inline-start: 6px; }
+.circular-row.archived { opacity: .72; border-style: dashed; }
+.circular-row .grow { flex: 1; }
+.doc-card.waiting { border-color: var(--warn); }
