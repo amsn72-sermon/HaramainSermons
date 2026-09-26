@@ -17,7 +17,7 @@ export const TEAM_FIELDS = [
   ['nationality', 'الجنسية',              (m, p) => p.nationality],
   ['residence',   'مكان الإقامة',         (m, p) => p.residence],
   ['languages',   'اللغات',               m => (m.member_languages || []).map(x => langName(x.language_code)).join('، ')],
-  ['policy',      'سياسة السرية',         (m, p, x) => x.signed ? 'موقّعة' : 'لم توقّع'],
+  ['policy',      'ميثاق العمل',         (m, p, x) => x.signed ? 'موقّعة' : 'لم توقّع'],
   // الحساب البنكي (ملاحظة ٨٤) — لا يظهر إلا لمن يرى البيانات المالية
   ['bank_name',   'اسم البنك',            (m, p, x) => x.bank?.bank_name],
   ['iban',        'الآيبان (IBAN)',        (m, p, x) => groupIban(x.bank?.iban) || x.bank?.account_number],

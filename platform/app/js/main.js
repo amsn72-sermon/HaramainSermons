@@ -33,6 +33,7 @@ const routes = [
   ['/app/me', () => import('./views/me.js'), true],
   ['/app/bank-accounts', () => import('./views/staff.js'), true, true],
   ['/app/cards', () => import('./views/cards.js'), true, true],
+  ['/app/charter', () => import('./views/charter.js'), true, true],
   ['/app/payroll', () => import('./views/payroll.js'), true, true],
   ['/app/shifts', () => import('./views/shifts.js'), true, true],
   ['/app/stats', () => import('./views/stats.js'), true, true],
@@ -114,7 +115,7 @@ async function render() {
       if (path !== '/mfa' && !(await loadMfaState())) {
         return navigate('/mfa?next=' + encodeURIComponent(path), { replace: true });
       }
-      // لا وصول إلى مساحة العمل قبل التوقيع على سياسة السرية (ملاحظة ٥٧)
+      // لا وصول إلى مساحة العمل قبل التوقيع على ميثاق العمل (ملاحظتا ٥٧ و١٢٥)
       if (path !== '/policy' && path !== '/mfa' && !(await loadPolicyState())) return navigate('/policy', { replace: true });
       if (path === '/policy' && state.policySigned) return navigate('/app', { replace: true });
       // تعميم ملزم لم يُوقَّع: لا متابعة للمهام قبل الاطّلاع والتوقيع (ملاحظة ٨٩)
