@@ -66,6 +66,7 @@ export async function render(ctx) {
   const stage = h('div.card-stage', { tabindex: '0', 'aria-label': 'لوحة تصميم البطاقة' });
   const panel = h('div.cd-panel');
   const bandBox = h('div.stack');
+  const fontBox = h('div');   // نوع الخط ظاهر دائمًا لا داخل التفاصيل المطوية
   const logoBox = h('div.stack');
   const sampleOf = () => pool.find(m => picked.has(m.id)) || pool[0] || null;
   const logoSrc = () => (logoKind === 'none' ? null : logoKind === 'custom' ? logoUrl : HARAMAIN_LOGO);
@@ -348,9 +349,10 @@ export async function render(ctx) {
         h('label.field', 'لونه', colorRow(r.color, v => { r.color = v; drawBand(); })));
     };
 
-    bandBox.replaceChildren(
+    fontBox.replaceChildren(
       h('label.field', 'نوع خط البطاقة', h('small', 'يسري على كل النصوص ما لم يُخصَّص عنصر بخط آخر'),
-        fontSelect(layout.font || 'haramain', v => { layout.font = v; drawBand(); }, false)),
+        fontSelect(layout.font || 'haramain', v => { layout.font = v; drawBand(); }, false)));
+    bandBox.replaceChildren(
       h('div.row', toggle),
       h('label.field', 'مكان الشريط', side),
       h('label.field', `${b.side === 'right' ? 'عرض' : 'ارتفاع'} الشريط (${round(b.h)} مم)`,
@@ -532,23 +534,28 @@ export async function render(ctx) {
         h('p.small.muted', 'اسحب العنصر بالفأرة، أو اخترَه ثم حرّكه بالأسهم (مع Shift خطوة أكبر).'),
         h('div.row', resetBtn)),
       h('div.card.stack', h('h3', 'خصائص العنصر'), panel)),
+    // الشاشة مضغوطة: البيانات والقالب في صف، والتفاصيل تُطوى (ملاحظة ١١٥)
     h('div.grid-2',
       h('div.card.stack',
         h('h3', 'بيانات البطاقة'),
-        h('label.field', 'عنوان البطاقة', f.title),
-        h('label.field', 'السطر تحته', f.subtitle),
+        h('div.grid-2',
+          h('label.field', 'عنوان البطاقة', f.title),
+          h('label.field', 'السطر تحته', f.subtitle)),
         h('div.grid-2',
           h('label.field', 'اسم المسؤول', f.official_name),
           h('label.field', 'منصب المسؤول', f.official_title)),
-        h('label.field', 'صلاحية البطاقة حتى', f.valid_until),
+        h('div.grid-2',
+          h('label.field', 'صلاحية البطاقة حتى', f.valid_until),
+          h('label.field', 'قالب جاهز', h('div.row.tight', presetSel, applyPreset))),
         h('div.row', saveBtn)),
       h('div.card.stack', h('h3', 'الشكل والشعار'),
-        h('label.field', 'قالب جاهز', h('div.row.tight', presetSel, applyPreset)),
-        h('hr'), logoBox, h('hr'), bandBox)),
+        fontBox,
+        h('details.cd-more', h('summary', 'الشعار وخياراته'), logoBox),
+        h('details.cd-more', h('summary', 'الشريط والفواصل وخلفية البطاقة'), bandBox))),
     h('div.card.stack',
-      h('div.row.between', h('h3', 'من تُطبع بطاقته'), h('div.row', onlyTranslators)),
+      h('div.row.between', h('h3', 'من تُطبع بطاقته'), h('div.row', onlyTranslators, counter)),
       h('label.check', allBox, h('b', 'تحديد الكل')),
-      listBox, counter,
+      listBox,
       h('p.small.muted', 'الاعتماد يُظهر البطاقة في حساب صاحبها ضمن «بياناتي» ليبرزها عند الحاجة.'),
       h('div.row', printBtn, issueBtn, revokeBtn)));
 }

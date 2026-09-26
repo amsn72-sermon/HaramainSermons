@@ -1,8 +1,9 @@
 // المراسلات: تعاميم وتوجيهات وتحذيرات ودعوات — إرسالٌ من الإدارة وتوقيعٌ بالعلم من العضو (ملاحظة ٨١)
-import { h, fill, toast, busy, dialog, emptyState, fmtDateTime } from '../ui.js';
+import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDateTime } from '../ui.js';
 import { db, storage, auth } from '../sb.js';
-import { state, isAdmin, ROLE_LABEL, langName, loadCircularState } from '../store.js';
+import { state, isAdmin, isManager, ROLE_LABEL, langName, loadCircularState } from '../store.js';
 import { pdfViewer } from '../pdfview.js';
+import { signaturePad, signatureImg } from '../signature.js';
 
 export const KIND_LABEL = {
   notice: 'تعميم', directive: 'توجيه', warning: 'تحذير', invitation: 'دعوة'
@@ -38,10 +39,47 @@ function readerCard(c, mine, onDone) {
   const name = h('input', { autocomplete: 'off', placeholder: state.profile?.full_name || 'اكتب اسمك الكامل' });
   const ackBtn = h('button.btn.primary', { type: 'button', disabled: !seenAll }, 'اطّلعت وأوقّع بالعلم');
   if (!seenAll) seenNote.hidden = false;
+
+  // التوقيع اليدوي: المحفوظ يُدرَج بضغطة، ومن لم يرسمه يرسمه هنا مرة واحدة (ملاحظة ١١٠)
+  const sigWrap = h('div.stack', { style: { gap: '8px' } });
+  let pad = null, savedSig = null;
+  const drawSigArea = async () => {
+    try {
+      const rows = await db.select('profile_private', { select: 'signature_path', id: `eq.${state.profile.id}` });
+      savedSig = rows[0]?.signature_path || null;
+    } catch { savedSig = null; }
+    if (savedSig) {
+      let url = null;
+      try { url = await storage.signedUrl('signatures', savedSig, 600); } catch { /* تُتجاوز */ }
+      const redo = h('button.btn.sm', { type: 'button' }, 'رسم توقيع جديد');
+      redo.onclick = () => { savedSig = null; showPad(); };
+      sigWrap.replaceChildren(
+        h('span.small.muted', 'يُدرَج توقيعك المحفوظ:'),
+        url ? signatureImg(url, 'توقيعك') : h('span.small.muted', 'توقيع محفوظ'),
+        h('div.row', redo));
+    } else showPad();
+  };
+  const showPad = () => {
+    pad = signaturePad({ height: 150 });
+    const clear = h('button.btn.sm', { type: 'button', onclick: () => pad.clear() }, 'مسح');
+    sigWrap.replaceChildren(
+      h('span.small.muted', 'ارسم توقيعك هنا (يُحفظ في ملفك ويُستعمل في المرات القادمة):'),
+      pad.el, h('div.row', clear));
+  };
+  drawSigArea();
+
   ackBtn.onclick = () => busy(ackBtn, async () => {
     if (name.value.trim().length < 3) return toast('اكتب اسمك الكامل توقيعًا بالعلم.', 'bad');
     try {
-      await db.rpc('ack_circular', { p_circular: c.id, p_name: name.value.trim() });
+      // توقيع جديد يُرفع ويُحفظ في ملف العضو قبل التوقيع
+      if (!savedSig && pad && !pad.isEmpty()) {
+        const blob = await pad.toBlob();
+        const path = `${state.profile.id}/sig-${Date.now()}.png`;
+        await storage.upload('signatures', path, blob);
+        await db.rpc('set_my_signature', { p_path: path });
+        savedSig = path;
+      }
+      await db.rpc('ack_circular', { p_circular: c.id, p_name: name.value.trim(), p_signature: savedSig });
       await loadCircularState(true).catch(() => {});
       toast('سُجّل توقيعك بالعلم.', 'ok');
       onDone && onDone();
@@ -59,6 +97,7 @@ function readerCard(c, mine, onDone) {
           ? h('div.stack',
               h('div.policy-state.unsigned', 'لم توقّع بالعلم على هذه الرسالة بعد'),
               h('label.field', 'التوقيع: اكتب اسمك الكامل', name),
+              sigWrap,
               seenNote,
               h('div.row', ackBtn))
           : h('p.small.muted', 'هذه الرسالة للعلم فقط ولا تحتاج توقيعًا.')));
@@ -92,10 +131,36 @@ export async function render(ctx) {
           h('td', { 'data-label': 'الدور' }, ROLE_LABEL[r.member?.role] || '—'),
           h('td', { 'data-label': 'الاطلاع' }, r.read_at ? fmtDateTime(r.read_at) : h('span.muted', 'لم يطّلع')),
           h('td', { 'data-label': 'التوقيع' }, r.acked_at
-            ? h('span', h('span.badge.ok', 'وقّع'), h('span.sub', `${r.signed_name || ''} — ${fmtDateTime(r.acked_at)}`))
+            ? h('span', h('span.badge.ok', 'وقّع'), h('span.sub', `${r.signed_name || ''} — ${fmtDateTime(r.acked_at)}`),
+                r.signature_path ? sigCell(r.signature_path) : null)
             : h('span.badge.warn', 'لم يوقّع'))))))),
-      buttons: [{ label: 'إغلاق', value: null }]
+      buttons: [
+        { label: 'تصدير الكشف', value: 'export' },
+        { label: 'إغلاق', value: null }
+      ]
+    }).then(async v => {
+      if (v !== 'export') return;
+      const rows2 = [['العضو', 'الدور', 'الاطلاع', 'التوقيع بالعلم', 'الاسم الموقَّع به']];
+      for (const r of list) {
+        rows2.push([r.member?.full_name || '—', ROLE_LABEL[r.member?.role] || '—',
+          r.read_at ? fmtDateTime(r.read_at) : 'لم يطّلع',
+          r.acked_at ? fmtDateTime(r.acked_at) : 'لم يوقّع', r.signed_name || '']);
+      }
+      try {
+        const { exportPdf } = await import('../teamexport.js');
+        const note = `${list.filter(r => r.acked_at).length} وقّعوا من ${list.length} — ${fmtDateTime(new Date())}`;
+        if (!exportPdf(rows2, `كشف التواقيع: ${c.title}`, { note })) toast('اسمح بالنوافذ المنبثقة.', 'bad');
+      } catch (err) { toast(err.message, 'bad'); }
     });
+  }
+
+  // صورة التوقيع اليدوي داخل السجل
+  function sigCell(path) {
+    const box = h('div.sig-cell');
+    storage.signedUrl('signatures', path, 600)
+      .then(url => box.replaceChildren(signatureImg(url, 'التوقيع اليدوي')))
+      .catch(() => { /* يبقى فارغًا */ });
+    return box;
   }
 
   async function compose() {
@@ -173,6 +238,68 @@ export async function render(ctx) {
     } catch (err) { toast(err.message, 'bad'); }
   }
 
+  // ---------------- تحكّم الإدارة فيما أُرسل (ملاحظة ١٠٩) ----------------
+  async function edit(c) {
+    const f = {
+      title: h('input', { maxlength: 200, value: c.title || '' }),
+      kind: h('select', Object.entries(KIND_LABEL).map(([k, v]) => h('option', { value: k, selected: c.kind === k ? true : null }, v))),
+      body: h('textarea', { rows: 6 }),
+      require_ack: h('input', { type: 'checkbox', checked: c.require_ack ? true : null }),
+      blocking: h('input', { type: 'checkbox', checked: c.blocking ? true : null })
+    };
+    f.body.value = c.body || '';
+    const st = stats[c.id] || {};
+    const res = await dialog({
+      title: 'تعديل الرسالة',
+      body: h('div.stack',
+        (st.acked ?? 0) > 0 ? h('p.small.bad', `وقّع عليها ${st.acked} من ${st.recipients} — التعديل بعد التوقيع يُسجَّل، وذكّر الموقّعين إن كان جوهريًّا.`) : null,
+        h('div.grid-2', h('label.field', 'النوع', f.kind), h('label.field', 'العنوان', f.title)),
+        h('label.field', 'نص الرسالة', f.body),
+        h('label.check', f.require_ack, 'يلزم توقيع العضو بالعلم'),
+        h('label.check', f.blocking, 'تعميم ملزم يحجب متابعة المهام'),
+        c.pdf_path ? h('p.small.muted', 'المرفق لا يُستبدل من هنا: احذف الرسالة وأرسلها من جديد بمرفق آخر.') : null),
+      buttons: [
+        { label: 'حفظ التعديل', kind: 'primary', validate: () => {
+          if (f.title.value.trim().length < 3) { toast('اكتب عنوان الرسالة.', 'bad'); return false; }
+          if (!f.body.value.trim() && !c.pdf_path) { toast('اكتب نص الرسالة.', 'bad'); return false; }
+          return true;
+        }, value: () => ({ title: f.title.value.trim(), body: f.body.value.trim(), kind: f.kind.value,
+          require_ack: f.require_ack.checked, blocking: f.blocking.checked }) },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
+    try {
+      await db.rpc('update_circular', { p_id: c.id, p_title: res.title, p_body: res.body, p_kind: res.kind,
+        p_require_ack: res.require_ack, p_blocking: res.blocking });
+      toast('حُفظ التعديل.', 'ok'); reload();
+    } catch (err) { toast(err.message, 'bad'); }
+  }
+
+  async function remind(c) {
+    try {
+      const n = await db.rpc('remind_circular', { p_id: c.id });
+      const count = Number(Array.isArray(n) ? n[0] : n) || 0;
+      toast(count ? `أُرسل التذكير إلى ${count} عضوًا لم يوقّعوا.` : 'وقّع الجميع، فلا تذكير.', 'ok');
+      reload();
+    } catch (err) { toast(err.message, 'bad'); }
+  }
+
+  async function unblock(c) {
+    if (!await confirm('إيقاف الإلزام', 'تبقى الرسالة ويبقى طلب التوقيع، لكنها لا تحجب متابعة المهام. متابعة؟', 'إيقاف الإلزام')) return;
+    try { await db.rpc('update_circular', { p_id: c.id, p_blocking: false }); toast('رُفع الإلزام.', 'ok'); reload(); }
+    catch (err) { toast(err.message, 'bad'); }
+  }
+
+  async function remove(c) {
+    const st = stats[c.id] || {};
+    if (!await confirm('حذف الرسالة',
+      `تُحذف «${c.title}» نهائيًّا ومعها سجل من وقّع عليها (${st.acked ?? 0} توقيعًا). لا يمكن التراجع.`,
+      'حذف نهائي', 'danger')) return;
+    try { await db.rpc('delete_circular', { p_id: c.id }); toast('حُذفت الرسالة.', 'ok'); reload(); }
+    catch (err) { toast(err.message, 'bad'); }
+  }
+
   const stats = Object.fromEntries((await db.select('circular_stats', { select: '*' }).catch(() => []))
     .map(s => [s.circular_id, s]));
 
@@ -192,7 +319,13 @@ export async function render(ctx) {
       c.body && h('p.clamp-2', c.body),
       h('div.row',
         h('button.btn.sm', { type: 'button', onclick: () => open(c) }, pending ? 'اطّلع ووقّع' : 'عرض'),
-        isAdmin() && h('button.btn.sm', { type: 'button', onclick: () => who(c) }, 'من وقّع')));
+        isAdmin() && h('button.btn.sm', { type: 'button', onclick: () => who(c) }, 'من وقّع'),
+        isAdmin() && h('button.btn.sm', { type: 'button', title: 'تعديل نص الرسالة وخياراتها', onclick: () => edit(c) }, 'تعديل'),
+        isAdmin() && (st.recipients ?? 0) > (st.acked ?? 0) && c.require_ack
+          && h('button.btn.sm', { type: 'button', title: 'تذكير من لم يوقّع', onclick: e => busy(e.currentTarget, () => remind(c)) }, 'تذكير'),
+        isAdmin() && c.blocking && h('button.btn.sm', { type: 'button', title: 'رفع الإلزام فلا يُحجب العمل',
+          onclick: e => busy(e.currentTarget, () => unblock(c)) }, 'إيقاف الإلزام'),
+        isManager() && h('button.btn.sm.danger', { type: 'button', onclick: e => busy(e.currentTarget, () => remove(c)) }, 'حذف')));
   })) : emptyState('لا مراسلات بعد', isAdmin() ? 'أرسل أول رسالة إلى الفريق.' : 'تظهر هنا التعاميم والتوجيهات الموجّهة إليك.');
 
   return h('div',

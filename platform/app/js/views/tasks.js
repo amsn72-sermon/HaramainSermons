@@ -394,6 +394,28 @@ export async function workspace(ctx) {
 
   document.title = fileName(m, t.language_code, m.khateeb?.name);
 
+  // في الجوال: تبويبان بدل عمودين متلاصقين، فالشاشة ضيّقة (ملاحظة ١١١)
+  function wsBlock() {
+    const srcCol = h('div.ws-col', { 'data-pane': 'src' }, h('h3', 'النص الأصلي — العربية'), sourceEl);
+    const trCol = h('div.ws-col', { 'data-pane': 'tr' }, h('h3', `الترجمة — ${langName(t.language_code)}`), editor.el);
+    const grid = h('div.workspace', srcCol, trCol);
+    const tabSrc = h('button.btn.tab', { type: 'button', role: 'tab' }, 'النص الأصلي');
+    const tabTr = h('button.btn.tab.on', { type: 'button', role: 'tab', 'aria-selected': 'true' }, 'الترجمة');
+    const tabs = h('div.tabs.ws-tabs', { role: 'tablist' }, tabSrc, tabTr);
+    const wrap = h('div.ws-wrap', { style: { marginTop: '16px' } },
+      tabs, canEdit && h('div.ws-tools', editor.tools), grid);
+    const pick = pane => {
+      grid.dataset.pane = pane; wrap.dataset.pane = pane;
+      tabSrc.classList.toggle('on', pane === 'src'); tabTr.classList.toggle('on', pane === 'tr');
+      tabSrc.setAttribute('aria-selected', String(pane === 'src'));
+      tabTr.setAttribute('aria-selected', String(pane === 'tr'));
+    };
+    tabSrc.onclick = () => pick('src');
+    tabTr.onclick = () => pick('tr');
+    pick(canEdit ? 'tr' : 'src');
+    return wrap;
+  }
+
   return h('div',
     h('div.page-head.workspace-banner', h('div.grow',
       h('div.eyebrow', `${t.status === 'completed' ? 'مهمة مكتملة' : t.status === 'awaiting_receipt' ? 'بانتظار الاستلام' : 'مهمة ' + stageName(cur?.stage_key)} · ${heading(m)}`),
@@ -410,11 +432,7 @@ export async function workspace(ctx) {
       lateSummary(t)),
     rev ? h('div', { style: { marginTop: '16px' } }, revisionCard(rev)) : null,
     h('details.card', h('summary', h('b', 'المسار والمراحل')), h('div', { style: { marginTop: '12px' } }, stageStrip(t))),
-    h('div', { style: { marginTop: '16px' } },
-      canEdit && h('div.ws-tools', editor.tools),
-      h('div.workspace',
-        h('div.ws-col', h('h3', 'النص الأصلي — العربية'), sourceEl),
-        h('div.ws-col', h('h3', `الترجمة — ${langName(t.language_code)}`), editor.el))),
+    wsBlock(),
     audioCard,
     h('div', { style: { marginTop: '16px' } }, actions),
     h('details.card', { style: { marginTop: '16px' } }, h('summary', h('b', `سجل الإجراءات (${events.length})`)),

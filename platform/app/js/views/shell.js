@@ -75,6 +75,8 @@ export function staffShell(view, path) {
          link('/app/staff', 'المترجمون المتخصصون'),
          link('/app/field', 'المرشدون المكانيون'),
          link('/app/cards', 'بطاقات العمل'),
+         link('/app/payroll', 'الرواتب'),
+         link('/app/shifts', 'الحضور والانصراف'),
          mail]),
        group('الإعدادات', [
          link('/app/languages', 'اللغات'),

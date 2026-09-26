@@ -6,6 +6,7 @@ import { PHOTO_RULES, preparePhoto, readStashed, clearStashed, dataUrlToBlob, ur
 import { bankSection } from './bank.js';
 import { normalizeLayout, staticCard, HARAMAIN_LOGO, CARD } from '../carddesign.js';
 import { nationalitySelect } from '../nationalities.js';
+import { signaturePad, signatureImg } from '../signature.js';
 
 const ID_LABEL = { national: 'رقم الهوية أو الإقامة', passport: 'رقم جواز السفر' };
 
@@ -134,6 +135,58 @@ export async function render(ctx) {
     h('label.field', 'مكان الإقامة', f.residence),
     h('div.row', saveBtn));
 
+  // التوقيع اليدوي: يُرسم مرة ويُحفظ، ويُدرَج على ما يوقّعه العضو (ملاحظة ١١٠)
+  const sigBox = h('div.stack');
+  const drawSig = async () => {
+    if (priv.signature_path) {
+      let url = null;
+      try { url = await storage.signedUrl('signatures', priv.signature_path, 600); } catch { /* يُعاد لاحقًا */ }
+      const replace = h('button.btn.sm', { type: 'button' }, 'تغيير التوقيع');
+      const remove = h('button.btn.sm.danger', { type: 'button' }, 'حذف التوقيع');
+      replace.onclick = () => padUI();
+      remove.onclick = () => busy(remove, async () => {
+        try { await db.rpc('set_my_signature', { p_path: null }); priv.signature_path = null; toast('حُذف التوقيع.', 'ok'); drawSig(); }
+        catch (e) { toast(e.message, 'bad'); }
+      });
+      sigBox.replaceChildren(
+        url ? signatureImg(url, 'توقيعك المحفوظ') : h('p.small.muted', 'تعذّر عرض التوقيع'),
+        h('p.small.muted', priv.signature_at ? `حُفظ في ${fmtDateTime(priv.signature_at)}` : ''),
+        h('div.row', replace, remove));
+    } else {
+      const start = h('button.btn.primary', { type: 'button' }, 'رسم التوقيع');
+      start.onclick = () => padUI();
+      sigBox.replaceChildren(
+        h('p.small.muted', 'ارسم توقيعك مرة واحدة، فيُدرَج تلقائيًّا كلما وقّعت بالعلم على المراسلات.'),
+        h('div.row', start));
+    }
+  };
+  const padUI = () => {
+    const pad = signaturePad();
+    const clear = h('button.btn.sm', { type: 'button', onclick: () => pad.clear() }, 'مسح');
+    const save = h('button.btn.primary', { type: 'button' }, 'حفظ التوقيع');
+    save.onclick = () => busy(save, async () => {
+      if (pad.isEmpty()) return toast('ارسم توقيعك أولًا.', 'bad');
+      try {
+        const blob = await pad.toBlob();
+        const path = `${me.id}/sig-${Date.now()}.png`;
+        await storage.upload('signatures', path, blob);
+        await db.rpc('set_my_signature', { p_path: path });
+        priv.signature_path = path; priv.signature_at = new Date().toISOString();
+        toast('حُفظ توقيعك.', 'ok');
+        drawSig();
+      } catch (e) { toast(e.message, 'bad'); }
+    });
+    sigBox.replaceChildren(
+      h('p.small.muted', 'ارسم توقيعك داخل الإطار بإصبعك على الجوال أو بالفأرة على الحاسب.'),
+      pad.el, h('div.row', save, clear));
+  };
+  drawSig();
+
+  const sigCard = h('div.card.stack',
+    h('div.row.between', h('h3', 'التوقيع اليدوي'),
+      priv.signature_path ? h('span.badge.ok', 'محفوظ') : h('span.badge.warn', 'لم يُرسم بعد')),
+    sigBox);
+
   // التحقق بخطوتين: حالته ورابط تفعيله (ملاحظة ١٠٣)
   const mfaCard = h('div.card.stack',
     h('div.row.between', h('h3', 'التحقق بخطوتين'),
@@ -147,6 +200,12 @@ export async function render(ctx) {
   const card = await cardSection(me, privRows[0] || {}, langRows.map(r => r.language_code),
     cardRows[0] || null, settingsRows[0] || null);
   const bank = await bankSection(ctx);
+  // الورديات والمستحقات: لا تظهر إلا لمن له وردية أو كشف معتمد (ملاحظتا ١١٦ و١١٧)
+  const { salarySection, shiftsSection } = await import('./mypay.js');
+  const [shifts, salary] = await Promise.all([
+    shiftsSection().catch(() => null),
+    salarySection().catch(() => null)
+  ]);
 
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'حسابي'), h('h1', 'بياناتي'),
@@ -159,7 +218,10 @@ export async function render(ctx) {
         h('label.field', 'رفع الصورة أو تغييرها', h('small', 'تُقصّ تلقائيًّا إلى مقاس ٤×٦'), picker),
         rules),
       fixed),
+    shifts,
+    salary,
     editable,
+    sigCard,
     mfaCard,
     card,
     bank);

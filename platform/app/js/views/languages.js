@@ -27,19 +27,66 @@ export async function render(ctx) {
     catch (e) { toast(/duplicate|unique/i.test(e.message) ? 'الرمز أو الاسم مستخدم مسبقًا' : e.message, 'bad'); }
   }
 
+  // شبكة بطاقات مضغوطة بدل جدول طويل: خمس لغات في الصف (ملاحظة ١١٣)
+  const q = h('input', { type: 'search', placeholder: 'ابحث عن لغة', 'aria-label': 'بحث' });
+  const filter = h('select', { 'aria-label': 'التصفية' },
+    h('option', { value: '' }, 'كل اللغات'),
+    h('option', { value: 'core' }, 'الرئيسية الثابتة'),
+    h('option', { value: 'active' }, 'المفعّلة'),
+    h('option', { value: 'off' }, 'المعطّلة'),
+    h('option', { value: 'empty' }, 'بلا مترجمين'));
+  const box = h('div.stack');
+  const counter = h('span.small.muted');
+
+  const toggle = (l, btn) => busy(btn, async () => {
+    try { await db.update('languages', { code: `eq.${l.code}` }, { is_active: !l.is_active }); reload(); }
+    catch (err) { toast(err.message, 'bad'); }
+  });
+
+  function card(l) {
+    const members = n(l.code);
+    const state2 = l.is_core ? 'core' : (l.is_active ? 'active' : 'off');
+    const el = h(l.is_core ? 'div.lang-card' : 'button.lang-card',
+      { class: state2, type: l.is_core ? null : 'button',
+        title: l.is_core ? 'لغة رئيسية ثابتة' : (l.is_active ? 'اضغط لتعطيلها' : 'اضغط لتفعيلها') },
+      h('div.row.between', h('b', l.name_ar), h('span.lang-code', { dir: 'ltr' }, l.code)),
+      h('span.lang-native', { dir: l.dir }, l.native_name),
+      h('div.row.between',
+        members ? h('span.small.muted', `${members} مترجمًا`) : h('span.badge.warn', 'لا أحد'),
+        l.is_core ? h('span.badge.gold', 'ثابتة') : h('span.badge', { class: l.is_active ? 'ok' : '' }, l.is_active ? 'مفعّلة' : 'معطّلة')));
+    if (!l.is_core) el.onclick = () => toggle(l, el);
+    return el;
+  }
+
+  function draw() {
+    const s = q.value.trim();
+    const match = l => (!s || l.name_ar.includes(s) || (l.native_name || '').includes(s) || l.code.includes(s.toLowerCase()))
+      && (filter.value !== 'core' || l.is_core)
+      && (filter.value !== 'active' || (l.is_active && !l.is_core))
+      && (filter.value !== 'off' || !l.is_active)
+      && (filter.value !== 'empty' || !n(l.code));
+    const list = state.languages.filter(match);
+    const groups = [
+      ['اللغات الرئيسية الثابتة', list.filter(l => l.is_core)],
+      ['المفعّلة', list.filter(l => !l.is_core && l.is_active)],
+      ['المعطّلة', list.filter(l => !l.is_active)]
+    ].filter(([, g]) => g.length);
+    counter.textContent = `${list.length} من ${state.languages.length} لغة`;
+    box.replaceChildren(...(groups.length ? groups.map(([title, g]) =>
+      h('section.card.stack',
+        h('div.row.between', h('h3', title), h('span.badge', `${g.length}`)),
+        h('div.lang-grid', g.map(card))))
+      : [h('p.muted', 'لا لغات مطابقة.')]));
+  }
+  q.addEventListener('input', draw);
+  filter.addEventListener('change', draw);
+  draw();
+
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'اللغات'),
-      h('p.muted', 'التعطيل يخفي اللغة من التكليفات الجديدة ويحفظ الأعمال السابقة. اللغات الرئيسية ثابتة.')),
+      h('p.muted', 'اضغط البطاقة لتفعيل اللغة أو تعطيلها. التعطيل يخفيها من التكليفات الجديدة ويحفظ الأعمال السابقة، واللغات الرئيسية ثابتة.')),
       h('button.btn.primary', { onclick: add }, '＋ إضافة لغة')),
-    h('div.table-wrap', h('table.responsive',
-      h('thead', h('tr', ['اللغة', 'بلغتها', 'الاتجاه', 'الأعضاء المؤهلون', 'الحالة'].map(t => h('th', t)))),
-      h('tbody', state.languages.map(l => h('tr',
-        h('td', { 'data-label': 'اللغة' }, h('b', l.name_ar), h('span.sub', { dir: 'ltr' }, l.code)),
-        h('td', { 'data-label': 'بلغتها', dir: l.dir }, l.native_name),
-        h('td', { 'data-label': 'الاتجاه' }, l.dir === 'rtl' ? 'يمين ← يسار' : 'يسار → يمين'),
-        h('td', { 'data-label': 'المؤهلون' }, n(l.code) || h('span.badge.warn', 'لا أحد')),
-        h('td', { 'data-label': 'الحالة' }, l.is_core ? h('span.badge.gold', 'رئيسية ثابتة')
-          : h('button.btn.sm', { class: l.is_active ? '' : 'primary', onclick: e => busy(e.currentTarget, async () => {
-            try { await db.update('languages', { code: `eq.${l.code}` }, { is_active: !l.is_active }); reload(); } catch (err) { toast(err.message, 'bad'); }
-          }) }, l.is_active ? 'مفعّلة · تعطيل' : 'معطّلة · تفعيل'))))))));
+    h('div.grid', { style: { marginBottom: '14px' } },
+      h('label.field', 'بحث', q), h('label.field', 'التصفية', filter), h('div.field', h('b', 'المعروض'), counter)),
+    box);
 }

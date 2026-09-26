@@ -151,6 +151,26 @@ export async function render(ctx) {
     }
     const { words, pages, sec } = sums(list);
     out.push(['المجموع', '', '', '', String(words), String(pages), String(minutes(sec))]);
+
+    // ملخّصان في آخر الكشف: حسب النوع وحسب اللغة، ثم الإجمالي (ملاحظة ١١٤)
+    out.push(['', '', '', '', '', '', '']);
+    out.push(['ملخّص حسب نوع المادة', 'عدد الأعمال', '', '', 'الكلمات', 'الصفحات', 'الدقائق']);
+    for (const t of [...TYPE_ORDER, 'مواد أخرى']) {
+      const l = list.filter(r => (r.material_type || 'مادة') === t
+        || (t === 'مواد أخرى' && !TYPE_ORDER.includes(r.material_type || '')));
+      if (!l.length) continue;
+      const g = sums(l);
+      out.push([t, String(l.length), '', '', String(g.words), String(g.pages), String(minutes(g.sec))]);
+    }
+    out.push(['', '', '', '', '', '', '']);
+    out.push(['ملخّص حسب اللغة', 'عدد الأعمال', '', '', 'الكلمات', 'الصفحات', 'الدقائق']);
+    for (const code of [...new Set(list.map(r => r.language_code))].sort()) {
+      const l = list.filter(r => r.language_code === code);
+      const g = sums(l);
+      out.push([langName(code), String(l.length), '', '', String(g.words), String(g.pages), String(minutes(g.sec))]);
+    }
+    out.push(['', '', '', '', '', '', '']);
+    out.push(['الإجمالي العام', String(list.length), '', '', String(words), String(pages), String(minutes(sec))]);
     return { out, list, words, pages, sec };
   };
   const stamp = () => `دليل الإنتاج ${new Date().toISOString().slice(0, 10)}`;
