@@ -33,6 +33,8 @@ const routes = [
   ['/app/me', () => import('./views/me.js'), true],
   ['/app/bank-accounts', () => import('./views/staff.js'), true, true],
   ['/app/cards', () => import('./views/cards.js'), true, true],
+  ['/app/payroll', () => import('./views/payroll.js'), true, true],
+  ['/app/shifts', () => import('./views/shifts.js'), true, true],
   ['/app/stats', () => import('./views/stats.js'), true, true],
   ['/app/revise/:material', () => import('./views/revise.js'), true, true]
 ];
