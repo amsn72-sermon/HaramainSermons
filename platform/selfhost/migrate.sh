@@ -25,4 +25,7 @@ for f in "$DIR"/*.sql; do
     { echo "begin;"; cat "$f"; echo "insert into public.schema_migrations (name) values ('$name');"; echo "commit;"; } | psql_db -q
     echo "✓ $name"
 done
-echo "قاعدة البيانات محدّثة."
+# تحديث ذاكرة PostgREST فورًا، فلا تبقى الدوال الجديدة «غير موجودة» حتى يعاد تشغيله (ملاحظة ١٢٣)
+psql_db -q -c "notify pgrst, 'reload schema'" || true
+docker kill -s SIGUSR1 supabase-rest >/dev/null 2>&1 || true
+echo "قاعدة البيانات محدّثة، وذاكرة الواجهة (PostgREST) أُعيد تحميلها."
