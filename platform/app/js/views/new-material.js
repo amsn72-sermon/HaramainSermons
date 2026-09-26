@@ -42,7 +42,10 @@ export async function render(ctx) {
     reminder: h('select', [5, 15, 30, 60].map(n => h('option', { value: n, selected: n === 15 }, fmtMinutes(n)))),
     escalate: h('input', { type: 'checkbox' })
   };
-  const source = createEditor({ plain: true, label: 'النص العربي', placeholder: 'اكتب النص العربي أو الصقه هنا…', html: draft.source_html || '' });
+  // الأصل المكتوب يُحرَّر على ورقة الكليشة نفسها، فيرى المنسق ما سيصل المترجم (ملاحظة ١٠٨)
+  const source = createEditor({ label: 'النص العربي', dir: 'rtl', detachTools: true,
+    placeholder: 'اكتب النص العربي أو الصقه هنا… ويظهر على الكليشة كما سيصل المترجم',
+    html: draft.source_html || '' });
   for (const [k, el] of Object.entries(f)) if (draft[k] !== undefined && el.type !== 'file') el.type === 'checkbox' ? (el.checked = draft[k]) : (el.value = draft[k]);
 
   function fillKhateebs() {
@@ -60,7 +63,11 @@ export async function render(ctx) {
   // الخطب والدروس تتبع مسجدًا؛ الكتب والمطويات والإعلانات والتوجيهات عامة (ملاحظة ٦٩)
   const mosqueWrap = h('label.field', 'مكان الخطبة / الموقع', f.mosque);
   const pdfWrap = h('label.field', 'ملف الأصل العربي (PDF)', h('small', 'حتى ٢٠ ميغابايت'), f.pdf);
-  const textWrap = h('div.field', h('b', 'النص العربي'), source.el);
+  const textWrap = h('div.field',
+    h('div.row.between', h('b', 'النص العربي على كليشة الهيئة'),
+      h('span.small.muted', 'ما تكتبه هنا هو ما يراه المترجم: الورقة نفسها بصفحاتها وعلامتها المائية')),
+    h('div.ws-tools', source.tools),
+    source.el);
   const syncVisibility = () => {
     sermonOnly.hidden = f.material_type.value !== 'خطب';
     mosqueWrap.hidden = !needsMosque(f.material_type.value);

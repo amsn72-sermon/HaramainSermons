@@ -29,14 +29,14 @@ export function footer(left = 'إدارة ترجمة الحرمين الشريف
   return h('footer.site', h('div.inner', h('span', left), h('span', right)));
 }
 
-// سياسة السرية حاضرة دائمًا: أخضر إن وُقّعت وأحمر إن لم تُوقّع (ملاحظة ٧٦)
+// ميثاق العمل حاضر دائمًا: أخضر إن وُقّع وأحمر إن لم يُوقَّع (ملاحظتا ٧٦ و١٢٥)
 export function policyChip() {
-  const chip = h('button.btn.sm.policy-chip', { type: 'button', title: 'سياسة السرية التامة' });
+  const chip = h('button.btn.sm.policy-chip', { type: 'button', title: 'ميثاق العمل' });
   const paint = () => {
     const ok = !!state.policySigned;
     chip.className = 'btn sm policy-chip ' + (ok ? 'signed' : 'unsigned');
-    chip.replaceChildren(h('span.dot', { 'aria-hidden': 'true' }), 'سياسة السرية');
-    chip.setAttribute('aria-label', ok ? 'سياسة السرية — موقّعة' : 'سياسة السرية — لم تُوقّع بعد');
+    chip.replaceChildren(h('span.dot', { 'aria-hidden': 'true' }), 'ميثاق العمل');
+    chip.setAttribute('aria-label', ok ? 'ميثاق العمل — موقَّع' : 'ميثاق العمل — لم يُوقَّع بعد');
   };
   chip.onclick = async () => {
     const m = await import('./policy.js');
@@ -75,6 +75,7 @@ export function staffShell(view, path) {
          link('/app/staff', 'المترجمون المتخصصون'),
          link('/app/field', 'المرشدون المكانيون'),
          link('/app/cards', 'بطاقات العمل'),
+         link('/app/charter', 'ميثاق العمل'),
          link('/app/payroll', 'الرواتب'),
          link('/app/shifts', 'الحضور والانصراف'),
          mail]),

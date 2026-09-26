@@ -383,8 +383,8 @@ export async function render(ctx, opts = {}) {
           h('div', h('div.small.muted', 'معدل التقييم'), h('div.v', sum.avg_score ? `${sum.avg_score} / 5` : '—'),
             h('div.small.muted', sum.ratings_count ? `${sum.ratings_count} تقييم` : ''))),
         h('p.small.muted', sg
-          ? `وقّع سياسة السرية (نسخة ${sg.policy_version}) باسم «${sg.signed_name}» في ${fmtDateTime(sg.accepted_at)}.`
-          : 'لم يوقّع على سياسة السرية بنسختها الحالية بعد.'),
+          ? `وقّع ميثاق العمل (نسخة ${sg.policy_version}) باسم «${sg.signed_name}» في ${fmtDateTime(sg.accepted_at)}.`
+          : 'لم يوقّع على ميثاق العمل بنسخته الحالية بعد.'),
         h('fieldset', h('legend', 'تقييم جديد'),
           h('div.stack', { style: { gap: '8px' } }, h('label.field', 'الدرجة', score), h('label.field', 'ملاحظة', note), h('div.row', add))),
         h('fieldset', h('legend', 'سجل التقييمات'), list)),

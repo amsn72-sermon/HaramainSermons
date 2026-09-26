@@ -251,7 +251,10 @@ export async function render(ctx) {
     const res = await dialog({
       title: 'رسالة جديدة إلى الفريق',
       body: h('div.stack',
-        error ? h('p.small.bad', 'تعذّر الإرسال: ' + error) : null,
+        error ? h('div.err-box',
+          h('b', '⚠ لم تُرسَل الرسالة'),
+          h('p.small', error),
+          h('p.small.muted', 'ما كتبتَه محفوظ أمامك. عالج السبب ثم اضغط إرسال، أو احذف المرفق وأرسل النص وحده.')) : null,
         h('div.grid-2', h('label.field', 'النوع', f.kind),
           h('label.field', 'المرسَل إليهم', f.audience, counter)),
         pickWrap,
@@ -287,7 +290,11 @@ export async function render(ctx) {
         await storage.upload('circulars', path, res.file);
       }
     } catch (err) {
-      return compose(res, 'تعذّر رفع المرفق — ' + err.message);
+      console.error('[circulars] upload failed', err);
+      const size = (res.file.size / (1024 * 1024)).toFixed(1);
+      return compose({ ...res, file: null },
+        `تعذّر رفع المرفق «${res.file.name}» (${size} ميغابايت): ${err.message}. `
+        + 'أعد اختيار الملف أو أرسل النص بلا مرفق.');
     }
     try {
       await db.rpc('send_circular', {
@@ -299,8 +306,9 @@ export async function render(ctx) {
       reload();
     } catch (err) {
       // النص محفوظ: تُفتح النافذة من جديد بما كُتب فيها مع بيان السبب
+      console.error('[circulars] send_circular failed', err);
       toast(err.message, 'bad');
-      return compose(res, err.message);
+      return compose(res, err.message + (err.status ? ` (رمز ${err.status})` : ''));
     }
   }
 

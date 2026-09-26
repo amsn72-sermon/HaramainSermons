@@ -12,9 +12,16 @@ const SPOTS = ['المسجد الحرام — المسعى', 'المسجد ال�
 export async function render(ctx) {
   const want = ['today', 'month'].includes(ctx.query?.get('tab')) ? ctx.query.get('tab') : 'week';
 
-  const members = (await db.select('profiles', {
-    select: 'id,full_name,member_no,track,status', status: 'eq.active', order: 'full_name.asc'
-  })).filter(m => m.track === 'field');
+  let members = [];
+  try {
+    const rows = await db.rpc('shift_candidates');
+    members = (Array.isArray(rows) ? rows : []).map(r => ({ ...r, id: r.member_id }));
+  } catch {
+    members = (await db.select('profiles', {
+      select: 'id,full_name,member_no,track,status', status: 'eq.active', order: 'full_name.asc'
+    })).map(m => ({ ...m, member_id: m.id, is_field: m.track === 'field' }));
+  }
+  const fieldOnly = members.filter(m => m.is_field);
 
   const panel = h('div.staff-panel');
   const TABS = [['week', 'الجدول الأسبوعي'], ['today', 'حضور اليوم'], ['month', 'تقرير الشهر']];
@@ -46,8 +53,8 @@ export async function render(ctx) {
     h('div.tabs', { role: 'tablist' }, btns),
     panel);
   if (!members.length) {
-    panel.replaceChildren(h('div.empty', h('b', 'لا مرشدين مكانيين مفعّلين'),
-      h('span', 'أضف المرشدين من شاشة «المرشدون المكانيون» ثم اجدول ورديّاتهم هنا.')));
+    panel.replaceChildren(h('div.empty', h('b', 'لا أعضاء مفعّلين'),
+      h('span', 'فعّل أعضاء الفريق أولًا، ثم اجدول ورديّاتهم هنا.')));
     return view;
   }
   await show(want);
@@ -80,12 +87,15 @@ async function weekSection(members) {
     const days = Array.from({ length: 7 }, (_, i) => addDays(from, i));
     const at = (member, day) => rows.filter(r => r.member_id === member && r.shift_date === day);
 
+    // الصفوف: المرشدون، ومن جُدولت له وردية هذا الأسبوع ولو من غيرهم (ملاحظة ١٢٧)
+    const withShift = new Set(rows.map(r => r.member_id));
+    const shown = members.filter(m => m.is_field || withShift.has(m.id));
     grid.replaceChildren(h('div.table-wrap', h('table.week-grid',
       h('thead', h('tr', h('th', 'المرشد'),
         days.map(d => h('th', h('span', DAY_NAMES[new Date(`${d}T00:00:00`).getDay()]),
           h('div.small.muted', d.slice(5).replace('-', '/')),
           d === today() ? h('span.badge.gold', 'اليوم') : null)))),
-      h('tbody', members.map(m => h('tr',
+      h('tbody', shown.map(m => h('tr',
         h('th.who', h('b', m.full_name), h('div.small.muted', m.member_no || '—')),
         days.map(d => h('td.day',
           at(m.id, d).map(s => chip(s, load)),
@@ -118,8 +128,15 @@ function chip(s, reload) {
 
 async function view(s, reload) {
   const [label] = SHIFT_STATUS[s.status] || [s.status];
+  const mates = s.crew_id
+    ? await db.select('shifts', { select: 'member_id,is_lead,member:profiles(full_name)', crew_id: `eq.${s.crew_id}` }).catch(() => [])
+    : [];
+  const lead = mates.find(x => x.is_lead);
   const body = h('div.stack',
     h('p', `${hhmm(s.start_at)} — ${hhmm(s.end_at)}`, s.location ? ` · ${s.location}` : ''),
+    mates.length > 1 ? h('p.small',
+      h('b', 'مسؤول الوردية: '), (lead?.member?.full_name || '—'),
+      h('div.small.muted', 'ومعه: ' + mates.filter(x => !x.is_lead).map(x => x.member?.full_name || '—').join('، '))) : null,
     h('p.small.muted', `الحالة: ${label}`
       + (s.check_in_at ? ` · حضر ${fmtDateTime(s.check_in_at)}` : '')
       + (s.check_out_at ? ` · انصرف ${fmtDateTime(s.check_out_at)}` : '')
@@ -137,8 +154,12 @@ async function view(s, reload) {
   if (!choice) return;
   if (choice === 'edit') return edit(s, null, reload);
   if (choice === 'delete') {
-    if (!await confirm('حذف الوردية', 'تُحذف الوردية من الجدول.', 'حذف', 'danger')) return;
-    await db.rpc('delete_shift', { p_id: s.id });
+    const crewWide = !!s.crew_id;
+    if (!await confirm('حذف الوردية',
+      crewWide ? 'تُحذف الوردية من الجدول عن مسؤولها وأعضائها جميعًا.' : 'تُحذف الوردية من الجدول.',
+      'حذف', 'danger')) return;
+    if (crewWide) await db.rpc('delete_shift_crew', { p_crew: s.crew_id });
+    else await db.rpc('delete_shift', { p_id: s.id });
     toast('حُذفت الوردية', 'ok');
     return reload();
   }
@@ -148,12 +169,45 @@ async function view(s, reload) {
 }
 
 async function edit(s, members, reload) {
-  const list = members || (await db.select('profiles', {
-    select: 'id,full_name,track,status', status: 'eq.active', order: 'full_name.asc'
-  })).filter(m => m.track === 'field');
+  let list = members;
+  if (!list || !list.length) {
+    try {
+      const rows = await db.rpc('shift_candidates');
+      list = (Array.isArray(rows) ? rows : []).map(r => ({ ...r, id: r.member_id }));
+    } catch {
+      list = (await db.select('profiles', { select: 'id,full_name,track,status', status: 'eq.active', order: 'full_name.asc' }))
+        .map(m => ({ ...m, is_field: m.track === 'field' }));
+    }
+  }
+  if (!list.length) return toast('لا أعضاء مفعّلين لجدولة وردية', 'bad');
 
-  const who = h('select', { 'aria-label': 'المرشد' }, list.map(m => h('option', { value: m.id }, m.full_name)));
-  who.value = s.member_id || (list[0] && list[0].id) || '';
+  // صفوف الوردية القائمة، ليُعرف مسؤولها وأعضاؤها عند التعديل
+  let crew = [];
+  if (s.crew_id) {
+    crew = await db.select('shifts', { select: 'member_id,is_lead', crew_id: `eq.${s.crew_id}` }).catch(() => []);
+  } else if (s.id) {
+    crew = [{ member_id: s.member_id, is_lead: true }];
+  }
+  const leadId = (crew.find(c => c.is_lead) || {}).member_id || s.member_id || (list[0] && list[0].id);
+  const picked = new Set(crew.filter(c => !c.is_lead).map(c => c.member_id));
+
+  const label = m => `${m.full_name}${m.is_field ? '' : ' — من خارج الإرشاد'}`;
+  const who = h('select', { 'aria-label': 'مسؤول الوردية' }, list.map(m => h('option', { value: m.id }, label(m))));
+  who.value = leadId || '';
+
+  const crewBox = h('div.pick-list');
+  const counter = h('span.small.muted');
+  const paintCrew = () => {
+    counter.textContent = picked.size ? `معه ${picked.size} من الفريق` : 'لا أحد معه — وردية فردية';
+    crewBox.replaceChildren(...list.filter(m => m.id !== who.value).map(m => {
+      const cb = h('input', { type: 'checkbox', checked: picked.has(m.id) ? true : null });
+      cb.onchange = () => { cb.checked ? picked.add(m.id) : picked.delete(m.id); paintCrew(); };
+      return h('label.check', cb, h('span', label(m)));
+    }));
+  };
+  who.addEventListener('change', () => { picked.delete(who.value); paintCrew(); });
+  paintCrew();
+
   const date = h('input', { type: 'date', value: s.shift_date || today(), 'aria-label': 'التاريخ' });
   const start = h('input', { type: 'time', value: hhmm(s.start_at) || '08:00', 'aria-label': 'من' });
   const end = h('input', { type: 'time', value: hhmm(s.end_at) || '14:00', 'aria-label': 'إلى' });
@@ -161,12 +215,14 @@ async function edit(s, members, reload) {
   const note = h('input', { value: s.note || '', maxlength: 200, 'aria-label': 'ملاحظة' });
 
   const ok = await dialog({
-    title: s.id ? 'تعديل وردية' : 'وردية جديدة',
+    title: s.id || s.crew_id ? 'تعديل وردية' : 'وردية جديدة',
     body: h('div.stack',
-      h('label.field', 'المرشد', who),
+      h('label.field', 'مسؤول الوردية', who,
+        h('small', 'المرشدون المكانيون أولًا، ويجوز أن يكون المسؤول من خارجهم.')),
       h('div.row.wrap', h('label.field', 'التاريخ', date), h('label.field', 'من', start), h('label.field', 'إلى', end)),
       h('label.field', 'الموقع', spot,
         h('datalist#hs-spots', SPOTS.map(v => h('option', { value: v })))),
+      h('fieldset', h('legend', 'أعضاء الوردية معه '), counter, crewBox),
       h('label.field', 'ملاحظة', note)),
     buttons: [
       { label: 'حفظ', kind: 'primary', value: true,
@@ -179,12 +235,16 @@ async function edit(s, members, reload) {
   });
   if (!ok) return;
   try {
-    await db.rpc('save_shift', { p_member: who.value, p_date: date.value, p_start: start.value, p_end: end.value,
-      p_location: spot.value || null, p_id: s.id || null, p_note: note.value || null });
-    toast('حُفظت الوردية', 'ok');
+    await db.rpc('save_shift_crew', {
+      p_lead: who.value, p_members: [...picked], p_date: date.value,
+      p_start: start.value, p_end: end.value,
+      p_location: spot.value || null, p_note: note.value || null,
+      p_crew: s.crew_id || null
+    });
+    toast(picked.size ? `حُفظت الوردية لـ${picked.size + 1} أعضاء` : 'حُفظت الوردية', 'ok');
     await reload();
   } catch (err) {
-    toast(/duplicate|unique/i.test(err.message) ? 'للمرشد وردية بالوقت نفسه في هذا اليوم' : err.message, 'bad');
+    toast(/duplicate|unique/i.test(err.message) ? 'لأحد المختارين وردية بالوقت نفسه في هذا اليوم' : err.message, 'bad');
   }
 }
 
