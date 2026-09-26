@@ -12,6 +12,23 @@ export const PAYROLL_STATUS = {
   paid: ['مصروفة', 'ok']
 };
 
+// أنواع الأعمال في التسعيرة بالمقطوع (ملاحظة ١١٨)
+export const WORK_KIND = {
+  sermon_audio: 'خطبة مع تسجيل صوتي',
+  sermon_text: 'خطبة كتابية',
+  lesson_audio: 'درس علمي مع تسجيل صوتي',
+  lesson_text: 'درس علمي كتابي',
+  book: 'كتاب',
+  booklet: 'مطوية',
+  post: 'منشور',
+  announcement: 'إعلان',
+  directive: 'توجيه',
+  other: 'عمل آخر'
+};
+
+export const WORK_KINDS = Object.keys(WORK_KIND);
+export const kindName = k => WORK_KIND[k] || k;
+
 export const SHIFT_STATUS = {
   scheduled: ['مجدولة', ''],
   present: ['حضر', 'ok'],
