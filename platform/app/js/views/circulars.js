@@ -103,11 +103,26 @@ function readerCard(c, mine, onDone) {
           : h('p.small.muted', 'هذه الرسالة للعلم فقط ولا تحتاج توقيعًا.')));
 }
 
+// ---------------------------------------------------------------------
+// شاشة المراسلات: قائمة ما أُرسل، وحاله، وإدارته (ملاحظة ١١٩)
+// ---------------------------------------------------------------------
+const AUDIENCE_LABEL = {
+  all: 'كل الفريق',
+  translators: 'المترجمون المتخصصون',
+  field: 'المرشدون المكانيون',
+  coordinators: 'المنسقون ومدير المشروع',
+  selected: 'أعضاء محدَّدون'
+};
+
 export async function render(ctx) {
   const rows = await db.select('circulars', { select: SELECT, order: 'sent_at.desc', limit: 200 });
   const me = state.profile.id;
   const mineOf = c => (c.recipients || []).find(r => r.member_id === me) || null;
-  const reload = () => ctx.navigate('/app/circulars', { replace: true });
+  const reload = () => ctx.navigate(location.pathname + location.search, { replace: true });
+
+  const stats = Object.fromEntries((await db.select('circular_stats', { select: '*' }).catch(() => []))
+    .map(s => [s.circular_id, s]));
+  const stOf = c => stats[c.id] || { recipients: (c.recipients || []).length, acked: 0, opened: 0 };
 
   async function open(c) {
     const mine = mineOf(c);
@@ -119,39 +134,60 @@ export async function render(ctx) {
     });
   }
 
+  // ---------------- كشف من وُجّهت إليهم ----------------
   async function who(c) {
-    const list = (c.recipients || []).slice()
-      .sort((a, b) => (a.acked_at ? 1 : 0) - (b.acked_at ? 1 : 0));
-    await dialog({
-      title: `من وقّع على «${c.title}»`,
-      body: h('div.table-wrap', h('table.responsive',
-        h('thead', h('tr', ['العضو', 'الدور', 'الاطلاع', 'التوقيع بالعلم'].map(t => h('th', t)))),
-        h('tbody', list.map(r => h('tr',
-          h('td', { 'data-label': 'العضو' }, r.member?.full_name || '—'),
-          h('td', { 'data-label': 'الدور' }, ROLE_LABEL[r.member?.role] || '—'),
-          h('td', { 'data-label': 'الاطلاع' }, r.read_at ? fmtDateTime(r.read_at) : h('span.muted', 'لم يطّلع')),
-          h('td', { 'data-label': 'التوقيع' }, r.acked_at
-            ? h('span', h('span.badge.ok', 'وقّع'), h('span.sub', `${r.signed_name || ''} — ${fmtDateTime(r.acked_at)}`),
-                r.signature_path ? sigCell(r.signature_path) : null)
-            : h('span.badge.warn', 'لم يوقّع'))))))),
+    let list = await db.rpc('circular_recipients_list', { p_circular: c.id }).catch(() => null);
+    if (!Array.isArray(list)) {
+      list = (c.recipients || []).map(r => ({
+        member_id: r.member_id, full_name: r.member?.full_name, role: r.member?.role,
+        read_at: r.read_at, acked_at: r.acked_at, signed_name: r.signed_name, signature_path: r.signature_path
+      }));
+    }
+    const signed = list.filter(r => r.acked_at);
+    const waiting = list.filter(r => !r.acked_at);
+
+    const tableOf = (items, kind) => h('div.table-wrap', h('table.responsive',
+      h('thead', h('tr', ['العضو', 'الدور', 'الاطّلاع', kind === 'signed' ? 'التوقيع بالعلم' : 'الحال'].map(t => h('th', t)))),
+      h('tbody', items.map(r => h('tr',
+        h('td', { 'data-label': 'العضو' }, r.full_name || '—', r.member_no ? h('div.small.muted', r.member_no) : null),
+        h('td', { 'data-label': 'الدور' }, ROLE_LABEL[r.role] || '—'),
+        h('td', { 'data-label': 'الاطّلاع' }, r.read_at ? fmtDateTime(r.read_at) : h('span.muted', 'لم يفتحها')),
+        kind === 'signed'
+          ? h('td', { 'data-label': 'التوقيع' },
+              h('span.badge.ok', 'وقّع'), h('span.sub', `${r.signed_name || ''} — ${fmtDateTime(r.acked_at)}`),
+              r.signature_path ? sigCell(r.signature_path) : null)
+          : h('td', { 'data-label': 'الحال' },
+              r.read_at ? h('span.badge.warn', 'اطّلع ولم يوقّع') : h('span.badge.bad', 'لم يفتحها')))))));
+
+    const v = await dialog({
+      title: `كشف «${c.title}»`,
+      body: h('div.stack',
+        h('div.pay-sum',
+          h('div.pay-cell', h('span', 'وُجّهت إلى'), h('b', String(list.length))),
+          h('div.pay-cell', h('span', 'وقّعوا'), h('b', String(signed.length))),
+          h('div.pay-cell', { class: waiting.length ? 'warn' : '' },
+            h('span', 'لم يوقّعوا'), h('b', String(waiting.length)))),
+        h('p.small.muted', `أرسلها ${c.sender?.full_name || '—'} — ${fmtDateTime(c.sent_at)}`
+          + (c.edited_at ? ` · عُدّلت ${fmtDateTime(c.edited_at)}` : '')
+          + (c.reminded_at ? ` · آخر تذكير ${fmtDateTime(c.reminded_at)}` : '')),
+        waiting.length ? h('div.stack', h('h3', `لم يوقّعوا (${waiting.length})`), tableOf(waiting, 'waiting')) : null,
+        signed.length ? h('div.stack', h('h3', `وقّعوا (${signed.length})`), tableOf(signed, 'signed')) : null),
       buttons: [
         { label: 'تصدير الكشف', value: 'export' },
         { label: 'إغلاق', value: null }
       ]
-    }).then(async v => {
-      if (v !== 'export') return;
-      const rows2 = [['العضو', 'الدور', 'الاطلاع', 'التوقيع بالعلم', 'الاسم الموقَّع به']];
-      for (const r of list) {
-        rows2.push([r.member?.full_name || '—', ROLE_LABEL[r.member?.role] || '—',
-          r.read_at ? fmtDateTime(r.read_at) : 'لم يطّلع',
-          r.acked_at ? fmtDateTime(r.acked_at) : 'لم يوقّع', r.signed_name || '']);
-      }
-      try {
-        const { exportPdf } = await import('../teamexport.js');
-        const note = `${list.filter(r => r.acked_at).length} وقّعوا من ${list.length} — ${fmtDateTime(new Date())}`;
-        if (!exportPdf(rows2, `كشف التواقيع: ${c.title}`, { note })) toast('اسمح بالنوافذ المنبثقة.', 'bad');
-      } catch (err) { toast(err.message, 'bad'); }
     });
+    if (v !== 'export') return;
+
+    const sheet = [['العضو', 'الدور', 'الاطّلاع', 'التوقيع بالعلم', 'الاسم الموقَّع به'],
+      ...list.map(r => [r.full_name || '—', ROLE_LABEL[r.role] || '—',
+        r.read_at ? fmtDateTime(r.read_at) : 'لم يفتحها',
+        r.acked_at ? fmtDateTime(r.acked_at) : 'لم يوقّع', r.signed_name || ''])];
+    try {
+      const { exportPdf } = await import('../teamexport.js');
+      const note = `${signed.length} وقّعوا من ${list.length} — ${fmtDateTime(new Date())}`;
+      if (!exportPdf(sheet, `كشف التواقيع: ${c.title}`, { note })) toast('اسمح بالنوافذ المنبثقة.', 'bad');
+    } catch (err) { toast(err.message, 'bad'); }
   }
 
   // صورة التوقيع اليدوي داخل السجل
@@ -163,40 +199,61 @@ export async function render(ctx) {
     return box;
   }
 
-  async function compose() {
+  // ---------------- إنشاء رسالة ----------------
+  // ما يُكتب لا يضيع: إن ردّ الخادم بخطأ عادت النافذة بما كُتب فيها (ملاحظة ١١٩)
+  async function compose(prefill = null, error = null) {
+    const d = prefill || {};
     const f = {
-      title: h('input', { maxlength: 200, placeholder: 'عنوان الرسالة' }),
+      title: h('input', { maxlength: 200, placeholder: 'عنوان الرسالة', value: d.title || '' }),
       kind: h('select', Object.entries(KIND_LABEL).map(([k, v]) => h('option', { value: k }, v))),
-      audience: h('select',
-        h('option', { value: 'all' }, 'كل الفريق'),
-        h('option', { value: 'translators' }, 'المترجمون والمراجعون'),
-        h('option', { value: 'field' }, 'فريق الإرشاد المكاني'),
-        h('option', { value: 'coordinators' }, 'المنسقون ومدير المشروع'),
-        h('option', { value: 'selected' }, 'أعضاء أحددهم')),
+      audience: h('select', Object.entries(AUDIENCE_LABEL).map(([k, v]) => h('option', { value: k }, v))),
       body: h('textarea', { rows: 6, placeholder: 'نص الرسالة — يمكن تركه إذا أرفقت ملف PDF' }),
       pdf: h('input', { type: 'file', accept: 'application/pdf' }),
-      require_ack: h('input', { type: 'checkbox', checked: true }),
-      blocking: h('input', { type: 'checkbox' })
+      require_ack: h('input', { type: 'checkbox', checked: d.require_ack !== false }),
+      blocking: h('input', { type: 'checkbox', checked: !!d.blocking })
     };
-    // الإلزام لا يقوم بلا توقيع
+    if (d.kind) f.kind.value = d.kind;
+    if (d.audience) f.audience.value = d.audience;
+    f.body.value = d.body || '';
+
     f.require_ack.addEventListener('change', () => {
       if (!f.require_ack.checked) f.blocking.checked = false;
       f.blocking.disabled = !f.require_ack.checked;
     });
-    const members = await db.select('profiles', { select: 'id,full_name,role,track', status: 'eq.active', order: 'full_name.asc' });
-    const picked = new Set();
+
+    const members = await db.select('profiles', {
+      select: 'id,full_name,role,track', status: 'eq.active', order: 'full_name.asc' });
+    const picked = new Set(d.members || []);
+    const counter = h('span.small.muted');
+    const paintCount = () => {
+      const n = f.audience.value === 'selected' ? picked.size
+        : members.filter(m => f.audience.value === 'all'
+            || (f.audience.value === 'translators' && m.role === 'translator' && m.track !== 'field')
+            || (f.audience.value === 'field' && m.track === 'field')
+            || (f.audience.value === 'coordinators' && ['coordinator', 'manager'].includes(m.role))).length;
+      counter.textContent = n ? `تصل إلى ${n} عضوًا` : 'لا أعضاء في هذه الفئة — اختر غيرها';
+      counter.className = 'small ' + (n ? 'muted' : 'bad');
+    };
     const pickBox = h('div.pick-list', members.map(m => {
-      const cb = h('input', { type: 'checkbox' });
-      cb.onchange = () => cb.checked ? picked.add(m.id) : picked.delete(m.id);
-      return h('label.check', cb, h('span', m.full_name, h('span.small.muted', ` — ${ROLE_LABEL[m.role]}`)));
+      const cb = h('input', { type: 'checkbox', checked: picked.has(m.id) ? true : null });
+      cb.onchange = () => { cb.checked ? picked.add(m.id) : picked.delete(m.id); paintCount(); };
+      return h('label.check', cb, h('span', m.full_name,
+        h('span.small.muted', ` — ${ROLE_LABEL[m.role]}${m.track === 'field' ? ' · إرشاد مكاني' : ''}`)));
     }));
-    const pickWrap = h('fieldset', { hidden: true }, h('legend', 'الأعضاء المحددون'), pickBox);
-    f.audience.addEventListener('change', () => { pickWrap.hidden = f.audience.value !== 'selected'; });
+    const pickWrap = h('fieldset', { hidden: f.audience.value !== 'selected' },
+      h('legend', 'الأعضاء المحددون'), pickBox);
+    f.audience.addEventListener('change', () => {
+      pickWrap.hidden = f.audience.value !== 'selected';
+      paintCount();
+    });
+    paintCount();
 
     const res = await dialog({
       title: 'رسالة جديدة إلى الفريق',
       body: h('div.stack',
-        h('div.grid-2', h('label.field', 'النوع', f.kind), h('label.field', 'المرسَل إليهم', f.audience)),
+        error ? h('p.small.bad', 'تعذّر الإرسال: ' + error) : null,
+        h('div.grid-2', h('label.field', 'النوع', f.kind),
+          h('label.field', 'المرسَل إليهم', f.audience, counter)),
         pickWrap,
         h('label.field', 'العنوان', f.title),
         h('label.field', 'نص الرسالة', f.body),
@@ -222,12 +279,17 @@ export async function render(ctx) {
       ]
     });
     if (!res) return;
+
+    let path = null;
     try {
-      let path = null;
       if (res.file) {
         path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pdf`;
         await storage.upload('circulars', path, res.file);
       }
+    } catch (err) {
+      return compose(res, 'تعذّر رفع المرفق — ' + err.message);
+    }
+    try {
       await db.rpc('send_circular', {
         p_title: res.title, p_kind: res.kind, p_body: res.body, p_pdf_path: path,
         p_audience: res.audience, p_members: res.audience === 'selected' ? res.members : null,
@@ -235,10 +297,14 @@ export async function render(ctx) {
       });
       toast('أُرسلت الرسالة.', 'ok');
       reload();
-    } catch (err) { toast(err.message, 'bad'); }
+    } catch (err) {
+      // النص محفوظ: تُفتح النافذة من جديد بما كُتب فيها مع بيان السبب
+      toast(err.message, 'bad');
+      return compose(res, err.message);
+    }
   }
 
-  // ---------------- تحكّم الإدارة فيما أُرسل (ملاحظة ١٠٩) ----------------
+  // ---------------- تحكّم الإدارة فيما أُرسل ----------------
   async function edit(c) {
     const f = {
       title: h('input', { maxlength: 200, value: c.title || '' }),
@@ -248,7 +314,7 @@ export async function render(ctx) {
       blocking: h('input', { type: 'checkbox', checked: c.blocking ? true : null })
     };
     f.body.value = c.body || '';
-    const st = stats[c.id] || {};
+    const st = stOf(c);
     const res = await dialog({
       title: 'تعديل الرسالة',
       body: h('div.stack',
@@ -257,7 +323,7 @@ export async function render(ctx) {
         h('label.field', 'نص الرسالة', f.body),
         h('label.check', f.require_ack, 'يلزم توقيع العضو بالعلم'),
         h('label.check', f.blocking, 'تعميم ملزم يحجب متابعة المهام'),
-        c.pdf_path ? h('p.small.muted', 'المرفق لا يُستبدل من هنا: احذف الرسالة وأرسلها من جديد بمرفق آخر.') : null),
+        c.pdf_path ? h('p.small.muted', 'المرفق لا يُستبدل من هنا: أرسل رسالة جديدة بمرفق آخر ثم أرشف هذه.') : null),
       buttons: [
         { label: 'حفظ التعديل', kind: 'primary', validate: () => {
           if (f.title.value.trim().length < 3) { toast('اكتب عنوان الرسالة.', 'bad'); return false; }
@@ -291,49 +357,132 @@ export async function render(ctx) {
     catch (err) { toast(err.message, 'bad'); }
   }
 
+  async function archive(c, on) {
+    if (on && !await confirm('أرشفة الرسالة',
+      `تُخفى «${c.title}» عن الفريق ويبقى سجلها وتواقيعها عندك في «المؤرشفة». متابعة؟`, 'أرشفة')) return;
+    try {
+      await db.rpc('archive_circular', { p_id: c.id, p_on: !!on });
+      toast(on ? 'أُرشفت الرسالة.' : 'أُعيدت الرسالة إلى الفريق.', 'ok');
+      reload();
+    } catch (err) { toast(err.message, 'bad'); }
+  }
+
   async function remove(c) {
-    const st = stats[c.id] || {};
+    const st = stOf(c);
     if (!await confirm('حذف الرسالة',
-      `تُحذف «${c.title}» نهائيًّا ومعها سجل من وقّع عليها (${st.acked ?? 0} توقيعًا). لا يمكن التراجع.`,
+      `تُحذف «${c.title}» نهائيًّا ومعها سجل من وقّع عليها (${st.acked ?? 0} توقيعًا) عند الجميع. ولو أردت إخفاءها مع حفظ السجل فاختر «أرشفة» بدلًا من الحذف.`,
       'حذف نهائي', 'danger')) return;
     try { await db.rpc('delete_circular', { p_id: c.id }); toast('حُذفت الرسالة.', 'ok'); reload(); }
     catch (err) { toast(err.message, 'bad'); }
   }
 
-  const stats = Object.fromEntries((await db.select('circular_stats', { select: '*' }).catch(() => []))
-    .map(s => [s.circular_id, s]));
-
-  const list = rows.length ? h('div.stack', rows.map(c => {
+  // ---------------- بطاقة الرسالة في القائمة ----------------
+  function card(c) {
     const mine = mineOf(c);
-    const st = stats[c.id] || {};
+    const st = stOf(c);
+    const waiting = Math.max(0, (st.recipients ?? 0) - (st.acked ?? 0));
     const pending = mine && c.require_ack && !mine.acked_at;
-    return h('article.card.circular-row', { class: pending ? 'pending' : '' },
-      h('div.row',
+    const archived = !!c.archived_at;
+    const pct = st.recipients ? Math.round(((st.acked ?? 0) / st.recipients) * 100) : 0;
+
+    const admin = isAdmin() ? h('div.row.wrap',
+      h('button.btn.sm', { type: 'button', onclick: () => who(c) }, 'من وقّع'),
+      h('button.btn.sm', { type: 'button', title: 'تعديل نص الرسالة وخياراتها', onclick: () => edit(c) }, 'تعديل'),
+      c.require_ack && waiting > 0 && !archived
+        && h('button.btn.sm', { type: 'button', title: 'تذكير من لم يوقّع', onclick: e => busy(e.currentTarget, () => remind(c)) }, 'تذكير'),
+      c.blocking && !archived && h('button.btn.sm', { type: 'button', title: 'رفع الإلزام فلا يُحجب العمل',
+        onclick: e => busy(e.currentTarget, () => unblock(c)) }, 'إيقاف الإلزام'),
+      h('button.btn.sm', { type: 'button', title: archived ? 'إعادتها إلى الفريق' : 'إخفاؤها عن الفريق مع حفظ سجلها',
+        onclick: e => busy(e.currentTarget, () => archive(c, !archived)) }, archived ? 'إعادة النشر' : 'أرشفة'),
+      isManager() && h('button.btn.sm.danger', { type: 'button', onclick: e => busy(e.currentTarget, () => remove(c)) }, 'حذف')) : null;
+
+    return h('article.card.circular-row', { class: [pending ? 'pending' : '', archived ? 'archived' : ''].join(' ').trim() },
+      h('div.row.wrap',
         h('span.badge', { class: KIND_CLASS[c.kind] || '' }, KIND_LABEL[c.kind] || 'تعميم'),
-        h('b', { style: { flex: 1, minWidth: '180px' } }, c.title),
+        h('b.grow', { style: { minWidth: '180px' } }, c.title),
+        archived && h('span.badge', 'مؤرشفة'),
+        c.blocking && !archived && h('span.badge.bad', 'ملزم'),
         mine && (mine.acked_at ? h('span.badge.ok', 'وقّعتَ بالعلم')
-          : c.require_ack ? h('span.badge.warn', 'بانتظار توقيعك') : h('span.badge', 'للعلم')),
-        c.blocking && h('span.badge.bad', 'ملزم'),
-        isAdmin() && h('span.small.muted', `وقّع ${st.acked ?? 0} من ${st.recipients ?? 0}`)),
-      h('p.small.muted', `${c.sender?.full_name || ''} — ${fmtDateTime(c.sent_at)}${c.pdf_path ? ' — مرفق PDF' : ''}`),
+          : c.require_ack ? h('span.badge.warn', 'بانتظار توقيعك') : h('span.badge', 'للعلم'))),
+      h('div.circ-meta.small.muted',
+        h('span', '🕔 ' + fmtDateTime(c.sent_at)),
+        h('span', '✎ ' + (c.sender?.full_name || '—')),
+        h('span', '👥 ' + (AUDIENCE_LABEL[c.audience] || c.audience || '—')),
+        c.pdf_path ? h('span', '📎 مرفق PDF') : null,
+        c.edited_at ? h('span', 'عُدّلت ' + fmtDateTime(c.edited_at)) : null,
+        c.reminded_at ? h('span', 'آخر تذكير ' + fmtDateTime(c.reminded_at)) : null),
       c.body && h('p.clamp-2', c.body),
-      h('div.row',
-        h('button.btn.sm', { type: 'button', onclick: () => open(c) }, pending ? 'اطّلع ووقّع' : 'عرض'),
-        isAdmin() && h('button.btn.sm', { type: 'button', onclick: () => who(c) }, 'من وقّع'),
-        isAdmin() && h('button.btn.sm', { type: 'button', title: 'تعديل نص الرسالة وخياراتها', onclick: () => edit(c) }, 'تعديل'),
-        isAdmin() && (st.recipients ?? 0) > (st.acked ?? 0) && c.require_ack
-          && h('button.btn.sm', { type: 'button', title: 'تذكير من لم يوقّع', onclick: e => busy(e.currentTarget, () => remind(c)) }, 'تذكير'),
-        isAdmin() && c.blocking && h('button.btn.sm', { type: 'button', title: 'رفع الإلزام فلا يُحجب العمل',
-          onclick: e => busy(e.currentTarget, () => unblock(c)) }, 'إيقاف الإلزام'),
-        isManager() && h('button.btn.sm.danger', { type: 'button', onclick: e => busy(e.currentTarget, () => remove(c)) }, 'حذف')));
-  })) : emptyState('لا مراسلات بعد', isAdmin() ? 'أرسل أول رسالة إلى الفريق.' : 'تظهر هنا التعاميم والتوجيهات الموجّهة إليك.');
+      isAdmin() && c.require_ack ? h('div.circ-sign',
+        h('div.progress', h('i', { style: { width: pct + '%' } })),
+        h('span.small',
+          h('b', `${st.acked ?? 0}`), ` وقّعوا من `, h('b', `${st.recipients ?? 0}`),
+          waiting > 0 ? h('span.badge.warn', `${waiting} لم يوقّعوا`) : h('span.badge.ok', 'وقّع الجميع'))) : null,
+      h('div.row.wrap',
+        h('button.btn.sm.primary', { type: 'button', onclick: () => open(c) }, pending ? 'اطّلع ووقّع' : 'عرض'),
+        admin));
+  }
+
+  // ---------------- القائمة ومرشّحاتها ----------------
+  const visible = rows.filter(c => isAdmin() || !c.archived_at);
+  const FILTERS = isAdmin()
+    ? [['active', 'المرسلة'], ['waiting', 'بانتظار توقيع'], ['blocking', 'الملزمة'], ['archived', 'المؤرشفة'], ['all', 'الكل']]
+    : [['all', 'الكل'], ['waiting', 'بانتظار توقيعي']];
+  const match = (c, key) => {
+    const st = stOf(c);
+    const mine = mineOf(c);
+    if (key === 'archived') return !!c.archived_at;
+    if (key === 'active') return !c.archived_at;
+    if (key === 'blocking') return c.blocking && !c.archived_at;
+    if (key === 'waiting') {
+      return isAdmin()
+        ? !c.archived_at && c.require_ack && (st.recipients ?? 0) > (st.acked ?? 0)
+        : !!(mine && c.require_ack && !mine.acked_at);
+    }
+    return true;
+  };
+
+  const listBox = h('div.stack');
+  let current = FILTERS[0][0];
+  const paint = () => {
+    const items = visible.filter(c => match(c, current));
+    listBox.replaceChildren(items.length
+      ? h('div.stack', items.map(card))
+      : emptyState('لا مراسلات في هذا التبويب',
+          isAdmin() ? 'جرّب تبويب «الكل» أو أرسل رسالة جديدة.' : 'تظهر هنا التعاميم والتوجيهات الموجّهة إليك.'));
+  };
+  const tabs = FILTERS.map(([key, label]) => {
+    const n = visible.filter(c => match(c, key)).length;
+    const b = h('button.btn.tab', { type: 'button', role: 'tab' }, label, n ? h('span.nav-badge', String(n)) : null);
+    b.onclick = () => {
+      current = key;
+      tabs.forEach((x, i) => {
+        const on = FILTERS[i][0] === key;
+        x.classList.toggle('on', on);
+        x.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      paint();
+    };
+    return b;
+  });
+  tabs[0].classList.add('on');
+  tabs[0].setAttribute('aria-selected', 'true');
+  paint();
+
+  const totals = isAdmin() ? h('div.pay-sum',
+    h('div.pay-cell', h('span', 'المرسلة'), h('b', String(visible.filter(c => !c.archived_at).length))),
+    h('div.pay-cell', { class: visible.some(c => match(c, 'waiting')) ? 'warn' : '' },
+      h('span', 'بانتظار توقيع'), h('b', String(visible.filter(c => match(c, 'waiting')).length))),
+    h('div.pay-cell', h('span', 'المؤرشفة'), h('b', String(visible.filter(c => c.archived_at).length)))) : null;
 
   return h('div',
     h('div.page-head',
       isAdmin() && h('div.row', { style: { marginInlineStart: 'auto', order: 2 } },
-        h('button.btn.sm.primary', { type: 'button', onclick: compose }, '＋ رسالة جديدة')),
-      h('div.grow', h('div.eyebrow', 'المراسلات'), h('h1', 'مراسلات الفريق'))),
+        h('button.btn.sm.primary', { type: 'button', onclick: () => compose() }, '＋ رسالة جديدة')),
+      h('div.grow', h('div.eyebrow', 'المراسلات'), h('h1', 'مراسلات الفريق'),
+        isAdmin() && h('p.muted', 'كل رسالة بتاريخها ووقتها ومن وُجّهت إليهم، ومن وقّع ومن لم يوقّع. والأرشفة تُخفيها عن الفريق ويبقى سجلها عندك.'))),
     state.blockingCirculars > 0 && h('div.policy-state.unsigned.gate-note',
       `لديك ${state.blockingCirculars} تعميمًا ملزمًا بانتظار توقيعك — لا تتابع مهامك قبل الاطّلاع عليه والتوقيع بالعلم.`),
-    list);
+    totals,
+    h('div.tabs', { role: 'tablist' }, tabs),
+    listBox);
 }

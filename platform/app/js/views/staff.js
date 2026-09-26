@@ -36,9 +36,10 @@ export async function render(ctx, group = 'translators') {
   const scr = SCREEN[group] || SCREEN.translators;
   const want = ctx.query?.get('tab') || (location.pathname === '/app/bank-accounts' ? 'bank' : 'team');
 
-  const [team, counts] = await Promise.all([
+  const [team, counts, byGroup] = await Promise.all([
     teamRender(ctx, { parts: true, group, reloadPath: scr.path + (want === 'team' ? '' : `?tab=${want}`) }),
-    db.rpc('pending_reviews').then(r => (Array.isArray(r) ? r[0] : r) || {}).catch(() => ({}))
+    db.rpc('pending_reviews').then(r => (Array.isArray(r) ? r[0] : r) || {}).catch(() => ({})),
+    db.rpc('pending_reviews_by_group').then(r => (Array.isArray(r) ? r : [])).catch(() => [])
   ]);
 
   const ids = new Set(team.members.map(m => m.id));
@@ -48,8 +49,12 @@ export async function render(ctx, group = 'translators') {
     ['docs', 'تدقيق المستندات', 0],
     ['bank', 'الحسابات البنكية', 0]
   ];
-  // العدّادات العامة تُعرض على شاشة المترجمين فقط حتى لا تختلط أرقام القوائم
-  if (group === 'translators') {
+  // لكل قائمة عدّادها: ما ينتظر تدقيقه فيها هي (ملاحظة ١٢٠)
+  const mineCount = byGroup.find(r => r.grp === group);
+  if (mineCount) {
+    TABS[1][2] = Number(mineCount.photos || 0) + Number(mineCount.iqamas || 0);
+    TABS[2][2] = Number(mineCount.banks || 0);
+  } else if (group === 'translators') {
     TABS[1][2] = Number(counts.photos || 0) + Number(counts.iqamas || 0);
     TABS[2][2] = Number(counts.banks || 0);
   }
@@ -74,7 +79,7 @@ export async function render(ctx, group = 'translators') {
     try {
       if (key === 'team') panel.replaceChildren(...[
         group === 'admins' ? securityCard(ctx) : null, team.joins, team.filters, team.table].filter(Boolean));
-      else if (key === 'docs') panel.replaceChildren(await docsSection(ctx, team, scr));
+      else if (key === 'docs') panel.replaceChildren(await docsSection(ctx, team, scr, group));
       else panel.replaceChildren(await bankAdmin(ctx, { parts: true, only: ids, reloadPath: `${scr.path}?tab=bank` }));
     } catch (err) { panel.replaceChildren(h('p.small.bad', err.message)); }
   }
@@ -113,14 +118,41 @@ function securityCard(ctx0) {
 // ---------------------------------------------------------------------
 // تدقيق المستندات: الصورة الشخصية وصورة الهوية تُعتمد أو تُعاد بسبب مكتوب
 // ---------------------------------------------------------------------
-async function docsSection(ctx, team, scr) {
-  const priv = await db.select('profile_private', { select: '*' });
-  const privOf = Object.fromEntries(priv.map(p => [p.id, p]));
-  const people = team.members.filter(m => m.status !== 'pending');
-  const reload = () => ctx.navigate(`${scr.path}?tab=docs`, { replace: true });
+// ---------------------------------------------------------------------
+// تدقيق المستندات: كشف الفريق كله من الخادم، لا من القائمة المعروضة،
+// فلا يفوت مستند رُفع (ملاحظتا ٩٨ و١٢٠)
+// ---------------------------------------------------------------------
+const GROUP_OF = m => (['manager', 'coordinator'].includes(m.role) ? 'admins'
+  : (m.track === 'field' ? 'field' : 'translators'));
+const GROUP_NAME = { admins: 'الحسابات الإدارية', translators: 'المترجمون المتخصصون', field: 'المرشدون المكانيون' };
 
-  const onlyPending = h('input', { type: 'checkbox', checked: true });
+async function docsSection(ctx, team, scr, group = 'translators') {
+  let people = [];
+  try {
+    const rows = await db.rpc('member_docs');
+    people = (Array.isArray(rows) ? rows : []).map(r => ({ ...r, id: r.member_id }));
+  } catch {
+    // خادم لم يُحدَّث بعد: يُرجع إلى قائمة الشاشة
+    const priv = await db.select('profile_private', { select: '*' }).catch(() => []);
+    const privOf = Object.fromEntries(priv.map(p => [p.id, p]));
+    people = team.members.map(m => ({ ...m, member_id: m.id, ...(privOf[m.id] || {}) }));
+  }
+  people = people.filter(m => m.status !== 'disabled');
+
+  const reload = () => ctx.navigate(`${scr.path}?tab=docs`, { replace: true });
+  const pendingOf = m => ['photo', 'iqama'].some(k => m[`${k}_path`] && (m[`${k}_status`] || 'pending') === 'pending');
+
+  const scope = h('select', { 'aria-label': 'نطاق العرض' },
+    h('option', { value: 'group' }, GROUP_NAME[group] || 'هذه القائمة'),
+    h('option', { value: 'all' }, 'كل الفريق'));
+  const status = h('select', { 'aria-label': 'حالة المستند' },
+    h('option', { value: 'pending' }, 'ما ينتظر التدقيق'),
+    h('option', { value: 'all' }, 'كل المستندات'),
+    h('option', { value: 'approved' }, 'المعتمدة'),
+    h('option', { value: 'rejected' }, 'المعادة للأعضاء'),
+    h('option', { value: 'missing' }, 'من لم يرفع'));
   const box = h('div.stack');
+  const summary = h('p.small.muted');
 
   async function decide(m, kind, decision) {
     let note = null;
@@ -143,19 +175,18 @@ async function docsSection(ctx, team, scr) {
       note = res;
     }
     try {
-      await db.rpc('review_member_doc', { p_member: m.id, p_kind: kind, p_decision: decision, p_note: note });
+      await db.rpc('review_member_doc', { p_member: m.member_id || m.id, p_kind: kind, p_decision: decision, p_note: note });
       toast(decision === 'approved' ? 'اعتُمد المستند.' : 'أُعيد المستند للعضو.', 'ok');
       reload();
     } catch (err) { toast(err.message, 'bad'); }
   }
 
   function docCard(m, kind) {
-    const p = privOf[m.id] || {};
-    const path = kind === 'photo' ? p.photo_path : p.iqama_path;
-    const status = (kind === 'photo' ? p.photo_status : p.iqama_status) || 'pending';
-    const note = kind === 'photo' ? p.photo_note : p.iqama_note;
-    const at = kind === 'photo' ? p.photo_at : p.iqama_at;
-    const [label, tone] = DOC_STATE[status] || DOC_STATE.pending;
+    const path = m[`${kind}_path`];
+    const st = m[`${kind}_status`] || 'pending';
+    const note = m[`${kind}_note`];
+    const at = m[`${kind}_at`];
+    const [label, tone] = DOC_STATE[st] || DOC_STATE.pending;
 
     const view = h('div.doc-view');
     if (kind === 'photo') {
@@ -172,42 +203,65 @@ async function docsSection(ctx, team, scr) {
       view.replaceChildren(open);
     }
 
-    return h('div.doc-card',
+    return h('div.doc-card', { class: st === 'pending' ? 'waiting' : '' },
       view,
       h('div.doc-body',
-        h('b', m.full_name), h('div.small.muted', { dir: 'ltr' }, m.email),
+        h('b', m.full_name),
+        h('div.small.muted', GROUP_NAME[GROUP_OF(m)] + (m.member_no ? ` · ${m.member_no}` : '')),
+        h('div.small.muted', { dir: 'ltr' }, m.email || ''),
         h('div.small', DOC_LABEL[kind], ' — ', h('span.badge', { class: tone }, label)),
         note ? h('div.small.bad', 'سبب الإعادة: ', note) : null,
         at ? h('div.small.muted', fmtDateTime(at)) : null,
         h('div.row',
-          status !== 'approved' && h('button.btn.sm.primary', { type: 'button', onclick: () => decide(m, kind, 'approved') }, 'اعتماد'),
-          status !== 'rejected' && h('button.btn.sm.danger', { type: 'button', onclick: () => decide(m, kind, 'rejected') }, 'إعادة للعضو'))));
+          st !== 'approved' && h('button.btn.sm.primary', { type: 'button', onclick: () => decide(m, kind, 'approved') }, 'اعتماد'),
+          st !== 'rejected' && h('button.btn.sm.danger', { type: 'button', onclick: () => decide(m, kind, 'rejected') }, 'إعادة للعضو'))));
   }
 
   function draw() {
+    const inScope = people.filter(m => scope.value === 'all' || GROUP_OF(m) === group);
+    const want = status.value;
     const items = [];
-    for (const m of people) {
-      const p = privOf[m.id] || {};
-      for (const kind of ['photo', 'iqama']) {
-        const path = kind === 'photo' ? p.photo_path : p.iqama_path;
-        if (!path) continue;
-        const status = (kind === 'photo' ? p.photo_status : p.iqama_status) || 'pending';
-        if (onlyPending.checked && status !== 'pending') continue;
-        items.push(docCard(m, kind));
+    if (want !== 'missing') {
+      for (const m of inScope) {
+        for (const kind of ['photo', 'iqama']) {
+          if (!m[`${kind}_path`]) continue;
+          const st = m[`${kind}_status`] || 'pending';
+          if (want !== 'all' && st !== want) continue;
+          items.push(docCard(m, kind));
+        }
       }
     }
-    const missing = people.filter(m => !(privOf[m.id] || {}).photo_path);
+    const missing = inScope.filter(m => !m.photo_path || !m.iqama_path);
+    const waiting = inScope.filter(pendingOf).length;
+
+    summary.textContent = `في هذه القائمة: ${inScope.length} عضوًا · ينتظر التدقيق: ${waiting} · لم يكتمل رفعهم: ${missing.length}`;
+
     box.replaceChildren(
-      items.length ? h('div.doc-grid', items)
-        : h('p.muted', onlyPending.checked ? 'لا مستندات بانتظار التدقيق.' : 'لم يرفع أحد مستندًا بعد.'),
-      missing.length ? h('p.small.muted', `لم يرفع صورته الشخصية بعد: ${missing.map(m => m.full_name).join('، ')}`) : null);
+      want === 'missing'
+        ? (missing.length
+            ? h('div.table-wrap', h('table.responsive',
+                h('thead', h('tr', ['العضو', 'الفريق', 'الصورة الشخصية', 'صورة الهوية'].map(t => h('th', t)))),
+                h('tbody', missing.map(m => h('tr',
+                  h('td', { 'data-label': 'العضو' }, h('b', m.full_name), h('div.small.muted', { dir: 'ltr' }, m.email || '')),
+                  h('td', { 'data-label': 'الفريق' }, GROUP_NAME[GROUP_OF(m)]),
+                  h('td', { 'data-label': 'الصورة' }, m.photo_path ? h('span.badge.ok', 'مرفوعة') : h('span.badge.bad', 'لم تُرفع')),
+                  h('td', { 'data-label': 'الهوية' }, m.iqama_path ? h('span.badge.ok', 'مرفوعة') : h('span.badge.bad', 'لم تُرفع')))))))
+            : h('p.muted', 'رفع الجميع مستنداتهم.'))
+        : (items.length ? h('div.doc-grid', items)
+            : h('p.muted', want === 'pending' ? 'لا مستندات بانتظار التدقيق في هذه القائمة.' : 'لا مستندات بهذه الحالة.')),
+      want !== 'missing' && missing.length
+        ? h('p.small.muted', `لم يكتمل رفع مستنداتهم: ${missing.slice(0, 12).map(m => m.full_name).join('، ')}${missing.length > 12 ? '…' : ''}`)
+        : null);
   }
-  onlyPending.onchange = draw;
+  scope.onchange = draw;
+  status.onchange = draw;
   draw();
 
   return h('div.card.stack',
-    h('div.row.between', h('h3', 'تدقيق المستندات'),
-      h('label.check', onlyPending, h('span', 'ما ينتظر التدقيق فقط'))),
+    h('div.row.between.wrap',
+      h('h3', 'تدقيق المستندات'),
+      h('div.row.wrap', h('label.field', 'الفريق', scope), h('label.field', 'الحالة', status))),
     h('p.small.muted', 'تُعتمد الصورة الشخصية وصورة الهوية قبل إصدار بطاقة العمل. وما لا يطابق الشروط يُعاد للعضو بسبب مكتوب.'),
+    summary,
     box);
 }
