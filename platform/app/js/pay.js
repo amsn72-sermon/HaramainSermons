@@ -29,6 +29,15 @@ export const WORK_KIND = {
 export const WORK_KINDS = Object.keys(WORK_KIND);
 export const kindName = k => WORK_KIND[k] || k;
 
+// أساس احتساب المقطوع (ملاحظة ١٢٤)
+export const RATE_BASIS = {
+  work: 'لكل عمل',
+  word: 'لكل كلمة',
+  minute: 'لكل دقيقة تسجيل'
+};
+export const basisName = b => RATE_BASIS[b] || RATE_BASIS.work;
+export const basisUnit = b => (b === 'word' ? 'كلمة' : b === 'minute' ? 'دقيقة' : 'عمل');
+
 export const SHIFT_STATUS = {
   scheduled: ['مجدولة', ''],
   present: ['حضر', 'ok'],
