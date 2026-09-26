@@ -551,8 +551,9 @@ dialog:has(.circular-doc) .dlg-body { max-height: 82vh; }
 .row.between { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 
 /* مصمِّم بطاقة العمل (ملاحظة ٨٦) */
-.cd-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
-@media (max-width: 960px) { .cd-wrap { grid-template-columns: 1fr; } }
+.cd-wrap { display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+@media (max-width: 1280px) { .cd-wrap { grid-template-columns: 300px minmax(0, 1fr); } .cd-wrap .cd-side { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; } }
+@media (max-width: 860px) { .cd-wrap { grid-template-columns: 1fr; } .cd-wrap .cd-side { grid-template-columns: 1fr; } }
 .card-stage-wrap { display: flex; justify-content: center; padding: 14px 0;
   background: repeating-conic-gradient(rgba(127,127,127,.10) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
   border-radius: 10px; }
@@ -949,3 +950,26 @@ table.responsive input[type="number"] { width: 100%; min-width: 88px; }
 .circular-row.archived { opacity: .72; border-style: dashed; }
 .circular-row .grow { flex: 1; }
 .doc-card.waiting { border-color: var(--warn); }
+
+/* خطأ ظاهر داخل نافذة الإرسال (ملاحظة ١١٩) */
+.err-box { border: 1px solid var(--bad); background: var(--bad-bg); color: var(--bad);
+  border-radius: 10px; padding: 10px 12px; }
+.err-box > b { display: block; margin-bottom: 4px; }
+.err-box p { margin: 2px 0; }
+.err-box .muted { color: inherit; opacity: .8; }
+
+/* كشف إنجاز الفريق: صفوف الأعضاء وأعمدة الأعمال (ملاحظة ١٢٦) */
+table.matrix th, table.matrix td { text-align: center; }
+table.matrix tbody td:first-child, table.matrix thead th:first-child { text-align: start; }
+
+/* لوحة المتابعة: مراحل العمل أيقونات تُضغط، وأيقونتا الإنتاج معزولتان (ملاحظتا ١٢٨ و١٢٩) */
+.stage-tiles { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin: 6px 0 0; }
+button.stage-tile { cursor: pointer; text-align: start; }
+button.stage-tile:hover { border-color: var(--gold); }
+button.stage-tile.on { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold) inset; }
+.prod-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 560px;
+  margin: 18px auto; padding-top: 14px; border-top: 1px dashed var(--border); }
+@media (max-width: 620px) { .prod-kpis { grid-template-columns: 1fr; } }
+a.prod-kpi { text-decoration: none; color: inherit; }
+a.prod-kpi:hover { border-color: var(--gold); }
+.small.warn { color: var(--warn); }
