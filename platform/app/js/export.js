@@ -3,7 +3,8 @@
 import { h } from './ui.js';
 import { sanitize } from './sanitize.js';
 import { langDir } from './store.js';
-import { PAGE, LETTERHEAD, cardColumns, fileName } from './page.js';
+import { PAGE, LETTERHEAD, cardColumns, fileName, docVerifyUrl, PUBLIC_SITE } from './page.js';
+import { qrPngDataUrl, qrPngBytes } from './qr.js';
 
 let docxLoading = null;
 export function loadDocx() {
@@ -95,7 +96,7 @@ function cardTable(docx, material, track, khateeb) {
   const { Paragraph, TextRun, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType } = docx;
   const b = { style: BorderStyle.SINGLE, size: 8, color: GOLD };
   const run = (text, o = {}) => new TextRun({ text, rightToLeft: true, font: 'Arial', size: 22, ...o });
-  const cols = cardColumns(material, track.language_code, khateeb);
+  const cols = cardColumns(material, track.language_code, khateeb, track.doc_no);
   const cell = (children, shading) => new TableCell({
     borders: { top: b, bottom: b, left: b, right: b },
     margins: { top: 70, bottom: 70, left: 90, right: 90 },
@@ -109,6 +110,23 @@ function cardTable(docx, material, track, khateeb) {
       new TableRow({ children: cols.map(([, v]) => cell([para(v)])) })
     ]
   });
+}
+
+// ختم التوثيق في آخر العمل: الرقم ورمز QR يفتح صفحة التحقق (ملاحظة ١٣٤)
+async function docStampBlocks(docx, track) {
+  if (!track.doc_no) return [];
+  const { Paragraph, TextRun, ImageRun, AlignmentType, BorderStyle } = docx;
+  let image = null;
+  try { image = await qrPngBytes(track.doc_no ? docVerifyUrl(track.doc_no) : '', { scale: 6 }); }
+  catch { image = null; }
+  const line = (children, extra = {}) => new Paragraph({ bidirectional: true, alignment: AlignmentType.CENTER, children, ...extra });
+  return [
+    line([], { spacing: { before: 300 }, border: { top: { style: BorderStyle.SINGLE, size: 6, color: GOLD } } }),
+    ...(image ? [line([new ImageRun({ type: 'png', data: image, transformation: { width: PX(24), height: PX(24) } })])] : []),
+    line([new TextRun({ text: `رقم التوثيق: ${track.doc_no}`, rightToLeft: true, font: 'Arial', size: 20, bold: true })]),
+    line([new TextRun({ text: `للتحقق من هذه النسخة: ${PUBLIC_SITE.replace('https://', '')}/verify`,
+      rightToLeft: true, font: 'Arial', size: 16, color: '6B6257' })])
+  ];
 }
 
 export async function downloadDocx({ material, track, khateeb }) {
@@ -128,7 +146,8 @@ export async function downloadDocx({ material, track, khateeb }) {
         margin: { top: TW(PAGE.top), bottom: TW(PAGE.bottom), left: TW(PAGE.side), right: TW(PAGE.side), header: 0, footer: 0 } } },
       headers: { default: new Header({ children: [letterhead] }) },
       children: [cardTable(docx, material, track, khateeb), new Paragraph({ children: [], spacing: { after: 200 } }),
-        ...htmlToBlocks(docx, track.translation_html, rtl)]
+        ...htmlToBlocks(docx, track.translation_html, rtl),
+        ...(await docStampBlocks(docx, track))]
     }]
   });
   const blob = await Packer.toBlob(doc);
@@ -165,6 +184,11 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 .print-body { --pt: 1pt; font-size: 12pt; line-height: 1.8; }
 .print-body .data-card { font-size: 11pt; }
 #measure { position: absolute; visibility: hidden; top: -10000mm; inset-inline-start: 0; width: ${BOX_W}mm; }
+.doc-stamp { display: flex; align-items: center; gap: 6mm; margin-top: 8mm; padding-top: 4mm;
+  border-top: 1px solid #bc9661; font-size: 10pt; color: #3b3630; }
+.doc-stamp img.qr { width: 22mm; height: 22mm; }
+.doc-stamp .no { font-size: 13pt; font-weight: 700; letter-spacing: 1px; margin: 1mm 0; }
+.doc-stamp .hint { font-size: 8.5pt; color: #6b6257; }
 @media screen { body { background: #d9d9d9 !important; } .sheet { margin: 16px auto; box-shadow: 0 2px 12px #0003; } }
 @media print { .sheet { margin: 0; box-shadow: none; height: ${P.h - 0.5}mm; } }
 </style></head><body><div id="pages"></div><div id="measure"><div class="print-body flow"><div class="card-slot"></div><div class="t"></div></div></div></body></html>`);
@@ -175,16 +199,37 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
   // بطاقة البيانات: صفّان بعرض الصفحة
   const card = d.createElement('table');
   card.className = 'data-card'; card.dir = 'rtl'; card.lang = 'ar';
-  const cols = cardColumns(material, track.language_code, khateeb);
+  const cols = cardColumns(material, track.language_code, khateeb, track.doc_no);
   const thead = d.createElement('thead'), htr = d.createElement('tr');
   const tb = d.createElement('tbody'), vtr = d.createElement('tr');
   for (const [k, v] of cols) {
     const th = d.createElement('th'), td = d.createElement('td');
-    th.textContent = k; td.textContent = v; htr.append(th); vtr.append(td);
+    th.textContent = k; td.textContent = v;
+    if (k === 'رقم التوثيق') { td.className = 'doc-cell'; td.dir = 'ltr'; }
+    htr.append(th); vtr.append(td);
   }
   thead.append(htr); tb.append(vtr); card.append(thead, tb);
   d.querySelector('.card-slot').replaceWith(card);
   d.querySelector('.t').innerHTML = sanitize(track.translation_html);
+
+  // ختم التوثيق في ذيل العمل: الرقم ورمز QR (ملاحظة ١٣٤)
+  if (track.doc_no) {
+    const stamp = d.createElement('div');
+    stamp.className = 'doc-stamp'; stamp.dir = 'rtl'; stamp.lang = 'ar';
+    let src = '';
+    try { src = qrPngDataUrl(docVerifyUrl(track.doc_no), { scale: 6 }); } catch { src = ''; }
+    const img = d.createElement('img');
+    img.className = 'qr'; img.alt = `رمز التحقق من ${track.doc_no}`; img.src = src;
+    const box = d.createElement('div');
+    const lbl = d.createElement('b'); lbl.textContent = 'رقم التوثيق';
+    const no = d.createElement('div'); no.className = 'no'; no.dir = 'ltr'; no.textContent = track.doc_no;
+    const hint = d.createElement('div'); hint.className = 'hint';
+    hint.textContent = `للتحقق من هذه النسخة امسح الرمز، أو زُر ${PUBLIC_SITE.replace('https://', '')}/verify`;
+    box.append(lbl, no, hint);
+    if (src) stamp.append(img);
+    stamp.append(box);
+    d.querySelector('.flow').append(stamp);
+  }
 
   // مواضع نهايات الأسطر: لا نقطع سطرًا بين صفحتين
   function lineBottoms(flow) {

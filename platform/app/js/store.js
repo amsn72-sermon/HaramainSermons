@@ -35,7 +35,9 @@ export const needsMosque = type => SERMON_MATERIALS.includes(type);
 export const CITY = { makkah: 'مكة المكرمة', madinah: 'المدينة المنورة' };
 export const PRIORITY = { normal: 'اعتيادية', urgent: 'عاجلة', emergency: 'طارئة' };
 export const MATERIAL_TYPES = ['خطب', 'دروس علمية', 'إعلانات', 'توجيهات', 'كتب', 'مطويات', 'منشورات'];
-export const SERMON_TYPES = ['خطبة جمعة', 'خطبة عرفة', 'خطبة استسقاء', 'خطبة كسوف'];
+// أنواع الخطب — ولكل نوع رمزه في ترقيم التوثيق (ملاحظة ١٣٤)
+export const SERMON_TYPES = ['خطبة جمعة', 'خطبة عرفة', 'خطبة عيد الأضحى', 'خطبة عيد الفطر',
+  'خطبة استسقاء', 'خطبة كسوف'];
 export const EVENT_LABEL = {
   assigned: 'إسناد المراحل وإرسال المادة', accepted: 'استلام المهمة وقبولها', edited: 'حفظ تعديل على الترجمة',
   audio_uploaded: 'رفع التسجيل الصوتي', completed: 'إتمام المرحلة', returned: 'إعادة للتعديل',

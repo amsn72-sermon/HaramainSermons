@@ -16,7 +16,28 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
   const { page, body } = plain ? { page: area, body: area } : letterheadPage(top, area);
   const pages = h('span.small.muted.pages-est');
   const changed = () => { updatePages(); onChange && onChange(); };
-  function updatePages() { if (plain) return; requestAnimationFrame(() => { pages.textContent = `≈ ${pagesEstimate(body)} صفحة عند الطباعة`; }); }
+
+  // علامات وهمية لا تُطبع: حدّ الهوامش، ونهاية كل صفحة وبداية التالية — ليُوازن النص
+  // فتبدأ الخطبة الثانية في صفحة جديدة مثلًا (ملاحظة ١٣٣)
+  const guides = plain ? null : h('div.lh-guides', { 'aria-hidden': 'true', contenteditable: 'false' });
+  const margins = plain ? null : h('div.lh-margins', { 'aria-hidden': 'true' });
+  let lastPages = 0;
+  function drawGuides(n) {
+    if (!guides || n === lastPages) return;
+    lastPages = n;
+    guides.replaceChildren(...Array.from({ length: Math.max(0, n - 1) }, (_, i) => h('div.lh-brk',
+      { style: { top: `calc(100% * ${i + 1})` } },
+      h('span.lh-brk-t', `نهاية الصفحة ${i + 1}`),
+      h('span.lh-brk-t.next', `بداية الصفحة ${i + 2}`))));
+  }
+  function updatePages() {
+    if (plain) return;
+    requestAnimationFrame(() => {
+      const n = pagesEstimate(body);
+      pages.textContent = `≈ ${n} صفحة عند الطباعة`;
+      drawGuides(n);
+    });
+  }
 
   // آخر تحديد داخل الورقة: القوائم المنسدلة تأخذ التركيز، فنعيد التحديد قبل التنفيذ
   let lastRange = null;
@@ -163,7 +184,24 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
   area.addEventListener('focus', () => { try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch { /* */ } });
   new ResizeObserver(updatePages).observe(body);
 
+  if (guides) body.append(guides);
+  if (margins) page.append(margins);
+
   const el = h('div.editor', { class: (readOnly ? 'readonly ' : '') + (plain ? 'plain' : 'paged') }, readOnly || detachTools ? null : tools, page, plain ? null : h('div.editor-foot', pages));
+
+  // زرّ إظهار العلامات وإخفائها، واختيار العضو محفوظ له في متصفحه (ملاحظة ١٣٣)
+  if (!plain) {
+    const KEY = 'hs-lh-guides';
+    let on = true;
+    try { on = localStorage.getItem(KEY) !== '0'; } catch { /* المتصفح قد يمنع الحفظ */ }
+    const gBtn = h('button', { type: 'button', title: 'علامات الهوامش وحدود الصفحات (لا تُطبع)',
+      'aria-label': 'علامات الهوامش وحدود الصفحات', onmousedown: e => e.preventDefault() }, '⊞');
+    const paint = () => { el.classList.toggle('no-guides', !on); gBtn.classList.toggle('on', on); };
+    gBtn.onclick = () => { on = !on; try { localStorage.setItem(KEY, on ? '1' : '0'); } catch { /* */ } paint(); };
+    tools.append(sep(), gBtn);
+    paint();
+    if (readOnly || detachTools) el.classList.add('guides-plain');
+  }
   updatePages();
   return {
     el, page, tools: readOnly ? null : tools,

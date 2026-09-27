@@ -6,7 +6,13 @@ import { MOSQUE, langName } from './store.js';
 export const PAGE = { w: 210, h: 297, top: 38, bottom: 32, side: 20 };
 export const LETTERHEAD = '/assets/letterhead.jpg';
 
-const SERMON_LABEL = { 'خطبة جمعة': 'خطبة الجمعة', 'خطبة عرفة': 'خطبة يوم عرفة', 'خطبة استسقاء': 'خطبة الاستسقاء', 'خطبة كسوف': 'خطبة الكسوف' };
+// التحقق من رقم التوثيق المطبوع: صفحة عامة يفتحها رمز QR (ملاحظة ١٣٤)
+export const PUBLIC_SITE = 'https://haramainsermons.com';
+export const docVerifyUrl = no => `${PUBLIC_SITE}/verify?doc=${encodeURIComponent(no || '')}`;
+
+const SERMON_LABEL = { 'خطبة جمعة': 'خطبة الجمعة', 'خطبة عرفة': 'خطبة يوم عرفة',
+  'خطبة عيد الأضحى': 'خطبة عيد الأضحى', 'خطبة عيد الفطر': 'خطبة عيد الفطر',
+  'خطبة استسقاء': 'خطبة الاستسقاء', 'خطبة كسوف': 'خطبة الكسوف' };
 
 // «خطبة الجمعة من المسجد الحرام»
 export function heading(m) {
@@ -53,16 +59,19 @@ const KIND_LABEL = { 'خطب': 'الخطبة', 'دروس علمية': 'الدر�
 export const kindLabel = m => (m.sermon_type ? 'الخطبة' : (KIND_LABEL[m.material_type] || 'المادة'));
 
 // أعمدة البطاقة: نوع المادة ثم بقية البيانات — صفّان فقط (تسميات ثم قيم)
-export function cardColumns(m, languageCode, khateeb) {
-  return [[kindLabel(m), heading(m)], ...cardRows(m, languageCode, khateeb)];
+// ورقم التوثيق يُضاف حين يُمنح، فيُطبع على العمل في كل مخرجاته (ملاحظة ١٣٤)
+export function cardColumns(m, languageCode, khateeb, docNo = null) {
+  return [[kindLabel(m), heading(m)], ...cardRows(m, languageCode, khateeb),
+    ...(docNo ? [['رقم التوثيق', docNo]] : [])];
 }
 
 // بطاقة بيانات الخطبة داخل مساحة الترجمة: صفّان بعرض الصفحة
-export function dataCard(m, languageCode, khateeb) {
-  const cols = cardColumns(m, languageCode, khateeb);
+export function dataCard(m, languageCode, khateeb, docNo = null) {
+  const cols = cardColumns(m, languageCode, khateeb, docNo);
+  const isNo = k => k === 'رقم التوثيق';
   return h('table.data-card', { dir: 'rtl', lang: 'ar', contenteditable: 'false' },
     h('thead', h('tr', cols.map(([k]) => h('th', k)))),
-    h('tbody', h('tr', cols.map(([, v]) => h('td', v)))));
+    h('tbody', h('tr', cols.map(([k, v]) => h('td', { class: isNo(k) ? 'doc-cell' : '' }, v)))));
 }
 
 // إطار الصفحة: body هو صندوق الكتابة الثابت
@@ -78,6 +87,7 @@ export function pagesEstimate(body) {
   const top = body.getBoundingClientRect().top - body.scrollTop;
   let bottom = 0;
   for (const el of body.children) {
+    if (el.classList.contains('lh-guides')) continue;   // طبقة العلامات لا تُحتسب (ملاحظة ١٣٣)
     let rect = el.getBoundingClientRect();
     if (el.classList.contains('area')) { const r = document.createRange(); r.selectNodeContents(el); rect = r.getBoundingClientRect(); }
     if (rect.height) bottom = Math.max(bottom, rect.bottom - top);

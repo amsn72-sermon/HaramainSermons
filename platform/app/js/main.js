@@ -11,6 +11,7 @@ const routes = [
   ['/', () => import('./views/public.js'), false],
   ['/arafah', () => import('./views/public.js').then(m => ({ render: m.arafah })), false],
   ['/about', () => import('./views/about.js'), false],
+  ['/verify', () => import('./views/verify.js'), false],
   ['/initiative', () => import('./views/about.js').then(m => ({ render: m.initiative })), false],
   ['/policy', () => import('./views/policy.js'), true],
   ['/mfa', () => import('./views/mfa.js'), true],

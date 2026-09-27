@@ -34,19 +34,35 @@ export function fill(el, ...children) { el.replaceChildren(); append(el, childre
 
 export function toast(message, kind = '') {
   const el = h('div.toast', { class: kind }, message);
-  document.getElementById('toasts').append(el);
+  // النافذة المنبثقة تعلو الصفحة كلها، فيُعرض التنبيه داخلها لئلا يختفي تحتها (ملاحظة ١٣١)
+  const dlg = document.querySelector('dialog[open]');
+  let host = document.getElementById('toasts');
+  if (dlg) host = dlg.querySelector('.dlg-toasts') || dlg.appendChild(h('div.dlg-toasts'));
+  host.append(el);
   setTimeout(() => el.remove(), kind === 'bad' ? 7000 : 4000);
 }
 
-// نافذة عامة: body عنصر، buttons [{label, kind, value}]
+// نافذة عامة: body عنصر، buttons [{label, kind, value, validate}]
+// validate: true يمضي، false يبقى، ونصٌّ يبقى ويُعرض النص في صدر النافذة (ملاحظة ١٣١)
 export function dialog({ title, body, buttons = [{ label: 'إغلاق', value: null }], onOpen }) {
   return new Promise(resolve => {
+    const err = h('div.dlg-err', { hidden: true, role: 'alert' });
     const dlg = h('dialog', { 'aria-labelledby': 'dlg-title' },
-      h('div.dlg-body', h('h3#dlg-title', title), body),
+      h('div.dlg-body', h('h3#dlg-title', title), err, body),
       h('div.dlg-foot', buttons.map(b => h('button.btn', {
         class: b.kind || '', type: 'button',
         onclick: async () => {
-          if (b.validate) { const ok = await b.validate(); if (!ok) return; }
+          if (b.validate) {
+            const ok = await b.validate();
+            if (typeof ok === 'string') {
+              fill(err, h('b', '⚠ '), ok);
+              err.hidden = false;
+              err.scrollIntoView({ block: 'nearest' });
+              return;
+            }
+            if (!ok) return;
+          }
+          err.hidden = true;
           dlg.close(); resolve(typeof b.value === 'function' ? b.value() : b.value);
         }
       }, b.label))));
