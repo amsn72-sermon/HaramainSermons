@@ -4,8 +4,11 @@ import { h, toast, busy, dialog } from '../ui.js';
 import { db, auth } from '../sb.js';
 import { state, isManager, loadProfile } from '../store.js';
 import { brand, themeToggle, footer } from './shell.js';
+import { qrImg } from '../qr.js';
 
 const readCode = key => { try { return sessionStorage.getItem('hs-page-' + key) || ''; } catch { return ''; } };
+// رابط الاطّلاع الخاص: يُرسَل للجهات بلا رقم سرّي، ويُحفظ للجلسة (ملاحظة ١٣٦)
+const linkKey = () => { try { return new URLSearchParams(location.search).get('k') || ''; } catch { return ''; } };
 const keepCode = (key, v) => { try { sessionStorage.setItem('hs-page-' + key, v); } catch { /* وضع تصفّح خاص */ } };
 
 function shell(inner, extra, wide) {
@@ -80,7 +83,7 @@ function securityDiagram() {
     ['صلاحيات على مستوى قاعدة البيانات', 'لا يصل العضو إلا إلى ما صُرّح له به'],
     ['علامة مائية على الأصل', 'معرّف المستخدم وتاريخ الاطّلاع'],
     ['تقييد النسخ والتنزيل', 'العمل داخل بيئة المنصة'],
-    ['روابط محدودة المدة', 'للوثائق الشخصية والمصرفية'],
+    ['روابط محدودة المدة', 'للاطّلاع على وثائق الأعضاء'],
     ['سجل اطّلاع وتتبّع', 'أثر يُرجع إليه عند المراجعة']
   ];
   return h('div.fig',
@@ -144,6 +147,20 @@ function page(d) {
     if (kind === 'cards') return h('div.ab-cards', val.map(([t, body]) =>
       h('article.ab-card', h('h3', t), h('p', body))));
     if (kind === 'diagram') return (DIAGRAMS[val] || (() => null))();
+    // خدمات المبادرة: كل خدمة ببطاقتها ورمزها، والضغط على الرمز يفتحها (ملاحظة ١٣٦)
+    if (kind === 'qrlinks') return h('div.ab-qr', (val || []).map(([label, url, note]) =>
+      h('a.ab-qr-card', { href: url, target: '_blank', rel: 'noopener' },
+        qrImg(url, { size: 132, alt: `رمز ${label}`, title: url }),
+        h('b', label),
+        note ? h('span.small.muted', note) : null,
+        h('span.ab-qr-url', { dir: 'ltr' }, String(url).replace(/^https?:\/\//, '')))));
+    // تشريح رقم التوثيق المطبوع على كل عمل (ملاحظة ١٣٤)
+    if (kind === 'docno') return h('div.fig',
+      h('div.docno-fig', (val || []).map(([seg, label]) =>
+        h('div.docno-seg', h('b', { dir: 'ltr' }, seg), h('span', label)))),
+      h('ul.ab-list.docno-legend', (val || []).map(([seg, label, detail]) =>
+        h('li', h('b', { dir: 'ltr' }, seg), ' — ', h('b', label), detail ? `: ${detail}` : ''))),
+      h('p.fig-cap', 'بنية رقم التوثيق المطبوع على كل عمل معتمد'));
     if (kind === 'vision') return h('div.ab-vm',
       h('div.ab-vm-card', h('div.eyebrow', 'الرؤية'), h('p', d.vision)),
       h('div.ab-vm-card', h('div.eyebrow', 'الرسالة'), h('p', d.mission)));
@@ -206,6 +223,34 @@ function codeBtn(key) {
   return btn;
 }
 
+// رابط اطّلاع خاص بلا رقم سرّي — لمدير المشروع (ملاحظة ١٣٦)
+function linkBtn(key) {
+  const btn = h('button.btn.sm', { type: 'button' }, 'رابط الاطّلاع');
+  btn.onclick = () => busy(btn, async () => {
+    try {
+      const token = await db.rpc('new_page_link', { p_key: key });
+      const url = `${location.origin}/${key === 'initiative' ? 'initiative' : 'about'}?k=${encodeURIComponent(token)}`;
+      const field = h('input', { value: url, readonly: true, dir: 'ltr', 'aria-label': 'الرابط' });
+      await dialog({
+        title: 'رابط الاطّلاع الخاص',
+        body: h('div.stack',
+          h('p.small.muted', 'أرسل هذا الرابط لمن تريد اطّلاعه. يفتح الصفحة مباشرة بلا رقم سرّي، '
+            + 'ويبقى صالحًا حتى تُنشئ رابطًا جديدًا فيبطل ما قبله.'),
+          h('label.field', 'الرابط', field)),
+        buttons: [
+          { label: 'نسخ الرابط', kind: 'primary', validate: async () => {
+            try { await navigator.clipboard.writeText(url); toast('نُسخ الرابط.', 'ok'); }
+            catch { field.select(); toast('انسخ الرابط يدويًّا.', 'bad'); }
+            return false;
+          }, value: null },
+          { label: 'إغلاق', value: null }
+        ]
+      });
+    } catch (e) { toast(e.message, 'bad'); }
+  });
+  return btn;
+}
+
 async function view({ key, title, login = false, wide = false, back = false }) {
   // الصفحة عامة، فالملف الشخصي لا يُحمَّل تلقائيًّا: نحمّله ليظهر زر الرمز للمدير
   if (auth.session && !state.profile) await loadProfile().catch(() => {});
@@ -218,14 +263,17 @@ async function view({ key, title, login = false, wide = false, back = false }) {
     tools.replaceChildren(...[
       login && !auth.session ? loginBtn : null,
       backBtn,
+      auth.session && isManager() ? linkBtn(key) : null,
       auth.session && isManager() ? codeBtn(key) : null
     ].filter(Boolean));
     return page(data);
   };
 
   // العضو المفعّل يراها مباشرة، والزائر يُجرَّب له الرمز المحفوظ في هذه الجلسة
+  const fromLink = linkKey();
+  if (fromLink) keepCode(key, fromLink);
   try {
-    const data = await db.rpc('open_page', { p_key: key, p_code: readCode(key) || null });
+    const data = await db.rpc('open_page', { p_key: key, p_code: fromLink || readCode(key) || null });
     return shell(draw(data), tools, wide);
   } catch (e) {
     if (!/REQUIRE_CODE|رمز الاطّلاع/.test(e.message)) return shell(h('p.err', e.message), tools, wide);

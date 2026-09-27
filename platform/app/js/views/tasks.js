@@ -146,7 +146,7 @@ export async function workspace(ctx) {
   let dirty = false;
   const saveState = h('span.small.muted', t.translation_html ? 'محفوظة' : 'مسودة فارغة');
   const editor = createEditor({ html: t.translation_html || '', dir, readOnly: !canEdit, detachTools: true,
-    label: `الترجمة (${langName(t.language_code)})`, top: dataCard(m, t.language_code, m.khateeb?.name),
+    label: `الترجمة (${langName(t.language_code)})`, top: dataCard(m, t.language_code, m.khateeb?.name, t.doc_no),
     placeholder: canEdit ? 'اكتب الترجمة هنا…' : 'لم تُكتب الترجمة بعد.',
     onChange: () => { dirty = true; saveState.textContent = 'تعديلات غير محفوظة'; onEdit(); } });
   // نسخة محلية فورية في المتصفح: لو توقف الحاسوب فجأة لا يضيع ما كُتب (ملاحظة ٣٦)

@@ -10,6 +10,11 @@ export const KIND_LABEL = {
 };
 const KIND_CLASS = { notice: '', directive: 'gold', warning: 'bad', invitation: 'ok' };
 
+// الحقول الإلزامية تُعلَّم في وجه النافذة، ويُحمَّر الحقل الناقص (ملاحظة ١٣١)
+const req = label => h('span', label, h('span.req', { title: 'حقل إلزامي', 'aria-hidden': 'true' }, ' *'),
+  h('span.sr-only', ' (إلزامي)'));
+const markBad = (el, on) => { el.classList.toggle('bad-field', !!on); el.setAttribute('aria-invalid', on ? 'true' : 'false'); };
+
 const SELECT = '*,sender:profiles!circulars_sent_by_fkey(full_name),'
   + 'recipients:circular_recipients(member_id,read_at,acked_at,signed_name,member:profiles(full_name,role))';
 
@@ -134,8 +139,17 @@ export async function render(ctx) {
     });
   }
 
+  // إدارة المراسلات للمنسق ومدير المشروع وحدهما: العضو يعرض ويوقّع فقط (ملاحظة ١٣٢)
+  // والحراسة مزدوجة: الأزرار لا تُبنى له، والإجراء يُرَدّ لو وصله بطريق آخر
+  const guardAdmin = () => {
+    if (isAdmin()) return true;
+    toast('إدارة المراسلات للمنسق ومدير المشروع. وأنت تعرض الرسالة وتوقّع بالعلم.', 'bad');
+    return false;
+  };
+
   // ---------------- كشف من وُجّهت إليهم ----------------
   async function who(c) {
+    if (!guardAdmin()) return;
     let list = await db.rpc('circular_recipients_list', { p_circular: c.id }).catch(() => null);
     if (!Array.isArray(list)) {
       list = (c.recipients || []).map(r => ({
@@ -202,12 +216,13 @@ export async function render(ctx) {
   // ---------------- إنشاء رسالة ----------------
   // ما يُكتب لا يضيع: إن ردّ الخادم بخطأ عادت النافذة بما كُتب فيها (ملاحظة ١١٩)
   async function compose(prefill = null, error = null) {
+    if (!guardAdmin()) return;
     const d = prefill || {};
     const f = {
       title: h('input', { maxlength: 200, placeholder: 'عنوان الرسالة', value: d.title || '' }),
       kind: h('select', Object.entries(KIND_LABEL).map(([k, v]) => h('option', { value: k }, v))),
       audience: h('select', Object.entries(AUDIENCE_LABEL).map(([k, v]) => h('option', { value: k }, v))),
-      body: h('textarea', { rows: 6, placeholder: 'نص الرسالة — يمكن تركه إذا أرفقت ملف PDF' }),
+      body: h('textarea', { rows: 6, placeholder: 'نص الرسالة كما يقرؤه العضو' }),
       pdf: h('input', { type: 'file', accept: 'application/pdf' }),
       require_ack: h('input', { type: 'checkbox', checked: d.require_ack !== false }),
       blocking: h('input', { type: 'checkbox', checked: !!d.blocking })
@@ -258,20 +273,30 @@ export async function render(ctx) {
         h('div.grid-2', h('label.field', 'النوع', f.kind),
           h('label.field', 'المرسَل إليهم', f.audience, counter)),
         pickWrap,
-        h('label.field', 'العنوان', f.title),
-        h('label.field', 'نص الرسالة', f.body),
-        h('label.field', 'مرفق PDF (اختياري)', h('small', 'حتى ٢٠ ميغابايت'), f.pdf),
+        h('label.field', req('العنوان'), f.title),
+        h('label.field', req('نص الرسالة'), f.body),
+        h('label.field', 'مرفق PDF (اختياري)', h('small', 'حتى ٢٠ ميغابايت — زيادةً على ما كتبتَه لا بديلًا عنه'), f.pdf),
         h('label.check', f.require_ack, 'يلزم توقيع العضو بالعلم'),
         h('label.check.top', f.blocking,
           h('span', h('b', 'تعميم ملزم: '),
             'يُطالَب به عند كل دخول، ولا يتابع العضو مهامه حتى يطّلع ويوقّع.'))),
       buttons: [
         { label: 'إرسال', kind: 'primary', validate: () => {
-          if (f.title.value.trim().length < 3) { toast('اكتب عنوان الرسالة.', 'bad'); return false; }
-          if (!f.body.value.trim() && !f.pdf.files[0]) { toast('اكتب نص الرسالة أو أرفق ملف PDF.', 'bad'); return false; }
-          if (f.audience.value === 'selected' && !picked.size) { toast('اختر عضوًا واحدًا على الأقل.', 'bad'); return false; }
+          // العنوان والنص إلزاميان، والمرفق اختياري — والسبب يُعرض داخل النافذة لا خلفها (ملاحظة ١٣١)
+          markBad(f.title, false); markBad(f.body, false);
+          if (f.title.value.trim().length < 3) {
+            markBad(f.title, true); f.title.focus();
+            return 'اكتب عنوان الرسالة (ثلاثة محارف على الأقل) — فهو ما يظهر للعضو في قائمة مراسلاته.';
+          }
+          if (f.body.value.trim().length < 3) {
+            markBad(f.body, true); f.body.focus();
+            return 'اكتب نص الرسالة. والمرفق — إن أرفقتَه — زيادةٌ على النص لا بديل عنه.';
+          }
+          if (f.audience.value === 'selected' && !picked.size) return 'اختر عضوًا واحدًا على الأقل من قائمة الأعضاء المحددين.';
           const file = f.pdf.files[0];
-          if (file && file.size > 20 * 1024 * 1024) { toast('الحد الأقصى ٢٠ ميغابايت.', 'bad'); return false; }
+          if (file && file.size > 20 * 1024 * 1024) {
+            return `حجم المرفق ${(file.size / (1024 * 1024)).toFixed(1)} ميغابايت، والحد الأقصى ٢٠ ميغابايت.`;
+          }
           return true;
         }, value: () => ({
           title: f.title.value.trim(), kind: f.kind.value, audience: f.audience.value,
@@ -314,6 +339,7 @@ export async function render(ctx) {
 
   // ---------------- تحكّم الإدارة فيما أُرسل ----------------
   async function edit(c) {
+    if (!guardAdmin()) return;
     const f = {
       title: h('input', { maxlength: 200, value: c.title || '' }),
       kind: h('select', Object.entries(KIND_LABEL).map(([k, v]) => h('option', { value: k, selected: c.kind === k ? true : null }, v))),
@@ -327,15 +353,20 @@ export async function render(ctx) {
       title: 'تعديل الرسالة',
       body: h('div.stack',
         (st.acked ?? 0) > 0 ? h('p.small.bad', `وقّع عليها ${st.acked} من ${st.recipients} — التعديل بعد التوقيع يُسجَّل، وذكّر الموقّعين إن كان جوهريًّا.`) : null,
-        h('div.grid-2', h('label.field', 'النوع', f.kind), h('label.field', 'العنوان', f.title)),
-        h('label.field', 'نص الرسالة', f.body),
+        h('div.grid-2', h('label.field', 'النوع', f.kind), h('label.field', req('العنوان'), f.title)),
+        h('label.field', req('نص الرسالة'), f.body),
         h('label.check', f.require_ack, 'يلزم توقيع العضو بالعلم'),
         h('label.check', f.blocking, 'تعميم ملزم يحجب متابعة المهام'),
         c.pdf_path ? h('p.small.muted', 'المرفق لا يُستبدل من هنا: أرسل رسالة جديدة بمرفق آخر ثم أرشف هذه.') : null),
       buttons: [
         { label: 'حفظ التعديل', kind: 'primary', validate: () => {
-          if (f.title.value.trim().length < 3) { toast('اكتب عنوان الرسالة.', 'bad'); return false; }
-          if (!f.body.value.trim() && !c.pdf_path) { toast('اكتب نص الرسالة.', 'bad'); return false; }
+          markBad(f.title, false); markBad(f.body, false);
+          if (f.title.value.trim().length < 3) {
+            markBad(f.title, true); f.title.focus(); return 'اكتب عنوان الرسالة (ثلاثة محارف على الأقل).';
+          }
+          if (f.body.value.trim().length < 3) {
+            markBad(f.body, true); f.body.focus(); return 'اكتب نص الرسالة، فهو ما يقرؤه العضو ويوقّع عليه.';
+          }
           return true;
         }, value: () => ({ title: f.title.value.trim(), body: f.body.value.trim(), kind: f.kind.value,
           require_ack: f.require_ack.checked, blocking: f.blocking.checked }) },
@@ -351,6 +382,7 @@ export async function render(ctx) {
   }
 
   async function remind(c) {
+    if (!guardAdmin()) return;
     try {
       const n = await db.rpc('remind_circular', { p_id: c.id });
       const count = Number(Array.isArray(n) ? n[0] : n) || 0;
@@ -360,12 +392,14 @@ export async function render(ctx) {
   }
 
   async function unblock(c) {
+    if (!guardAdmin()) return;
     if (!await confirm('إيقاف الإلزام', 'تبقى الرسالة ويبقى طلب التوقيع، لكنها لا تحجب متابعة المهام. متابعة؟', 'إيقاف الإلزام')) return;
     try { await db.rpc('update_circular', { p_id: c.id, p_blocking: false }); toast('رُفع الإلزام.', 'ok'); reload(); }
     catch (err) { toast(err.message, 'bad'); }
   }
 
   async function archive(c, on) {
+    if (!guardAdmin()) return;
     if (on && !await confirm('أرشفة الرسالة',
       `تُخفى «${c.title}» عن الفريق ويبقى سجلها وتواقيعها عندك في «المؤرشفة». متابعة؟`, 'أرشفة')) return;
     try {
@@ -376,6 +410,7 @@ export async function render(ctx) {
   }
 
   async function remove(c) {
+    if (!isManager()) { toast('الحذف النهائي لمدير المشروع.', 'bad'); return; }
     const st = stOf(c);
     if (!await confirm('حذف الرسالة',
       `تُحذف «${c.title}» نهائيًّا ومعها سجل من وقّع عليها (${st.acked ?? 0} توقيعًا) عند الجميع. ولو أردت إخفاءها مع حفظ السجل فاختر «أرشفة» بدلًا من الحذف.`,
@@ -393,7 +428,8 @@ export async function render(ctx) {
     const archived = !!c.archived_at;
     const pct = st.recipients ? Math.round(((st.acked ?? 0) / st.recipients) * 100) : 0;
 
-    const admin = isAdmin() ? h('div.row.wrap',
+    // أزرار الإدارة لا تُبنى لغير الإدارة أصلًا (ملاحظة ١٣٢)
+    const admin = isAdmin() ? h('div.row.wrap.circ-admin',
       h('button.btn.sm', { type: 'button', onclick: () => who(c) }, 'من وقّع'),
       h('button.btn.sm', { type: 'button', title: 'تعديل نص الرسالة وخياراتها', onclick: () => edit(c) }, 'تعديل'),
       c.require_ack && waiting > 0 && !archived
