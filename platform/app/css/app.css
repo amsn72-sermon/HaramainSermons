@@ -973,3 +973,63 @@ button.stage-tile.on { border-color: var(--gold); box-shadow: 0 0 0 1px var(--go
 a.prod-kpi { text-decoration: none; color: inherit; }
 a.prod-kpi:hover { border-color: var(--gold); }
 .small.warn { color: var(--warn); }
+
+/* النوافذ: سبب المنع يُقرأ داخل النافذة، والحقل الإلزامي معلَّم (ملاحظة ١٣١) */
+.dlg-err { margin: 0 0 12px; border: 1px solid var(--bad); background: var(--bad-bg); color: var(--bad);
+  border-radius: 10px; padding: 10px 12px; font-size: .95rem; }
+.dlg-toasts { position: sticky; bottom: 0; display: grid; gap: 8px; padding: 0 20px 12px; }
+.req { color: var(--bad); font-weight: 700; }
+.bad-field { border-color: var(--bad) !important; box-shadow: 0 0 0 1px var(--bad) inset; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* علامات وهمية في المحرر: حدّ الهوامش وحدود الصفحات — تُرى ولا تُطبع (ملاحظة ١٣٣) */
+.lh-margins { position: absolute; top: calc(38 / 297 * 100%); bottom: calc(32 / 297 * 100%);
+  inset-inline: calc(20 / 210 * 100%); pointer-events: none; z-index: 3;
+  border: 1px dashed rgb(188 150 97 / 55%); }
+.lh-margins::before, .lh-margins::after { content: ''; position: absolute; inset-inline: -8px; height: 0;
+  border-top: 1px solid rgb(188 150 97 / 35%); }
+.lh-margins::before { top: 0; } .lh-margins::after { bottom: 0; }
+/* ارتفاعها ارتفاع الصفحة الواحدة، فتُحسب مواضع الفواصل منه: كل 100% صفحة */
+.lh-guides { position: absolute; inset-inline: 0; top: 0; height: 100%; pointer-events: none; z-index: 2; }
+.lh-brk { position: absolute; inset-inline: 0; height: 0; border-top: 1px dashed rgb(193 61 61 / 60%); }
+.lh-brk-t { position: absolute; inset-inline-start: 0; transform: translateY(-100%);
+  font-size: calc(var(--pt) * 7); color: #c13d3d; background: rgb(255 255 255 / 85%);
+  padding: 0 4px; border-radius: 3px; white-space: nowrap; }
+.lh-brk-t.next { inset-inline-start: auto; inset-inline-end: 0; transform: none; color: #2f6f4f; }
+.editor.no-guides .lh-guides, .editor.no-guides .lh-margins { display: none; }
+.tools button.on { border-color: var(--gold); color: var(--gold); }
+@media print { .lh-guides, .lh-margins { display: none !important; } }
+
+/* الأرشيف: بطاقات الأنواع، ومسار التصفّح، ورقم التوثيق في السطر (ملاحظتا ١٣٧ و١٣٨) */
+.arch-filters { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); align-items: end; }
+.arch-tiles { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+button.arch-tile { cursor: pointer; text-align: start; position: relative; }
+button.arch-tile:hover { border-color: var(--gold); }
+.arch-tile > span { display: block; }
+.arch-tile .arch-tile-emoji { position: absolute; inset-inline-end: 12px; top: 10px;
+  font-size: 1.25rem; line-height: 1; opacity: .5; }
+.arch-tile .small.muted { font-weight: 400; margin-top: 3px; }
+.arch-crumbs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.arch-exports { align-items: center; gap: 8px; margin: 6px 0 10px; }
+.arch-exports .muted { margin-inline-end: auto; }
+.doc-no { display: inline-block; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .8rem;
+  letter-spacing: .5px; color: var(--gold); border: 1px solid var(--border); border-radius: 6px;
+  padding: 0 6px; margin-top: 2px; }
+
+/* خدمات المبادرة: بطاقة لكل خدمة برمزها، وتشريح رقم التوثيق (ملاحظتا ١٣٤ و١٣٦) */
+.ab-qr { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin: 18px 0; }
+.ab-qr-card { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center;
+  text-decoration: none; color: inherit; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 16px 12px; background: var(--card); transition: border-color .15s ease; }
+.ab-qr-card:hover { border-color: var(--gold); }
+.ab-qr-card img.qr { background: #fff; border-radius: 8px; padding: 6px; }
+.ab-qr-url { font-size: .78rem; color: var(--muted); word-break: break-all; }
+.docno-fig { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; justify-content: center; margin: 14px 0; }
+.docno-seg { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 88px;
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--soft); }
+.docno-seg b { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 1.25rem; color: var(--gold); }
+.docno-seg span { font-size: .8rem; color: var(--muted); }
+.docno-legend b { color: var(--ink-strong, inherit); }
+@media print { .ab-qr-card { break-inside: avoid; } }
+/* رقم التوثيق في بطاقة البيانات: سطر واحد بأرقام لاتينية (ملاحظة ١٣٤) */
+.data-card td.doc-cell { white-space: nowrap; direction: ltr; font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: .3px; }
