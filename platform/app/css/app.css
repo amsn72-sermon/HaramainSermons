@@ -1051,3 +1051,24 @@ button.arch-tile:hover { border-color: var(--gold); }
 .small.warn { color: var(--warn); }
 .small.ok { color: var(--ok); }
 .take .stack { margin-top: 2px; }
+
+/* ---------------------------------------------------------------
+   شريط الكميات التعاقدية، والدليل المصطلحي، ووحدات الإنتاج
+   (ملاحظات ١٤٨ و١٥٠ و١٤٧)
+--------------------------------------------------------------- */
+.qbar { position: relative; height: 10px; border-radius: 999px; background: color-mix(in srgb, var(--border) 60%, transparent);
+  overflow: hidden; margin: 8px 0 6px; }
+.qbar-fill { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: 999px;
+  background: linear-gradient(90deg, var(--gold), color-mix(in srgb, var(--gold) 60%, var(--ok))); }
+.qitem { gap: 4px; display: flex; flex-direction: column; }
+.qitem .row.between { gap: 10px; }
+.units-head { border-inline-start: 3px solid var(--gold); }
+
+.term-card .term-ar { font-size: 1.15rem; }
+.term-card table { margin-top: 4px; }
+.gl-results { max-height: 52vh; overflow: auto; }
+.gl-hit { border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+.gl-hit:last-child { border-bottom: 0; }
+.gl-hit ul { margin: 4px 0 0; padding-inline-start: 18px; }
+.ws-glossary { justify-content: flex-start; margin: 0 0 10px; }
+.ws-glossary:empty { display: none; }
