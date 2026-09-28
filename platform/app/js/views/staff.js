@@ -4,6 +4,7 @@
 import { h, toast, busy, dialog, fmtDateTime } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { state, isManager } from '../store.js';
+import { applyPattern } from '../page.js';
 import { render as teamRender } from './team.js';
 import { adminList as bankAdmin } from './bank.js';
 
@@ -78,7 +79,8 @@ export async function render(ctx, group = 'translators') {
     panel.replaceChildren(h('p.muted.small', 'جارٍ التحميل…'));
     try {
       if (key === 'team') panel.replaceChildren(...[
-        group === 'admins' ? securityCard(ctx) : null, team.joins, team.filters, team.table].filter(Boolean));
+        group === 'admins' ? securityCard(ctx) : null,
+        group === 'admins' ? namingCard() : null, team.joins, team.filters, team.table].filter(Boolean));
       else if (key === 'docs') panel.replaceChildren(await docsSection(ctx, team, scr, group));
       else panel.replaceChildren(await bankAdmin(ctx, { parts: true, only: ids, reloadPath: `${scr.path}?tab=bank` }));
     } catch (err) { panel.replaceChildren(h('p.small.bad', err.message)); }
@@ -96,6 +98,39 @@ export async function render(ctx, group = 'translators') {
 // ---------------------------------------------------------------------
 // حماية حسابات الإدارة: إلزام التحقق بخطوتين — بيد مدير المشروع (ملاحظة ١٠٣)
 // ---------------------------------------------------------------------
+// نمط تسمية الملفات المسلَّمة — شرطٌ في العقد، ويضبطه مدير المشروع (ملاحظة ١٤٤)
+function namingCard() {
+  const TOKENS = [['doc_no', 'رقم التوثيق'], ['kind', 'نوع العمل'], ['sub', 'النوع الفرعي'],
+    ['mosque', 'الجهة'], ['hijri', 'التاريخ الهجري'], ['date', 'التاريخ الميلادي'],
+    ['lang', 'اللغة'], ['title', 'العنوان'], ['khateeb', 'الخطيب أو المؤلف']];
+  const SAMPLE = { doc_no: 'H48-EN-110001', kind: 'خطبة الجمعة من المسجد الحرام', sub: 'خطبة جمعة',
+    mosque: 'المسجد الحرام', hijri: '١٦ ربيع الآخر ١٤٤٨', date: '2026-09-18',
+    lang: 'الإنجليزية', title: 'فضل الإحسان', khateeb: 'الشيخ صالح بن حميد' };
+  const input = h('input', { value: state.filePattern || '', dir: 'ltr',
+    'aria-label': 'نمط تسمية الملفات', style: { fontFamily: 'ui-monospace, monospace' } });
+  const preview = h('div.small.muted');
+  const paint = () => { preview.textContent = 'مثال: ' + (applyPattern(input.value || '', SAMPLE) || '—'); };
+  input.addEventListener('input', paint); paint();
+  const save = h('button.btn.sm.primary', { type: 'button' }, 'حفظ النمط');
+  save.onclick = () => busy(save, async () => {
+    try {
+      await db.rpc('set_file_name_pattern', { p_pattern: input.value.trim() });
+      state.filePattern = input.value.trim();
+      toast('حُفظ نمط التسمية، ويُطبَّق على كل ما يُنزَّل بعده.', 'ok');
+    } catch (err) { toast(err.message, 'bad'); }
+  });
+  return h('div.card.stack',
+    h('h3', 'نمط تسمية الملفات المسلَّمة'),
+    h('p.small.muted', 'يُطبَّق على ملفات Word وPDF والتسجيلات وكشوف التصدير، فتخرج بأسماء موحَّدة يسهل أرشفتها واسترجاعها — كما يشترط العقد.'),
+    h('label.field', 'النمط', input),
+    preview,
+    h('div.row.wrap', TOKENS.map(([k, label]) =>
+      h('button.btn.xs', { type: 'button', title: label,
+        onclick: () => { input.value = `${input.value} {${k}}`.trim(); paint(); input.focus(); } },
+        `${label} {${k}}`))),
+    isManager() ? h('div.row', save) : h('p.small.muted', 'ضبط النمط بيد مدير المشروع.'));
+}
+
 function securityCard(ctx0) {
   const on = state.mfaRequired !== false;
   const btn = h('button.btn.sm', { type: 'button' }, on ? 'إلغاء الإلزام' : 'إلزام التحقق');

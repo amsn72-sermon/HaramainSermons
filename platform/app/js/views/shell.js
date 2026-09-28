@@ -82,13 +82,15 @@ export function staffShell(view, path) {
        group('الإعدادات', [
          link('/app/languages', 'اللغات'),
          link('/app/khateebs', 'الخطباء'),
-         link('/app/workflow', 'إعداد سير العمل')]),
+         link('/app/workflow', 'إعداد سير العمل'),
+         link('/app/audio-guide', 'دليل التسجيل الصوتي')]),
        broadcast,
        group('حسابي', [mine, link('/about', 'عن المنصة')])]
     : p.track === 'field'
       // الإرشاد المكاني: لا تُسنَد إليه أعمال ترجمة، فلا قائمة مهام (ملاحظة ٩٩)
       ? [broadcast, group('حسابي', [mine, mail, link('/about', 'عن المنصة')])]
-      : [group('عملي', [link('/app/tasks', 'مهامي'), mail]),
+      : [group('عملي', [link('/app/tasks', 'مهامي'), mail,
+           link('/app/audio-guide', 'دليل التسجيل الصوتي')]),
          broadcast,
          group('حسابي', [mine, link('/about', 'عن المنصة')])];
   // شارة ما لم يُوقَّع عليه بالعلم

@@ -5,6 +5,7 @@ import { state, isManager, isAdmin, TRACK_SELECT, MOSQUE, MOSQUE_ANY, PRIORITY, 
   langName, langDir, stageName } from '../store.js';
 import { statusBadge, trackTimer, progressBar, stageStrip, lateSummary } from './parts.js';
 import { createEditor } from '../editor.js';
+import { audioInfo, specLine, isAllowedAudio, AUDIO_EXTS, SPEC } from '../audiofile.js';
 import { downloadDocx, printTranslation } from '../export.js';
 import { pdfViewer } from '../pdfview.js';
 import { textViewer } from '../textview.js';
@@ -146,7 +147,7 @@ export async function workspace(ctx) {
   let dirty = false;
   const saveState = h('span.small.muted', t.translation_html ? 'محفوظة' : 'مسودة فارغة');
   const editor = createEditor({ html: t.translation_html || '', dir, readOnly: !canEdit, detachTools: true,
-    label: `الترجمة (${langName(t.language_code)})`, top: dataCard(m, t.language_code, m.khateeb?.name, t.doc_no),
+    label: `الترجمة (${langName(t.language_code)})`, top: dataCard(m, t.language_code, m.khateeb?.name),
     placeholder: canEdit ? 'اكتب الترجمة هنا…' : 'لم تُكتب الترجمة بعد.',
     onChange: () => { dirty = true; saveState.textContent = 'تعديلات غير محفوظة'; onEdit(); } });
   // نسخة محلية فورية في المتصفح: لو توقف الحاسوب فجأة لا يضيع ما كُتب (ملاحظة ٣٦)
@@ -215,21 +216,46 @@ export async function workspace(ctx) {
       catch { takes = []; }
     };
     const picks = new Set();
+    const specs = new Map();          // path -> مواصفات مقيسة عند الرفع
+    const audioErr = h('div.err-box', { hidden: true, role: 'alert' });
     const drawAudio = () => {
-      const input = h('input', { type: 'file', accept: 'audio/*', 'aria-label': 'ملف التسجيل' });
+      const input = h('input', { type: 'file', accept: '.wav,.mp3,audio/wav,audio/x-wav,audio/mpeg',
+        'aria-label': 'ملف التسجيل' });
       input.onchange = () => busy(input, async () => {
         const f = input.files[0];
         if (!f) return;
-        if (!f.type.startsWith('audio/')) return toast('الملف ليس تسجيلًا صوتيًا.', 'bad');
-        if (f.size > 200 * 1024 * 1024) return toast('الحد الأقصى ٢٠٠ ميغابايت.', 'bad');
+        audioErr.hidden = true;
+        const fail = (title, lines) => {
+          audioErr.replaceChildren(h('b', title), h('ul', lines.map(x => h('li', x))));
+          audioErr.hidden = false;
+          audioErr.scrollIntoView({ block: 'center' });
+          input.value = '';
+        };
+        // الصيغة شرطٌ في العقد، والفيديو يُرفض (ملاحظة ١٤٣)
+        if (!isAllowedAudio(f)) {
+          return fail('لم يُرفع التسجيل — الصيغة غير معتمدة',
+            [`الصيغ المعتمدة في العقد: ${AUDIO_EXTS.map(x => x.toUpperCase()).join(' أو ')} فقط.`,
+             'حوِّل الملف إلى إحداهما، أو سجّل ببرنامج يخرجها — وفي «دليل التسجيل الصوتي» برامج مقترحة.']);
+        }
+        if (f.size > 200 * 1024 * 1024) return fail('الملف أكبر من الحد', ['الحد الأقصى ٢٠٠ ميغابايت.']);
+
+        let info = null;
+        try { info = await audioInfo(f); } catch { info = null; }
+        if (info?.video) {
+          return fail('هذا مقطع فيديو',
+            ['ارفع تسجيلًا صوتيًّا فقط (WAV أو MP3) حفظًا لمساحة الخادم.']);
+        }
         try {
           const ext = (f.name.split('.').pop() || 'mp3').toLowerCase().replace(/[^a-z0-9]/g, '');
           // مدة التسجيل تُقاس هنا لتُحسب الدقائق في دليل الإنتاج (ملاحظة ٩٠)
-          const seconds = await audioSeconds(f).catch(() => null);
+          const seconds = Math.round(info?.duration || 0) || await audioSeconds(f).catch(() => null);
           const path = await storage.upload('audio', `${t.id}/${crypto.randomUUID()}.${ext}`, f);
           await db.rpc('set_track_audio', { p_track: t.id, p_path: path, p_seconds: seconds });
+          if (info) specs.set(path, info);
           t.audio_path = path; await loadTakes(); drawAudio(); blockersBox.hidden = true;
-          toast('أُضيف تسجيل جديد، والسابق محفوظ.', 'ok');
+          toast(info?.issues?.length
+            ? 'رُفع التسجيل، وعليه ملاحظات في الجودة يراها المنسق.'
+            : 'أُضيف تسجيل جديد، والسابق محفوظ.', info?.issues?.length ? 'warn' : 'ok');
         } catch (err) { toast(err.message, 'bad'); }
       });
 
@@ -240,7 +266,18 @@ export async function workspace(ctx) {
           h('b', `التسجيل ${i + 1}`),
           h('span.small.muted', `${a.by?.full_name || '—'} · ${stageName(a.stage_key) || ''} · ${fmtDateTime(a.created_at)}`),
           a.is_approved && h('span.badge.ok', 'معتمد')),
-        h('audio', { controls: true, preload: 'none', src: storage.publicUrl('audio', a.path), style: { width: '100%' } }));
+        h('audio', { controls: true, preload: 'none', src: storage.publicUrl('audio', a.path), style: { width: '100%' } }),
+        (() => {
+          // مواصفات التسجيل تُعرض للمنسق ليقبل أو يُعيد — ولا تحجب الرفع (ملاحظة ١٤٣)
+          const info = specs.get(a.path);
+          const ext = (a.path.split('.').pop() || '').toUpperCase();
+          if (!info) return h('span.small.muted', `${ext}${a.duration_seconds ? ` · ${Math.round(a.duration_seconds / 60)} دقيقة` : ''}`);
+          return h('div.stack', { style: { gap: '2px' } },
+            h('span.small.muted', specLine(info)),
+            info.issues.length
+              ? h('span.small.warn', '⚠ ' + info.issues.join(' · '))
+              : h('span.small.ok', '✓ مطابق لمواصفات العقد'));
+        })());
 
       const needNew = t.audio_required_after && !takes.some(a => new Date(a.created_at) > new Date(t.audio_required_after));
       fill(box,
@@ -249,6 +286,12 @@ export async function workspace(ctx) {
         audioNow && !takes.length && h('p', h('span.badge.bad', 'مطلوب'), ' لم يُرفع التسجيل بعد، ولا يمكن إتمام المرحلة دونه.'),
         takes.map(row),
         isReviewer && h('p.small', 'استمع إلى التسجيل كاملًا وتحقق من مطابقته للترجمة. إن عدّلت الترجمة فارفع تسجيلًا جديدًا (يُحفظ السابق باسم صاحبه)، أو أعد المهمة إلى المترجم.'),
+        canUpload && audioErr,
+        canUpload && h('div.spec-note',
+          h('b', 'الصيغ المعتمدة: '), `${AUDIO_EXTS.map(x => x.toUpperCase()).join(' أو ')}`,
+          h('span', ` — بجودة ${SPEC.kbps} kbps فأعلى، ومعدل عينة ${SPEC.sampleRate / 1000} kHz فأعلى، `),
+          h('span', 'صوتٌ واضح بلا تشويش ولا مؤثرات، وبلا صمتٍ طويل في أوله وآخره.'),
+          h('a', { href: '/app/audio-guide' }, 'دليل التسجيل الصوتي ←')),
         canUpload && h('label.field', takes.length ? 'إضافة تسجيل جديد (تبقى النسخ السابقة)' : 'رفع التسجيل (يُحفظ فور اختياره)', input),
         canApprove && takes.length > 1 && h('p.small.muted', 'اختر التسجيل الأفضل أداءً وجودة، ويمكن اعتماد أكثر من تسجيل.'),
         canApprove && takes.length ? h('div.row',
@@ -392,7 +435,7 @@ export async function workspace(ctx) {
     return digitalCountdown(c.due_at);
   };
 
-  document.title = fileName(m, t.language_code, m.khateeb?.name);
+  document.title = fileName(m, t.language_code, m.khateeb?.name, null, t.doc_no);
 
   // في الجوال: تبويبان بدل عمودين متلاصقين، فالشاشة ضيّقة (ملاحظة ١١١)
   function wsBlock() {
@@ -421,6 +464,8 @@ export async function workspace(ctx) {
       h('div.eyebrow', `${t.status === 'completed' ? 'مهمة مكتملة' : t.status === 'awaiting_receipt' ? 'بانتظار الاستلام' : 'مهمة ' + stageName(cur?.stage_key)} · ${heading(m)}`),
       h('h1', `${langName(t.language_code)} — ${m.title}`),
       h('p.sub', `من العربية إلى ${langName(t.language_code)}`)),
+      // رقم التوثيق يُمنح عند الاعتماد فيظهر هنا وعلى مخرجات العمل (ملاحظة ١٤٥)
+      t.doc_no ? h('span.doc-no', { dir: 'ltr', title: 'رقم التوثيق' }, t.doc_no) : null,
       statusBadge(t), h('a.btn.sm', { href: '/app/tasks' }, 'مهامي'), workspaceClock(t)),
     returnedToMe && h('div.card', { style: { borderColor: 'var(--warn)', marginBottom: '16px' } },
       h('b', 'أُعيدت إليك للتعديل: '), lastReturn.note, h('span.small.muted', ` — ${lastReturn.actor?.full_name}، ${fmtDateTime(lastReturn.created_at)}`)),

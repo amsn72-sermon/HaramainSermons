@@ -1,5 +1,5 @@
 // المراسلات: تعاميم وتوجيهات وتحذيرات ودعوات — إرسالٌ من الإدارة وتوقيعٌ بالعلم من العضو (ملاحظة ٨١)
-import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDateTime } from '../ui.js';
+import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDateTime, req, markBad } from '../ui.js';
 import { db, storage, auth } from '../sb.js';
 import { state, isAdmin, isManager, ROLE_LABEL, langName, loadCircularState } from '../store.js';
 import { pdfViewer } from '../pdfview.js';
@@ -9,11 +9,6 @@ export const KIND_LABEL = {
   notice: 'تعميم', directive: 'توجيه', warning: 'تحذير', invitation: 'دعوة'
 };
 const KIND_CLASS = { notice: '', directive: 'gold', warning: 'bad', invitation: 'ok' };
-
-// الحقول الإلزامية تُعلَّم في وجه النافذة، ويُحمَّر الحقل الناقص (ملاحظة ١٣١)
-const req = label => h('span', label, h('span.req', { title: 'حقل إلزامي', 'aria-hidden': 'true' }, ' *'),
-  h('span.sr-only', ' (إلزامي)'));
-const markBad = (el, on) => { el.classList.toggle('bad-field', !!on); el.setAttribute('aria-invalid', on ? 'true' : 'false'); };
 
 const SELECT = '*,sender:profiles!circulars_sent_by_fkey(full_name),'
   + 'recipients:circular_recipients(member_id,read_at,acked_at,signed_name,member:profiles(full_name,role))';

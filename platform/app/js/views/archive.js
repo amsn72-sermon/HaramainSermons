@@ -193,7 +193,7 @@ export async function render(ctx) {
   const rowEl = (t, n) => {
     const khateeb = t.material.khateeb?.name;
     const args = { material: t.material, track: t, khateeb };
-    const name = fileName(t.material, t.language_code, khateeb);
+    const name = fileName(t.material, t.language_code, khateeb, null, t.doc_no);
     const late = hadLateness(t);
     return h('li.arch-row', { title: name },
       h('span.arch-n', String(n).padStart(3, '0')),

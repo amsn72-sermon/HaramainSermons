@@ -1,5 +1,5 @@
 // إضافة مادة وإسنادها — على ثلاث خطوات مع حفظ مسودة محلية
-import { h, fill, toast, busy, fmtMinutes, confirm } from '../ui.js';
+import { h, fill, toast, busy, fmtMinutes, confirm, req, markBad } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { state, MATERIAL_TYPES, SERMON_TYPES, MOSQUE, PRIORITY, langName, stageName, needsMosque, GENERAL_MOSQUE } from '../store.js';
 import { createEditor } from '../editor.js';
@@ -24,8 +24,11 @@ export async function render(ctx) {
 
   // ---------------- الخطوة ١: بيانات المادة ----------------
   const f = {
-    material_type: h('select', MATERIAL_TYPES.map(t => h('option', t))),
-    sermon_type: h('select', SERMON_TYPES.map(t => h('option', t))),
+    // الاختيار صريح لا افتراضي، فلا تمرّ مادة بنوع لم يقصده المنسق (ملاحظة ١٤٢)
+    material_type: h('select', h('option', { value: '' }, '— اختر نوع المادة —'),
+      MATERIAL_TYPES.map(t => h('option', t))),
+    sermon_type: h('select', h('option', { value: '' }, '— اختر نوع الخطبة —'),
+      SERMON_TYPES.map(t => h('option', t))),
     title: h('input', { placeholder: 'عنوان المادة', maxlength: 300 }),
     mosque: h('select', Object.entries(MOSQUE).map(([k, v]) => h('option', { value: k }, v))),
     khateeb_id: h('select'),
@@ -58,21 +61,29 @@ export async function render(ctx) {
   f.mosque.addEventListener('change', fillKhateebs);
 
   const sermonOnly = h('div.grid-2',
-    h('label.field', 'نوع الخطبة', f.sermon_type),
-    h('label.field', 'الخطيب', f.khateeb_id));
+    h('label.field', req('نوع الخطبة'), f.sermon_type),
+    h('label.field', req('الخطيب'), f.khateeb_id));
   // الخطب والدروس تتبع مسجدًا؛ الكتب والمطويات والإعلانات والتوجيهات عامة (ملاحظة ٦٩)
-  const mosqueWrap = h('label.field', 'مكان الخطبة / الموقع', f.mosque);
-  const pdfWrap = h('label.field', 'ملف الأصل العربي (PDF)', h('small', 'حتى ٢٠ ميغابايت'), f.pdf);
+  const mosqueWrap = h('label.field', req('مكان الخطبة / الموقع'), f.mosque);
+  const pdfWrap = h('label.field', req('ملف الأصل العربي (PDF)'), h('small', 'حتى ٢٠ ميغابايت'), f.pdf);
+  // المواد العامة لا خطيب لها، فالمؤلف أو الجهة المصدرة إلزامي فيها (ملاحظة ١٤٢)
+  const authorLabel = h('span');
+  const authorWrap = h('label.field', authorLabel, f.author);
   const textWrap = h('div.field',
     h('div.row.between', h('b', 'النص العربي على كليشة الهيئة'),
       h('span.small.muted', 'ما تكتبه هنا هو ما يراه المترجم: الورقة نفسها بصفحاتها وعلامتها المائية')),
     h('div.ws-tools', source.tools),
     source.el);
+  const isSermon = () => f.material_type.value === 'خطب';
   const syncVisibility = () => {
-    sermonOnly.hidden = f.material_type.value !== 'خطب';
+    sermonOnly.hidden = !isSermon();
     mosqueWrap.hidden = !needsMosque(f.material_type.value);
     pdfWrap.hidden = f.source_mode.value !== 'pdf';
     textWrap.hidden = f.source_mode.value !== 'text';
+    // اسم الحقل وإلزامه يتغيران بتغير نوع المادة
+    authorLabel.replaceChildren(isSermon()
+      ? h('span', 'المؤلف أو الجهة المصدرة', h('small.muted', ' (اختياري للخطب)'))
+      : req('المؤلف أو الجهة المصدرة'));
   };
   f.material_type.addEventListener('change', syncVisibility);
   f.source_mode.addEventListener('change', syncVisibility);
@@ -207,10 +218,10 @@ export async function render(ctx) {
   const errs = h('div.form-errors', { hidden: true, role: 'alert' });
   const steps = [
     h('div.stack',
-      h('div.grid-2', h('label.field', 'نوع المادة', f.material_type), mosqueWrap),
+      h('div.grid-2', h('label.field', req('نوع المادة'), f.material_type), mosqueWrap),
       sermonOnly,
-      h('label.field', 'العنوان', f.title),
-      h('div.grid-2', h('label.field', 'التاريخ', f.sermon_date), h('label.field', 'المؤلف أو الجهة المصدرة', f.author)),
+      h('label.field', req('العنوان'), f.title),
+      h('div.grid-2', h('label.field', req('التاريخ'), f.sermon_date), authorWrap),
       h('label.field', 'تفاصيل المادة وتعليمات الترجمة', f.instructions),
       h('div.grid-2', h('label.field', 'طريقة إدخال النص العربي', f.source_mode), h('label.field', 'المطلوب تسليمه', f.deliverable)),
       textWrap, pdfWrap),
@@ -236,16 +247,33 @@ export async function render(ctx) {
   const next = h('button.btn.primary', { type: 'button', onclick: () => go(step + 1) }, 'التالي');
   const send = h('button.btn.primary', { type: 'button', onclick: e => submit(e.currentTarget) }, 'إسناد وإرسال ←');
 
+  // البيانات الرئيسة لا يُتجاوَز عنها: يُحمَّر الحقل الناقص ويُنتقل إليه (ملاحظة ١٤٢)
+  const badFields = [];
+  const need = (el, cond, msg, list) => { if (cond) { list.push(msg); badFields.push(el); markBad(el, true); } };
   function validate(i) {
     const e = [];
+    badFields.forEach(el => markBad(el, false));
+    badFields.length = 0;
     if (i === 0) {
-      if (!f.title.value.trim()) e.push('اكتب عنوان المادة');
-      if (f.source_mode.value === 'text' && !plainText(source.html)) e.push('أدخل النص العربي');
+      need(f.material_type, !f.material_type.value, 'حدّد نوع المادة', e);
+      if (isSermon()) {
+        need(f.sermon_type, !f.sermon_type.value, 'حدّد نوع الخطبة (جمعة، عرفة، عيد…)', e);
+        need(f.khateeb_id, !f.khateeb_id.value, 'اختر الخطيب', e);
+      } else if (f.material_type.value) {
+        // المؤلف أو الجهة لغير الخطب — ولا يُطلب قبل اختيار نوع المادة
+        need(f.author, !f.author.value.trim(), 'اكتب المؤلف أو الجهة المصدرة', e);
+      }
+      need(f.mosque, needsMosque(f.material_type.value) && !f.mosque.value, 'حدّد الجهة: المسجد الحرام أو المسجد النبوي', e);
+      need(f.title, !f.title.value.trim(), 'اكتب عنوان المادة', e);
+      need(f.sermon_date, !f.sermon_date.value, 'حدّد تاريخ المادة', e);
+      if (f.source_mode.value === 'text') {
+        need(source.el, !plainText(source.html), 'أدخل النص العربي — لا تُرسَل مادة بلا أصل', e);
+      }
       if (f.source_mode.value === 'pdf') {
         const file = f.pdf.files[0];
-        if (!file) e.push('أرفق ملف PDF العربي');
-        else if (file.type !== 'application/pdf') e.push('الملف ليس PDF');
-        else if (file.size > 20 * 1024 * 1024) e.push('حجم الملف أكبر من ٢٠ ميغابايت');
+        if (!file) need(f.pdf, true, 'أرفق ملف PDF العربي — لا تُرسَل مادة بلا أصل', e);
+        else if (file.type !== 'application/pdf') need(f.pdf, true, 'الملف ليس PDF', e);
+        else if (file.size > 20 * 1024 * 1024) need(f.pdf, true, 'حجم الملف أكبر من ٢٠ ميغابايت', e);
       }
     }
     if (i === 1) {
@@ -260,8 +288,15 @@ export async function render(ctx) {
     }
     return e;
   }
+  const showErrors = e => {
+    errs.replaceChildren(h('b', '⚠ أكمل البيانات المطلوبة قبل المتابعة:'), h('ul', e.map(x => h('li', x))));
+    errs.hidden = false;
+    errs.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const first = badFields[0];
+    if (first && first.focus) setTimeout(() => first.focus({ preventScroll: true }), 300);
+  };
   function go(i) {
-    if (i > step) { const e = validate(step); errs.replaceChildren(h('ul', e.map(x => h('li', x)))); errs.hidden = !e.length; if (e.length) return; }
+    if (i > step) { const e = validate(step); if (e.length) { showErrors(e); return; } errs.hidden = true; }
     errs.hidden = true;
     step = Math.max(0, Math.min(2, i));
     stepNav.replaceChildren(...titles.map((t, j) => h('span.badge', { class: j === step ? 'gold' : j < step ? 'ok' : '' }, t)));
@@ -306,7 +341,7 @@ export async function render(ctx) {
   const draftTimer = setInterval(() => { if (!body.isConnected) return clearInterval(draftTimer); saveDraft(); }, 5000);
 
   async function submit(btn) {
-    for (const i of [0, 1, 2]) { const e = validate(i); if (e.length) { go(i); errs.replaceChildren(h('ul', e.map(x => h('li', x)))); errs.hidden = false; return; } }
+    for (const i of [0, 1, 2]) { const e = validate(i); if (e.length) { step = i; go(i); showErrors(e); return; } }
     const langs = [...picked.keys()].map(langName).join('، ');
     if (!await confirm('إرسال المادة', `ستُسند «${f.title.value.trim()}» إلى ${picked.size} لغة (${langs})، وتظهر فورًا في مهام المسؤولين. متابعة؟`, 'إسناد وإرسال')) return;
     await busy(btn, async () => {
