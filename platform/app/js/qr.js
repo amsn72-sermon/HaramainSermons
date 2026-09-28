@@ -286,8 +286,13 @@ export function qrPngDataUrl(text, { scale = 8, margin = 2, dark = '#111111', li
   }
   return c.toDataURL('image/png');
 }
-export async function qrPngBytes(text, opts) {
-  return (await fetch(qrPngDataUrl(text, opts))).arrayBuffer();
+// بايتات الصورة لملف Word — تُفكّ من النصّ نفسه، فسياسة الأمان تمنع جلب data:
+export function qrPngBytes(text, opts) {
+  const b64 = qrPngDataUrl(text, opts).split(',')[1] || '';
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
 }
 
 // عنصر جاهز للصفحة، بوصف يُقرأ صوتيًّا

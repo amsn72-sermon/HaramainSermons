@@ -32,6 +32,7 @@ const routes = [
   ['/app/archive', () => import('./views/archive.js'), true, true],
   ['/app/circulars', () => import('./views/circulars.js'), true],
   ['/app/me', () => import('./views/me.js'), true],
+  ['/app/audio-guide', () => import('./views/audioguide.js'), true],
   ['/app/bank-accounts', () => import('./views/staff.js'), true, true],
   ['/app/cards', () => import('./views/cards.js'), true, true],
   ['/app/charter', () => import('./views/charter.js'), true, true],
@@ -42,6 +43,8 @@ const routes = [
 ];
 
 function match(path) {
+  // الصفحات ذات الملفات المستقلة (بطاقة الرابط) قد تُفتح بامتدادها، فتُعامل معاملة مسارها (ملاحظة ١٤٠)
+  path = path.replace(/\.html$/, '') || '/';
   for (const [pattern, load, needsAuth, adminOnly] of routes) {
     const keys = [];
     const re = new RegExp('^' + pattern.replace(/:[^/]+/g, m => { keys.push(m.slice(1)); return '([^/]+)'; }) + '/?$');

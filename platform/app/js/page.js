@@ -1,6 +1,6 @@
 // صفحة A4 على كليشة الهيئة: مقاسات ثابتة موحّدة لكل المواد في المحرر والطباعة وملف Word.
 import { h, fmtSermonDate } from './ui.js';
-import { MOSQUE, langName } from './store.js';
+import { MOSQUE, langName, state } from './store.js';
 
 // المساحة المخصصة للكتابة (مم) — لا تتغير من مادة لأخرى
 export const PAGE = { w: 210, h: 297, top: 38, bottom: 32, side: 20 };
@@ -45,12 +45,39 @@ export function cardRows(m, languageCode, khateeb) {
   ].filter(([, v]) => v);
 }
 
-// اسم ملف واضح: خطبة الجمعة من المسجد الحرام (العنوان) اسم الخطيب، التاريخ، اللغة
-export function fileName(m, languageCode, khateeb, n) {
-  const date = m.sermon_date ? m.sermon_date : '';
-  const parts = [`${heading(m)} (${m.title})`, khateeb || m.khateeb?.name, date, languageCode && langName(languageCode)].filter(Boolean);
-  const name = (n ? `${n} - ` : '') + parts.join('، ');
-  return name.replace(/[\\/:*?"<>|\n\r]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+// اسم ملف واضح، ووفق نمط التسمية الموحَّد متى ضبطته الإدارة (ملاحظة ١٤٤)
+//   العناصر: {doc_no} {kind} {sub} {mosque} {hijri} {date} {lang} {title} {khateeb}
+export const NAME_TOKENS = ['doc_no', 'kind', 'sub', 'mosque', 'hijri', 'date', 'lang', 'title', 'khateeb'];
+const clean = s => String(s ?? '').replace(/[\\/:*?"<>|\n\r]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+export function nameParts(m, languageCode, khateeb, docNo) {
+  return {
+    doc_no: docNo || '',
+    kind: heading(m),
+    sub: m.sermon_type || m.material_type || '',
+    mosque: (m.mosque && MOSQUE[m.mosque]) || '',
+    hijri: m.sermon_date ? fmtSermonDate(m.sermon_date).split('(')[0].trim() : '',
+    date: m.sermon_date || '',
+    lang: languageCode ? langName(languageCode) : '',
+    title: m.title || '',
+    khateeb: khateeb || m.khateeb?.name || ''
+  };
+}
+
+export function applyPattern(pattern, parts) {
+  const out = String(pattern).replace(/\{(\w+)\}/g, (_, k) => parts[k] ?? '');
+  // ما خلا من قيمة يترك فاصلًا معلقًا، فتُنظَّف الفواصل المتكررة
+  return clean(out).replace(/\s*[-–]\s*(?=\s*[-–]|$)/g, '').replace(/^[\s\-–,،]+|[\s\-–,،]+$/g, '').trim();
+}
+
+export function fileName(m, languageCode, khateeb, n, docNo) {
+  const parts = nameParts(m, languageCode, khateeb, docNo);
+  const pattern = (typeof state !== 'undefined' && state.filePattern) || null;
+  const base = pattern
+    ? applyPattern(pattern, parts)
+    : [`${heading(m)} (${m.title})`, parts.khateeb, parts.date, parts.lang].filter(Boolean).join('، ');
+  const name = (n ? `${n} - ` : '') + base;
+  return clean(name).slice(0, 180);
 }
 
 // تسمية العمود الأول بحسب نوع المادة: خطبة أو درس أو كتاب… لا «الخطبة» دائمًا (ملاحظة ٣٧)

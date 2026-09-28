@@ -15,7 +15,8 @@ export const state = {
   mfaOk: true,           // التحقق بخطوتين: مستوفًى أو غير لازم (ملاحظة ١٠٣)
   mfaEnrolled: false,
   mfaRequired: true,     // إلزامه على حسابات الإدارة — مفتاح بيد مدير المشروع
-  mfaLoaded: false
+  mfaLoaded: false,
+  filePattern: null      // نمط تسمية الملفات المسلَّمة (ملاحظة ١٤٤)
 };
 
 export const ROLE_LABEL = { manager: 'مدير المشروع', coordinator: 'منسق', translator: 'مترجم' };
@@ -91,12 +92,15 @@ export async function loadCircularState(force = false) {
 
 export async function loadReference(force = false) {
   if (state.loadedRef && !force) return;
-  const [languages, stages, khateebs] = await Promise.all([
+  const [languages, stages, khateebs, settings] = await Promise.all([
     db.select('languages', { select: '*', order: 'sort.asc' }),
     db.select('workflow_stages', { select: '*', order: 'sort.asc' }),
-    db.select('khateebs', { select: '*', order: 'mosque.asc,sort.asc' })
+    db.select('khateebs', { select: '*', order: 'mosque.asc,sort.asc' }),
+    // الإعدادات لأصحاب الحسابات وحدهم، والموقع العام يُفتح بلا دخول (ملاحظة ١٤٤)
+    auth.session ? db.select('platform_settings', { select: 'file_name_pattern' }).catch(() => []) : []
   ]);
-  Object.assign(state, { languages, stages, khateebs, loadedRef: true });
+  Object.assign(state, { languages, stages, khateebs, loadedRef: true,
+    filePattern: settings[0]?.file_name_pattern || null });
 }
 
 export const langName = code => state.languages.find(l => l.code === code)?.name_ar || code;

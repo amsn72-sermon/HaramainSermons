@@ -32,6 +32,16 @@ export const frag = (...children) => { const f = document.createDocumentFragment
 // يستبدل محتوى العنصر، ويقبل المصفوفات ويتجاهل الفراغات (بخلاف replaceChildren الأصلية)
 export function fill(el, ...children) { el.replaceChildren(); append(el, children); return el; }
 
+// حقلٌ إلزامي: نجمة في التسمية، وتحميرُ الحقل الناقص (ملاحظتا ١٣١ و١٤٢)
+export const req = label => h('span', label,
+  h('span.req', { title: 'حقل إلزامي', 'aria-hidden': 'true' }, ' *'),
+  h('span.sr-only', ' (إلزامي)'));
+export const markBad = (el, on) => {
+  if (!el) return;
+  el.classList.toggle('bad-field', !!on);
+  el.setAttribute('aria-invalid', on ? 'true' : 'false');
+};
+
 export function toast(message, kind = '') {
   const el = h('div.toast', { class: kind }, message);
   // النافذة المنبثقة تعلو الصفحة كلها، فيُعرض التنبيه داخلها لئلا يختفي تحتها (ملاحظة ١٣١)
@@ -88,6 +98,8 @@ const hijriFmt = new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura-nu-latn', 
 
 export const fmtDateTime = v => v ? dtFmt.format(new Date(v)) : '—';
 export const fmtDate = v => v ? dFmt.format(new Date(v)) : '—';
+// تاريخ هجري وحده — يُطبع في ختم التوثيق (ملاحظة ١٤٥)
+export const fmtHijri = v => (v ? hijriFmt.format(new Date(String(v).length > 10 ? v : v + 'T12:00:00')) : '—');
 export function fmtSermonDate(v) {
   if (!v) return '—';
   const d = new Date(v + 'T12:00:00');
