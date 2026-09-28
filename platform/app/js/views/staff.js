@@ -157,7 +157,7 @@ function securityCard(ctx0) {
 // تدقيق المستندات: كشف الفريق كله من الخادم، لا من القائمة المعروضة،
 // فلا يفوت مستند رُفع (ملاحظتا ٩٨ و١٢٠)
 // ---------------------------------------------------------------------
-const GROUP_OF = m => (['manager', 'coordinator'].includes(m.role) ? 'admins'
+const GROUP_OF = m => (['manager', 'coordinator', 'supervisor'].includes(m.role) ? 'admins'
   : (m.track === 'field' ? 'field' : 'translators'));
 const GROUP_NAME = { admins: 'الحسابات الإدارية', translators: 'المترجمون المتخصصون', field: 'المرشدون المكانيون' };
 

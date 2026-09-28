@@ -168,6 +168,12 @@ export async function workspace(ctx) {
   const saveBtn = canEdit ? h('button.btn.sm', { type: 'button', title: 'حفظ الآن (Ctrl/⌘ + S)' },
     'حفظ الترجمة') : null;
   if (saveBtn) saveBtn.onclick = e => busy(e.currentTarget, () => saveDraft().catch(err => toast(err.message, 'bad')));
+  // الدليل المصطلحي في متناول اليد: يُفتح فوق العمل ولا يغادره المترجم (ملاحظة ١٥٠)
+  const glossarySlot = h('div.row.ws-glossary');
+  const glBtn = h('button.btn.sm', { type: 'button', title: 'الرجوع إليه إلزامي عند لبس المصطلح' }, '📖 الدليل المصطلحي');
+  glBtn.onclick = () => import('./glossary.js').then(m => m.glossaryPanel()).catch(err => toast(err.message, 'bad'));
+  if (editor.tools) editor.tools.append(glBtn);
+  else glossarySlot.append(glBtn);
   // الحفظ داخل شريط الأدوات لا خارجه، فيبقى الشريط كاملًا أمام المترجم (ملاحظة ٦٨)
   if (canEdit) editor.tools.append(h('span.tb-save', saveState, saveBtn));
 
@@ -446,7 +452,7 @@ export async function workspace(ctx) {
     const tabTr = h('button.btn.tab.on', { type: 'button', role: 'tab', 'aria-selected': 'true' }, 'الترجمة');
     const tabs = h('div.tabs.ws-tabs', { role: 'tablist' }, tabSrc, tabTr);
     const wrap = h('div.ws-wrap', { style: { marginTop: '16px' } },
-      tabs, canEdit && h('div.ws-tools', editor.tools), grid);
+      tabs, canEdit && h('div.ws-tools', editor.tools), glossarySlot, grid);
     const pick = pane => {
       grid.dataset.pane = pane; wrap.dataset.pane = pane;
       tabSrc.classList.toggle('on', pane === 'src'); tabTr.classList.toggle('on', pane === 'tr');

@@ -37,7 +37,8 @@ export async function render(ctx, opts = {}) {
       if (group === 'field') return as === 'field' || trackOf(m) === 'field';
       return as !== 'coordinator' && as !== 'field' && trackOf(m) !== 'field';
     }
-    if (group === 'admins') return m.role === 'manager' || m.role === 'coordinator';
+    // وحساب مشرف الهيئة يُدار مع الحسابات الإدارية (ملاحظة ١٤٦)
+    if (group === 'admins') return ['manager', 'coordinator', 'supervisor'].includes(m.role);
     if (group === 'field') return trackOf(m) === 'field';
     return m.role === 'translator' && trackOf(m) === 'translation';
   };

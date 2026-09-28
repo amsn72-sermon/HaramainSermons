@@ -1,6 +1,6 @@
 // أرشيف أعمال الترجمة: يُدخَل ببطاقات الأنواع كبطاقات المتابعة، ثم بطاقات الخطب
 // بأنواعها، ثم قائمة الأعمال — وفي كل مستوى بحثٌ وفلترة وتصدير (ملاحظتا ١٣٧ و١٣٨)
-import { h, toast, busy, emptyState, fmtDate, fmtDateTime, fmtSermonDate } from '../ui.js';
+import { h, toast, busy, dialog, emptyState, fmtDate, fmtDateTime, fmtSermonDate } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { state, langName, hadLateness, isManager, MATERIAL_TYPES, SERMON_TYPES } from '../store.js';
 import { downloadDocx, printTranslation } from '../export.js';
@@ -144,6 +144,72 @@ export async function render(ctx) {
         count(t => t.material.sermon_type || t.material.material_type), '', '',
         'التوزيع على اللغات', count(t => langName(t.language_code)), '', '', '', '']];
   }
+  // ----------------------------------------------------------------
+  // تصدير مجمَّع على هيئة كتاب: غلافٌ وفهرسٌ والخطب مرقَّمة (ملاحظة ١٥٢)
+  // ----------------------------------------------------------------
+  async function bookDialog(list) {
+    const codes = [...new Set(list.map(t => t.language_code))].sort();
+    if (!codes.length) return toast('لا أعمال ضمن هذا التحديد.', 'bad');
+    const boxes = codes.map(c => h('label.row', { style: { gap: '6px', alignItems: 'center' } },
+      h('input', { type: 'checkbox', value: c, checked: true, 'aria-label': langName(c) }), h('span', langName(c))));
+    const inputs = boxes.map(b => b.querySelector('input'));
+    const shape = h('select', { 'aria-label': 'شكل المخرج' },
+      h('option', { value: 'per' }, 'ملف لكل لغة (الغالب)'),
+      h('option', { value: 'one' }, 'ملف واحد يجمع اللغات مرتَّبة'));
+    const titleIn = h('input', { value: 'خطب الحرمين الشريفين', 'aria-label': 'عنوان الكتاب' });
+    const all = h('button.btn.xs', { type: 'button',
+      onclick: () => inputs.forEach(i => { i.checked = true; }) }, 'كل اللغات');
+    const none = h('button.btn.xs', { type: 'button',
+      onclick: () => inputs.forEach(i => { i.checked = false; }) }, 'إلغاء التحديد');
+    const count = h('p.small.muted');
+    const paint = () => {
+      const picked = inputs.filter(i => i.checked).map(i => i.value);
+      const n = list.filter(t => picked.includes(t.language_code)).length;
+      count.textContent = `${n} عملًا في ${picked.length} لغة — ${periodLabel()}`;
+    };
+    inputs.forEach(i => i.addEventListener('change', paint));
+    paint();
+
+    const picked = await dialog({
+      title: 'تصدير مجمَّع على هيئة كتاب',
+      body: h('div.stack',
+        h('p.small.muted', 'يُبنى كتابٌ على كليشة الهيئة: غلافٌ ببياناته، ثم فهرسٌ بالأعمال '
+          + 'وتواريخها وأرقام توثيقها وصفحاتها، ثم كل عمل ببطاقته ونصه وختمه، بترقيم صفحات متسلسل.'),
+        h('label.field', 'عنوان الكتاب', titleIn),
+        h('div.card.stack',
+          h('div.row.between', h('b', 'اللغات'), h('div.row', all, none)),
+          h('div.row.wrap', boxes), count),
+        h('label.field', 'شكل المخرج', shape),
+        h('p.small.muted', 'المدة والنوع كما حُدِّدا في الأرشيف: ' + scopeLabel() + ' — ' + periodLabel())),
+      buttons: [{ label: 'إلغاء', value: null },
+        { label: 'بناء الكتاب', kind: 'primary',
+          validate: () => (inputs.some(i => i.checked) ? true : 'اختر لغةً واحدة على الأقل'),
+          value: () => ({ codes: inputs.filter(i => i.checked).map(i => i.value),
+            shape: shape.value, title: titleIn.value.trim() || 'خطب الحرمين الشريفين' }) }]
+    });
+    if (!picked) return;
+
+    const { printBook, sortBook } = await import('../bookexport.js');
+    const pack = rows => sortBook(rows.map(t => ({
+      material: t.material, track: t, khateeb: t.material.khateeb?.name })));
+    const edition = `إصدار ${fmtDate(new Date())}`;
+    const groups = picked.shape === 'per'
+      ? picked.codes.map(c => ({ code: c, rows: list.filter(t => t.language_code === c) }))
+      : [{ code: null, rows: picked.codes.flatMap(c => list.filter(t => t.language_code === c)) }];
+
+    let opened = 0;
+    for (const g of groups) {
+      if (!g.rows.length) continue;
+      const ok = printBook(pack(g.rows),
+        { title: picked.title, period: periodLabel(), language: g.code, edition },
+        { autoPrint: false });
+      if (ok) opened++;
+      await new Promise(r => setTimeout(r, 400));   // نوافذ متتابعة لا دفعةً واحدة
+    }
+    if (!opened) toast('اسمح بالنوافذ المنبثقة لبناء الكتاب.', 'bad');
+    else toast(opened === 1 ? 'فُتح الكتاب — اطبعه أو احفظه PDF.' : `فُتحت ${opened} كتب — كلٌّ بلغته.`, 'ok');
+  }
+
   function exportRow(list) {
     const title = `أرشيف أعمال الترجمة — ${scopeLabel()}`;
     const note = `${list.length} عملًا — ${periodLabel()} — أُصدر في ${fmtDate(new Date())}`;
@@ -156,7 +222,10 @@ export async function render(ctx) {
       wordBtn,
       h('button.btn.sm', { type: 'button',
         onclick: () => { if (!exportPdf(sheetOf(list), title, { note })) toast('اسمح بالنوافذ المنبثقة للتصدير', 'bad'); } },
-        'تصدير PDF'));
+        'تصدير PDF'),
+      h('button.btn.sm.primary', { type: 'button',
+        onclick: e => busy(e.currentTarget, () => bookDialog(list).catch(err => toast(err.message, 'bad'))) },
+        '📕 تصدير مجمَّع (كتاب)'));
   }
 
   // ----------------------------------------------------------------
