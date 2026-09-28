@@ -1,6 +1,6 @@
-import { auth, configured } from './sb.js';
+import { auth, configured, db } from './sb.js';
 import { h, toast } from './ui.js';
-import { state, loadProfile, loadReference, loadPolicyState, loadCircularState, loadMfaState, isAdmin, isActive } from './store.js';
+import { state, loadProfile, loadReference, loadPolicyState, loadCircularState, loadMfaState, isAdmin, isActive, isSupervisor } from './store.js';
 import { staffShell } from './views/shell.js';
 import { start as idleStart, stop as idleStop } from './idle.js';
 
@@ -29,7 +29,7 @@ const routes = [
   ['/app/languages', () => import('./views/languages.js'), true, true],
   ['/app/khateebs', () => import('./views/khateebs.js'), true, true],
   ['/app/workflow', () => import('./views/workflow.js'), true, true],
-  ['/app/archive', () => import('./views/archive.js'), true, true],
+  ['/app/archive', () => import('./views/archive.js'), true, 'reports'],
   ['/app/circulars', () => import('./views/circulars.js'), true],
   ['/app/me', () => import('./views/me.js'), true],
   ['/app/audio-guide', () => import('./views/audioguide.js'), true],
@@ -38,7 +38,11 @@ const routes = [
   ['/app/charter', () => import('./views/charter.js'), true, true],
   ['/app/payroll', () => import('./views/payroll.js'), true, true],
   ['/app/shifts', () => import('./views/shifts.js'), true, true],
-  ['/app/stats', () => import('./views/stats.js'), true, true],
+  ['/app/stats', () => import('./views/stats.js'), true, 'reports'],
+  ['/app/interpretation', () => import('./views/interpretation.js'), true, 'reports'],
+  ['/app/contract', () => import('./views/contract.js'), true, 'reports'],
+  ['/app/evaluation', () => import('./views/evaluation.js'), true, 'reports'],
+  ['/app/glossary', () => import('./views/glossary.js'), true],
   ['/app/revise/:material', () => import('./views/revise.js'), true, true]
 ];
 
@@ -127,7 +131,12 @@ async function render() {
         toast('لديك تعميم ملزم بانتظار اطّلاعك وتوقيعك.', 'bad');
         return navigate('/app/circulars', { replace: true });
       }
-      if (route.adminOnly && !isAdmin()) return navigate('/app', { replace: true });
+      // الشاشات الإدارية: بعضها يطّلع عليه مشرف الهيئة ولا يعدّل فيه (ملاحظة ١٤٦)
+      const mayView = isAdmin() || (route.adminOnly === 'reports' && isSupervisor());
+      if (route.adminOnly && !mayView) return navigate('/app', { replace: true });
+      // المشرف لا لوحة متابعة له، فمدخله دليل الإنتاج
+      if (path === '/app' && isSupervisor()) return navigate('/app/stats', { replace: true });
+      if (isSupervisor()) db.rpc('log_supervisor_view', { p_screen: path }).catch(() => {});
     }
     const mod = await route.load();
     document.title = DEFAULT_TITLE;

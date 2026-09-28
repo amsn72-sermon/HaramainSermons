@@ -19,7 +19,8 @@ export const state = {
   filePattern: null      // نمط تسمية الملفات المسلَّمة (ملاحظة ١٤٤)
 };
 
-export const ROLE_LABEL = { manager: 'مدير المشروع', coordinator: 'منسق', translator: 'مترجم' };
+export const ROLE_LABEL = { manager: 'مدير المشروع', coordinator: 'منسق', translator: 'مترجم',
+  supervisor: 'مشرف الهيئة' };
 export const STATUS_LABEL = { pending: 'بانتظار التفعيل', active: 'مفعّل', disabled: 'معطّل' };
 export const TRACK_STATUS = {
   awaiting_receipt: ['بانتظار الاستلام', 'warn'],
@@ -49,6 +50,9 @@ export const EVENT_LABEL = {
 export const isAdmin = () => ['manager', 'coordinator'].includes(state.profile?.role) && state.profile?.status === 'active';
 export const isManager = () => state.profile?.role === 'manager' && state.profile?.status === 'active';
 export const isActive = () => state.profile?.status === 'active';
+// مشرف الهيئة: يطّلع على التقارير ولا يعدّل شيئًا (ملاحظة ١٤٦)
+export const isSupervisor = () => state.profile?.role === 'supervisor' && state.profile?.status === 'active';
+export const canViewReports = () => isAdmin() || isSupervisor();
 
 export async function loadProfile() {
   if (!auth.session) { state.profile = null; return null; }
