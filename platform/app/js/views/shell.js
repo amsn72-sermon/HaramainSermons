@@ -64,14 +64,28 @@ export function staffShell(view, path) {
     out('/?tab=archive', 'أرشيف الخطب والمجالس'),
     out('/arafah', 'خطب عرفة')]);
   const nav = isSupervisor()
-    // مشرف الهيئة: اطّلاعٌ على الإنجاز والتقارير، بلا بيانات الأعضاء ولا المراسلات (ملاحظة ١٤٦)
-    ? [group('الاطّلاع', [
-         link('/app/stats', 'دليل الإنتاج'),
-         link('/app/contract', 'بنود العقد والمستخلص'),
-         link('/app/interpretation', 'الترجمة الفورية'),
-         link('/app/evaluation', 'تقييم المرشدين'),
+    // مدير المشروع من الهيئة: يرى ما يراه المنسق اطّلاعًا، بلا إنشاء ولا تعديل،
+    // وبلا الرواتب ولا الحسابات المصرفية ولا المراسلات الداخلية (ملاحظتا ١٤٦ و١٦٤)
+    ? [group('سير العمل', [
+         link('/app', 'المتابعة'),
          link('/app/archive', 'أرشيف الترجمة'),
-         link('/app/glossary', 'الدليل المصطلحي')]),
+         link('/app/stats', 'دليل الإنتاج'),
+         link('/app/interpretation', 'الترجمة الفورية')]),
+       group('الفريق', [
+         link('/app/staff/admins', 'الحسابات الإدارية'),
+         link('/app/staff', 'المترجمون المتخصصون'),
+         link('/app/field', 'المرشدون المكانيون'),
+         link('/app/cards', 'بطاقات العمل'),
+         link('/app/charter', 'ميثاق العمل'),
+         link('/app/shifts', 'الحضور والانصراف'),
+         link('/app/evaluation', 'تقييم المرشدين'),
+         link('/app/rooms', 'القاعات واللقاءات')]),
+       group('الإعدادات', [
+         link('/app/languages', 'اللغات'),
+         link('/app/khateebs', 'الخطباء'),
+         link('/app/workflow', 'إعداد سير العمل'),
+         link('/app/glossary', 'الدليل المصطلحي'),
+         link('/app/audio-guide', 'دليل التسجيل الصوتي')]),
        broadcast,
        group('حسابي', [mine, link('/about', 'عن المنصة')])]
     : isAdmin()
@@ -82,7 +96,7 @@ export function staffShell(view, path) {
          link('/app/archive', 'أرشيف الترجمة'),
          link('/app/stats', 'دليل الإنتاج'),
          link('/app/interpretation', 'الترجمة الفورية'),
-         link('/app/contract', 'بنود العقد والمستخلص')]),
+         isManager() ? link('/app/contract', 'بنود العقد والمستخلص') : null].filter(Boolean)),
        group('الفريق', [
          link('/app/staff/admins', 'الحسابات الإدارية'),
          link('/app/staff', 'المترجمون المتخصصون'),
@@ -92,6 +106,7 @@ export function staffShell(view, path) {
          link('/app/payroll', 'الرواتب'),
          link('/app/shifts', 'الحضور والانصراف'),
          link('/app/evaluation', 'تقييم المرشدين'),
+         link('/app/rooms', 'القاعات واللقاءات'),
          mail]),
        group('الإعدادات', [
          link('/app/languages', 'اللغات'),
@@ -103,8 +118,10 @@ export function staffShell(view, path) {
        group('حسابي', [mine, link('/about', 'عن المنصة')])]
     : p.track === 'field'
       // الإرشاد المكاني: لا تُسنَد إليه أعمال ترجمة، فلا قائمة مهام (ملاحظة ٩٩)
-      ? [broadcast, group('حسابي', [mine, mail, link('/about', 'عن المنصة')])]
+      ? [group('عملي', [link('/app/rooms', 'القاعات واللقاءات')]),
+         broadcast, group('حسابي', [mine, mail, link('/about', 'عن المنصة')])]
       : [group('عملي', [link('/app/tasks', 'مهامي'), mail,
+           link('/app/rooms', 'القاعات واللقاءات'),
            link('/app/glossary', 'الدليل المصطلحي'),
            link('/app/audio-guide', 'دليل التسجيل الصوتي')]),
          broadcast,
