@@ -1,6 +1,6 @@
 import { auth, configured, db } from './sb.js';
 import { h, toast } from './ui.js';
-import { state, loadProfile, loadReference, loadPolicyState, loadCircularState, loadMfaState, isAdmin, isActive, isSupervisor } from './store.js';
+import { state, loadProfile, loadReference, loadPolicyState, loadCircularState, loadMfaState, isAdmin, isManager, isActive, isSupervisor } from './store.js';
 import { staffShell } from './views/shell.js';
 import { start as idleStart, stop as idleStop } from './idle.js';
 
@@ -40,9 +40,10 @@ const routes = [
   ['/app/shifts', () => import('./views/shifts.js'), true, true],
   ['/app/stats', () => import('./views/stats.js'), true, 'reports'],
   ['/app/interpretation', () => import('./views/interpretation.js'), true, 'reports'],
-  ['/app/contract', () => import('./views/contract.js'), true, 'reports'],
+  ['/app/contract', () => import('./views/contract.js'), true, 'manager'],
   ['/app/evaluation', () => import('./views/evaluation.js'), true, 'reports'],
   ['/app/glossary', () => import('./views/glossary.js'), true],
+  ['/app/rooms', () => import('./views/rooms.js'), true],
   ['/app/revise/:material', () => import('./views/revise.js'), true, true]
 ];
 
@@ -131,11 +132,14 @@ async function render() {
         toast('لديك تعميم ملزم بانتظار اطّلاعك وتوقيعك.', 'bad');
         return navigate('/app/circulars', { replace: true });
       }
-      // الشاشات الإدارية: بعضها يطّلع عليه مشرف الهيئة ولا يعدّل فيه (ملاحظة ١٤٦)
-      const mayView = isAdmin() || (route.adminOnly === 'reports' && isSupervisor());
+      // مدير المشروع من الهيئة يرى شاشات المنسق كلها اطّلاعًا، إلا ما يُنشئ أو يمسّ
+      // الأجور والحسابات المصرفية، وإلا بنود العقد فهي لمدير المشروع (ملاحظتا ١٥٥ و١٦٤)
+      const NOT_FOR_SUPERVISOR = ['/app/new', '/app/payroll', '/app/bank-accounts', '/app/circulars'];
+      const supervisorMay = isSupervisor()
+        && !NOT_FOR_SUPERVISOR.includes(path) && !path.startsWith('/app/revise');
+      const mayView = route.adminOnly === 'manager' ? isManager() : isAdmin() || supervisorMay;
       if (route.adminOnly && !mayView) return navigate('/app', { replace: true });
-      // المشرف لا لوحة متابعة له، فمدخله دليل الإنتاج
-      if (path === '/app' && isSupervisor()) return navigate('/app/stats', { replace: true });
+      if (isSupervisor() && NOT_FOR_SUPERVISOR.includes(path)) return navigate('/app', { replace: true });
       if (isSupervisor()) db.rpc('log_supervisor_view', { p_screen: path }).catch(() => {});
     }
     const mod = await route.load();
