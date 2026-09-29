@@ -1072,3 +1072,18 @@ button.arch-tile:hover { border-color: var(--gold); }
 .gl-hit ul { margin: 4px 0 0; padding-inline-start: 18px; }
 .ws-glossary { justify-content: flex-start; margin: 0 0 10px; }
 .ws-glossary:empty { display: none; }
+
+/* الأصل الصوتي ومعاينته، ولوحة فتح الدليل المصطلحي (ملاحظتا ١٥٧ و١٥٨) */
+.src-audio { position: sticky; top: 8px; }
+.src-audio audio { width: 100%; }
+.src-audio-prev { margin-top: 8px; gap: 4px; }
+.src-audio-prev audio { width: 100%; }
+.gl-open { border-inline-start: 3px solid var(--gold); }
+
+/* القاعات واللقاءات (ملاحظة ١٦٣) */
+.meet-card { border-inline-start: 3px solid var(--border); }
+.meet-card.open { border-inline-start-color: var(--ok); }
+.meet-card .sep { opacity: .5; }
+.inv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 12px; }
+.inv-row { min-height: 28px; }
+@media (max-width: 560px) { .inv-grid { grid-template-columns: 1fr; } }
