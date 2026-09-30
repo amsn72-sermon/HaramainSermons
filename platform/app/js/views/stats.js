@@ -1,8 +1,9 @@
 // دليل الإنتاج: قوائم الأعمال بعدد كلماتها وصفحاتها ودقائقها، ومجموع يتحدّث (ملاحظة ٩٠)
-import { h, toast, busy, fmtDate, fmtDateTime, fmtSermonDate } from '../ui.js';
+import { h, toast, busy, fmtDate, fmtDateTime, fmtSermonDate, fmtHijri } from '../ui.js';
 import { db } from '../sb.js';
-import { state, langName, MOSQUE_ANY, MATERIAL_TYPES, canViewReports } from '../store.js';
+import { state, langName, MOSQUE, MOSQUE_ANY, MATERIAL_TYPES, SERMON_TYPES, isManager } from '../store.js';
 import { buildXlsx, downloadBlob } from '../xlsx.js';
+import { EVENT_TYPES } from './interpretation.js';
 
 // الصفحة المطبوعة على كليشة الهيئة ≈ ٢٥٠ كلمة
 const WORDS_PER_PAGE = 250;
@@ -24,6 +25,8 @@ const isSermonType = t => t === 'خطب' || t === 'دروس علمية';
 
 // وحدات المناقصة الثلاث: الخطبة (لكل لغة) · الساعة (ترجمة فورية) · الكلمة (بقية المواد)
 export const UNIT_OF = type => (type === 'خطب' ? 'sermon' : type === 'دروس علمية' ? 'hour' : 'word');
+// الخطب تُحتسب بالخطبة، فلا يُحصى لها عدد كلمات (ملاحظة ١٥٦)
+export const countsWords = type => type !== 'خطب';
 export const UNIT_LABEL = { sermon: 'بالخطبة (لكل لغة)', hour: 'بالساعة', word: 'بالكلمة' };
 const hrs = n => (Math.round(Number(n || 0) * 100) / 100).toLocaleString('en-US');
 
@@ -57,38 +60,12 @@ export async function render(ctx) {
     return r.words > 0 || r.audio_seconds > 0;
   };
 
-  // ---------------- العدّاد ----------------
-  const counter = h('div.counter-grid');
-  const bigWords = h('b.counter-num', '٠');
-  let shown = 0;
-
-  function animateTo(target) {
-    const start = shown, diff = target - start, t0 = performance.now(), dur = 900;
-    const step = now => {
-      const k = Math.min(1, (now - t0) / dur);
-      const v = Math.round(start + diff * (1 - Math.pow(1 - k, 3)));
-      bigWords.textContent = ar(v);
-      if (k < 1) requestAnimationFrame(step); else shown = target;
-    };
-    requestAnimationFrame(step);
-  }
-
-  function drawCounter(list) {
-    const { words, pages, sec } = sums(list);
-    const mats = new Set(list.map(r => r.material_id)).size;
-    const lg = new Set(list.map(r => r.language_code)).size;
-    counter.replaceChildren(
-      h('div.counter-main',
-        h('span.counter-label', 'مجموع الكلمات المترجمة حتى الآن'),
-        bigWords,
-        h('span.counter-sub', `${ar(pages)} صفحة تقديرًا`)),
-      h('div.counter-side',
-        h('div.counter-cell', h('b', ar(mats)), h('span', 'مادة')),
-        h('div.counter-cell', h('b', ar(list.length)), h('span', 'عمل مترجَم')),
-        h('div.counter-cell', h('b', ar(lg)), h('span', 'لغة')),
-        h('div.counter-cell', h('b', ar(minutes(sec))), h('span', 'دقيقة صوتية'))));
-    animateTo(words);
-  }
+  // ---------------- عدّادات الأقسام (ملاحظة ١٦٩) ----------------
+  // لا عدّاد واحد في أعلى الشاشة: لكل قسمٍ عدّاداته بوحدته، فلا تختلط الوحدات.
+  const tile = (num, label, note) => h('div.stat-tile',
+    h('b.stat-num', num), h('span.stat-label', label),
+    note ? h('span.stat-note', note) : null);
+  const tiles = (...cells) => h('div.stat-tiles', cells.filter(Boolean));
 
   // ---------------- القوائم ----------------
   const tablesBox = h('div.stack');
@@ -99,25 +76,24 @@ export async function render(ctx) {
 
   function typeTable(type, list) {
     const sermon = isSermonType(type);
-    const { words, pages, sec } = sums(list);
-    const head = sermon
-      ? ['العنوان', 'النوع', 'التاريخ', 'اللغة', 'الكلمات', 'الصفحات', 'الدقائق']
-      : ['العنوان', 'التاريخ', 'اللغة', 'الكلمات', 'الصفحات'];
+    const words = countsWords(type);                 // الخطب بالخطبة لا بالكلمة (ملاحظة ١٥٦)
+    const g = sums(list);
+    const head = ['العنوان', ...(sermon ? ['النوع'] : []), 'التاريخ', 'اللغة',
+      ...(words ? ['الكلمات', 'الصفحات'] : []), ...(sermon ? ['الدقائق'] : [])];
     const body = list.map(r => {
-      const cells = sermon
-        ? [r.title, rowTitle(r), r.sermon_date ? fmtSermonDate(r.sermon_date) : fmtDate(r.added_at),
-           langName(r.language_code), ar(r.words), ar(pagesOf(r.words)), ar(minutes(r.audio_seconds))]
-        : [r.title, r.sermon_date ? fmtSermonDate(r.sermon_date) : fmtDate(r.added_at),
-           langName(r.language_code), ar(r.words), ar(pagesOf(r.words))];
+      const cells = [r.title, ...(sermon ? [rowTitle(r)] : []),
+        r.sermon_date ? fmtSermonDate(r.sermon_date) : fmtDate(r.added_at), langName(r.language_code),
+        ...(words ? [ar(r.words), ar(pagesOf(r.words))] : []),
+        ...(sermon ? [ar(minutes(r.audio_seconds))] : [])];
       return h('tr', cells.map((v, i) => h('td', { 'data-label': head[i] }, v)));
     });
-    const totalRow = sermon
-      ? ['المجموع', '', '', `${ar(list.length)} عملًا`, ar(words), ar(pages), ar(minutes(sec))]
-      : ['المجموع', '', `${ar(list.length)} عملًا`, ar(words), ar(pages)];
+    const totalRow = ['المجموع', ...(sermon ? [''] : []), '', `${ar(list.length)} عملًا`,
+      ...(words ? [ar(g.words), ar(g.pages)] : []), ...(sermon ? [ar(minutes(g.sec))] : [])];
 
     return h('section.card.stack',
       h('div.row.between', h('h3', type),
-        h('span.badge', `${ar(words)} كلمة · ${ar(pages)} صفحة`)),
+        h('span.badge', words ? `${ar(g.words)} كلمة · ${ar(g.pages)} صفحة`
+          : `${ar(list.length)} عملًا · بالخطبة لكل لغة`)),
       h('div.table-wrap', h('table.responsive.prod-table',
         h('thead', h('tr', head.map(t => h('th', t)))),
         h('tbody', body),
@@ -150,9 +126,17 @@ export async function render(ctx) {
 
     // ١) الخطب — بالخطبة، وكل لغة خطبةٌ مستقلة
     const byLang = arr => [...new Set(arr.map(r => r.language_code))].sort();
+    // عدّادات الخطب: بالمسجدين أولًا، ثم نوعًا نوعًا (ملاحظة ١٦٩)
+    const ofType = t => sermons.filter(r => (r.sermon_type || '') === t).length;
+    const sermonTiles = tiles(
+      tile(ar(sermons.length), 'خطبة مترجَمة', `${ar(byLang(sermons).length)} لغة`),
+      ...Object.entries(MOSQUE).map(([key, label]) =>
+        tile(ar(sermons.filter(r => r.mosque === key).length), label)),
+      ...SERMON_TYPES.map(t => tile(ar(ofType(t)), t.replace(/^خطبة /, ''))));
     const sermonTable = h('section.card.stack',
       h('div.row.between', h('h3', 'الخطب بأنواعها'), h('span.badge.gold', UNIT_LABEL.sermon)),
       h('p.small.muted', 'كل لغة خطبةٌ مستقلة، فالخطبة المترجَمة بعشر لغات عشرةُ أعمال.'),
+      sermonTiles,
       h('div.table-wrap', h('table.responsive',
         h('thead', h('tr', ['نوع الخطبة', 'اللغات', 'عدد الخطب'].map(t => h('th', t)))),
         h('tbody', (() => {
@@ -169,9 +153,18 @@ export async function render(ctx) {
           h('td', 'المجموع'), h('td', ar(byLang(sermons).length)), h('td', ar(sermons.length)))))));
 
     // ٢) الدروس — بالساعة، من سجلّ الترجمة الفورية
+    const hoursOf = arr => arr.reduce((sm, r) => sm + Number(r.hours || 0), 0);
+    const evTypes = [...new Set([...EVENT_TYPES, ...hours.map(r => r.event_type)])].filter(Boolean);
+    const hourTiles = tiles(
+      tile(hrs(hoursTotal), 'ساعة ترجمة فورية', `${ar(hours.length)} فعالية`),
+      ...evTypes.map(t => {
+        const l = hours.filter(r => r.event_type === t);
+        return tile(hrs(hoursOf(l)), `ساعات ${t}`, `${ar(l.length)} فعالية`);
+      }));
     const hourTable = h('section.card.stack',
       h('div.row.between', h('h3', 'الدروس والندوات والمؤتمرات — ترجمة فورية'),
         h('span.badge.gold', UNIT_LABEL.hour)),
+      hourTiles,
       h('div.table-wrap', h('table.responsive',
         h('thead', h('tr', ['نوع الفعالية', 'الفعاليات', 'الساعات'].map(t => h('th', t)))),
         h('tbody', (() => {
@@ -189,9 +182,19 @@ export async function render(ctx) {
       h('p.small.muted', 'تُدوَّن في سجلّ الترجمة الفورية بعد إتمامها، بشهادة مشرف الهيئة.'));
 
     // ٣) النصوص والكتب والمطويات وغيرها — بالكلمة
+    const wsumAll = sums(words);
+    const wordKinds = [...new Set([...MATERIAL_TYPES.filter(t => UNIT_OF(t) === 'word'),
+      ...words.map(r => r.material_type)])].filter(Boolean);
+    const wordTiles = tiles(
+      tile(ar(wsumAll.words), 'كلمة مترجَمة', `${ar(wsumAll.pages)} صفحة تقديرًا`),
+      ...wordKinds.map(t => {
+        const l = words.filter(r => (r.material_type || 'مادة') === t);
+        return tile(ar(sums(l).words), `كلمات ${t}`, `${ar(l.length)} عملًا`);
+      }));
     const wordTable = h('section.card.stack',
       h('div.row.between', h('h3', 'النصوص والكتب والمطويات والمنشورات والتوجيهات'),
         h('span.badge.gold', UNIT_LABEL.word)),
+      wordTiles,
       h('div.table-wrap', h('table.responsive',
         h('thead', h('tr', ['نوع المادة', 'الأعمال', 'الكلمات', 'الصفحات'].map(t => h('th', t)))),
         h('tbody', (() => {
@@ -225,6 +228,10 @@ export async function render(ctx) {
       h('div.row.between', h('h3', 'الدقائق الصوتية'),
         h('span.badge', `${ar(minutes(sec))} دقيقة · ${ar(list.length)} تسجيلًا`)),
       h('p.small.muted', 'قسمٌ مستقل: الدقائق لا تدخل وحدات المناقصة، وتُوثَّق ببيانات كل تسجيل ليخرج التقرير واضحًا.'),
+      tiles(
+        tile(ar(minutes(sec)), 'دقيقة صوتية', `${ar(list.length)} تسجيلًا`),
+        tile(ar(list.filter(a => a.is_approved).length), 'تسجيل معتمد'),
+        tile(ar(new Set(list.map(a => a.language_code)).size), 'لغة')),
       h('div.table-wrap', h('table.responsive',
         h('thead', h('tr', head.map(t => h('th', t)))),
         h('tbody', list.length ? list.map(a => h('tr',
@@ -245,7 +252,6 @@ export async function render(ctx) {
 
   function draw() {
     const list = rows.filter(match);
-    drawCounter(list);
     drawUnits(list);
     drawAudio();
     const groups = TYPE_ORDER
@@ -254,7 +260,9 @@ export async function render(ctx) {
     const other = list.filter(r => !TYPE_ORDER.includes(r.material_type || ''));
     if (other.length) groups.push(['مواد أخرى', other]);
 
-    const { words, pages, sec } = sums(list);
+    const { words, pages } = sums(list.filter(r => countsWords(r.material_type)));
+    const sec = sums(list).sec;
+    const sermonCount = list.filter(r => !countsWords(r.material_type)).length;
 
     tablesBox.replaceChildren(
       ...(groups.length ? groups.map(([t, l]) => typeTable(t, l))
@@ -262,7 +270,7 @@ export async function render(ctx) {
       groups.length ? h('div.card.grand-total',
         h('div.row.between',
           h('b', 'المجموع العام'),
-          h('span', `${ar(words)} كلمة · ${ar(pages)} صفحة · ${ar(minutes(sec))} دقيقة صوتية`))) : null);
+          h('span', `${ar(sermonCount)} خطبة · ${ar(words)} كلمة لغير الخطب · ${ar(pages)} صفحة · ${ar(minutes(sec))} دقيقة صوتية`))) : null);
   }
 
   for (const el of Object.values(f)) el.addEventListener('change', draw);
@@ -270,16 +278,22 @@ export async function render(ctx) {
   // ---------------- تصدير: Excel وWord وPDF على كليشة الهيئة (ملاحظة ٩٨) ----------------
   const sheetRows = () => {
     const list = rows.filter(match);
+    // التاريخ هجريٌّ وحده في كل التصديرات (ملاحظة ١٦٠)
+    const dateOf = r => (r.sermon_date ? fmtHijri(r.sermon_date) : fmtHijri((r.added_at || '').slice(0, 10)));
+    const wordCell = r => (countsWords(r.material_type) ? String(r.words || 0) : '—');
+    const pageCell = r => (countsWords(r.material_type) ? String(pagesOf(r.words)) : '—');
     const out = [['النوع', 'العنوان', 'التاريخ', 'اللغة', 'الكلمات', 'الصفحات', 'الدقائق الصوتية']];
     for (const t of [...TYPE_ORDER, 'مواد أخرى']) {
       const l = list.filter(r => (r.material_type || 'مادة') === t
         || (t === 'مواد أخرى' && !TYPE_ORDER.includes(r.material_type || '')));
       for (const r of l) {
-        out.push([t, r.title, r.sermon_date || (r.added_at || '').slice(0, 10), langName(r.language_code),
-          String(r.words || 0), String(pagesOf(r.words)), String(minutes(r.audio_seconds))]);
+        out.push([t, r.title, dateOf(r), langName(r.language_code),
+          wordCell(r), pageCell(r), String(minutes(r.audio_seconds))]);
       }
     }
-    const { words, pages, sec } = sums(list);
+    const counted = list.filter(r => countsWords(r.material_type));
+    const { words, pages } = sums(counted);
+    const sec = sums(list).sec;
     out.push(['المجموع', '', '', '', String(words), String(pages), String(minutes(sec))]);
 
     // ملخّصان في آخر الكشف: حسب النوع وحسب اللغة، ثم الإجمالي (ملاحظة ١١٤)
@@ -290,14 +304,17 @@ export async function render(ctx) {
         || (t === 'مواد أخرى' && !TYPE_ORDER.includes(r.material_type || '')));
       if (!l.length) continue;
       const g = sums(l);
-      out.push([t, String(l.length), '', '', String(g.words), String(g.pages), String(minutes(g.sec))]);
+      const w = countsWords(t);
+      out.push([t, String(l.length), '', '', w ? String(g.words) : '—', w ? String(g.pages) : '—',
+        String(minutes(g.sec))]);
     }
     out.push(['', '', '', '', '', '', '']);
     out.push(['ملخّص حسب اللغة', 'عدد الأعمال', '', '', 'الكلمات', 'الصفحات', 'الدقائق']);
     for (const code of [...new Set(list.map(r => r.language_code))].sort()) {
       const l = list.filter(r => r.language_code === code);
-      const g = sums(l);
-      out.push([langName(code), String(l.length), '', '', String(g.words), String(g.pages), String(minutes(g.sec))]);
+      const g = sums(l.filter(r => countsWords(r.material_type)));
+      out.push([langName(code), String(l.length), '', '', String(g.words), String(g.pages),
+        String(minutes(sums(l).sec))]);
     }
     out.push(['', '', '', '', '', '', '']);
     out.push(['الإجمالي العام', String(list.length), '', '', String(words), String(pages), String(minutes(sec))]);
@@ -354,7 +371,7 @@ export async function render(ctx) {
   const timer = setInterval(refresh, 60000);
   // يتوقف المؤقّت حين تُغادر الشاشة
   const stop = new MutationObserver(() => {
-    if (!document.body.contains(counter)) { clearInterval(timer); stop.disconnect(); }
+    if (!document.body.contains(panels)) { clearInterval(timer); stop.disconnect(); }
   });
   stop.observe(document.body, { childList: true, subtree: true });
 
@@ -378,10 +395,10 @@ export async function render(ctx) {
   return h('div',
     h('div.page-head',
       h('div.row', { style: { marginInlineStart: 'auto', order: 2 } }, fmtSel, xlsBtn,
-        canViewReports() ? h('a.btn.sm', { href: '/app/contract' }, 'بنود العقد والمستخلص') : null),
+        isManager() ? h('a.btn.sm', { href: '/app/contract' }, 'بنود العقد والمستخلص') : null),
       h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'دليل الإنتاج'),
-        h('p.muted', 'كل عمل مترجَم بعدد كلماته وصفحاته، مرتَّبًا بنوع المادة، والمجموع يتحدّث كلما أُنجز عمل.'))),
-    counter,
+        h('p.muted', 'لكل قسمٍ عدّاداته بوحدته: الخطب بالخطبة، والدروس بالساعة، '
+          + 'والنصوص بالكلمة — وتتحدّث كلما أُنجز عمل.'))),
     h('div.card.stack',
       h('div.grid-2',
         h('label.field', 'اللغة', f.lang),
