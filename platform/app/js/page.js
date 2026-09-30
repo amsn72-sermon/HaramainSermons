@@ -1,5 +1,5 @@
 // صفحة A4 على كليشة الهيئة: مقاسات ثابتة موحّدة لكل المواد في المحرر والطباعة وملف Word.
-import { h, fmtSermonDate } from './ui.js';
+import { h, fmtHijri } from './ui.js';
 import { MOSQUE, langName, state } from './store.js';
 
 // المساحة المخصصة للكتابة (مم) — لا تتغير من مادة لأخرى
@@ -12,7 +12,7 @@ export const docVerifyUrl = no => `${PUBLIC_SITE}/verify?doc=${encodeURIComponen
 
 const SERMON_LABEL = { 'خطبة جمعة': 'خطبة الجمعة', 'خطبة عرفة': 'خطبة يوم عرفة',
   'خطبة عيد الأضحى': 'خطبة عيد الأضحى', 'خطبة عيد الفطر': 'خطبة عيد الفطر',
-  'خطبة استسقاء': 'خطبة الاستسقاء', 'خطبة كسوف': 'خطبة الكسوف' };
+  'خطبة استسقاء': 'خطبة الاستسقاء', 'خطبة كسوف': 'خطبة الكسوف', 'خطبة خسوف': 'خطبة الخسوف' };
 
 // «خطبة الجمعة من المسجد الحرام»
 export function heading(m) {
@@ -33,14 +33,14 @@ export function cardRows(m, languageCode, khateeb) {
     return [
       ['العنوان', m.title],
       [SOURCE_LABEL[m.material_type] || 'المؤلف', m.author],
-      ['التاريخ', m.sermon_date && fmtSermonDate(m.sermon_date)],
+      ['التاريخ', m.sermon_date && fmtHijri(m.sermon_date)],
       ['اللغة', languageCode && langName(languageCode)]
     ].filter(([, v]) => v);
   }
   return [
     ['العنوان', m.title],
     ['الخطيب', khateeb || m.khateeb?.name],
-    ['التاريخ', m.sermon_date && fmtSermonDate(m.sermon_date)],
+    ['التاريخ', m.sermon_date && fmtHijri(m.sermon_date)],
     ['اللغة', languageCode && langName(languageCode)]
   ].filter(([, v]) => v);
 }
@@ -56,7 +56,7 @@ export function nameParts(m, languageCode, khateeb, docNo) {
     kind: heading(m),
     sub: m.sermon_type || m.material_type || '',
     mosque: (m.mosque && MOSQUE[m.mosque]) || '',
-    hijri: m.sermon_date ? fmtSermonDate(m.sermon_date).split('(')[0].trim() : '',
+    hijri: m.sermon_date ? fmtHijri(m.sermon_date) : '',
     date: m.sermon_date || '',
     lang: languageCode ? langName(languageCode) : '',
     title: m.title || '',
