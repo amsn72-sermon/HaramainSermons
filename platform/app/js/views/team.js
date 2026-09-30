@@ -1,7 +1,7 @@
 // فريق العمل: طلبات التسجيل، التفعيل، الأدوار، واللغات
 import { h, fill, toast, busy, dialog, emptyState, fmtDate, fmtDateTime, confirm } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, isManager, ROLE_LABEL, STATUS_LABEL, langName, stageName } from '../store.js';
+import { state, isManager, PERM_LABEL, PERM_KEYS, ROLE_LABEL, STATUS_LABEL, langName, stageName } from '../store.js';
 import { POLICY_KEY, POLICY_VERSION } from '../policy.js';
 import { TEAM_FIELDS, teamRows, exportExcel, exportWord, exportPdf } from '../teamexport.js';
 import { nationalitySelect } from '../nationalities.js';
@@ -77,6 +77,51 @@ export async function render(ctx, opts = {}) {
     const trackSel = h('select', { 'aria-label': 'الفريق' },
       Object.entries(TRACK_LABEL).map(([k, v]) => h('option', { value: k, selected: trackOf(m) === k }, v)));
 
+    // المتميّز من المرشدين المكانيين تُسنَد إليه الترجمة بلغته (ملاحظة ١٧٣)
+    const mayBox = h('input', { type: 'checkbox', checked: m.may_translate ? true : null,
+      'aria-label': 'يترجم بلغته المسجَّلة' });
+    const mayCard = h('fieldset.stack', { style: { display: trackOf(m) === 'field' ? '' : 'none' } },
+      h('legend', 'المرشد المتميّز'),
+      h('label.check', mayBox, h('span', 'تُسنَد إليه أعمال ترجمة بلغته المسجَّلة')),
+      h('p.small.muted', 'الأصل في فريق الإرشاد المكاني ألّا تُسنَد إليه ترجمة. '
+        + 'وهذا استثناءٌ للمتميّز، ولا يتجاوز لغاته المسجَّلة أعلاه. '
+        + 'ولا تُرفع الإتاحة وفي يده عملٌ لم يُنجز.'));
+    trackSel.addEventListener('change', () => {
+      mayCard.style.display = trackSel.value === 'field' ? '' : 'none';
+      if (trackSel.value !== 'field') mayBox.checked = false;
+    });
+
+    // إلزام هذا الحساب بالتحقق بخطوتين — لمدير المشروع (ملاحظة ١٧١)
+    const mfaBox = h('input', { type: 'checkbox', checked: m.mfa_required ? true : null,
+      disabled: !isManager() || null, 'aria-label': 'إلزام التحقق بخطوتين' });
+    const mfaCard = h('fieldset.stack',
+      h('legend', 'التحقق بخطوتين'),
+      h('label.check', mfaBox, h('span', 'يُلزَم هذا الحساب بالتحقق بخطوتين')),
+      h('p.small.muted', isManager()
+        ? 'من أُلزم لا يدخل حتى يفعّله بتطبيق المصادقة على جوّاله. والتفعيل بيده هو، '
+          + 'فلا يملكه أحدٌ عنه.'
+        : 'الإلزام بيد مدير المشروع.'));
+
+    // قائمة صلاحيات الحساب الإداري — لمدير المشروع (ملاحظة ١٧٢)
+    const permBoxes = new Map();
+    const permCard = h('fieldset.stack', { style: { display: ['coordinator', 'supervisor'].includes(m.role) ? '' : 'none' } },
+      h('legend', 'صلاحيات الحساب'),
+      h('p.small.muted', 'الأصل أن تكون كلها مفتوحة. وما تُغلقه هنا يُحجب من القائمة، '
+        + 'ويُمنع في قاعدة البيانات لا في الشاشة وحدها.'),
+      h('div.perm-grid', PERM_KEYS.map(k => {
+        const cb = h('input', { type: 'checkbox', checked: m.perms?.[k] === false ? null : true,
+          disabled: !isManager() || null, 'aria-label': PERM_LABEL[k] });
+        permBoxes.set(k, cb);
+        return h('label.check', cb, h('span', PERM_LABEL[k]));
+      })),
+      isManager() ? h('div.row',
+        h('button.btn.xs', { type: 'button', onclick: () => permBoxes.forEach(c => { c.checked = true; }) }, 'فتح الكل'),
+        h('button.btn.xs', { type: 'button', onclick: () => permBoxes.forEach(c => { c.checked = false; }) }, 'إغلاق الكل'))
+        : h('p.small.muted', 'ضبط الصلاحيات بيد مدير المشروع.'));
+    role.addEventListener('change', () => {
+      permCard.style.display = ['coordinator', 'supervisor'].includes(role.value) ? '' : 'none';
+    });
+
     // اللغات من قائمة منسدلة مع رقائق تُحذف بضغطة (ملاحظة ٥٢)
     const chosen = new Set(langsOf(m));
     const langSelect = h('select', { 'aria-label': 'أضف لغة' });
@@ -151,9 +196,12 @@ export async function render(ctx, opts = {}) {
             h('small', track === 'field'
               ? 'ينتقل المتميّز إلى الترجمة التخصصية فتُسنَد إليه الأعمال'
               : 'الإرشاد المكاني: توثيق بيانات فقط بلا إسناد أعمال ترجمة'))),
-        h('fieldset', h('legend', 'اللغات المؤهل فيها'), h('div.stack', { style: { gap: '10px' } }, langSelect, langChips))),
+        h('fieldset', h('legend', 'اللغات المؤهل فيها'), h('div.stack', { style: { gap: '10px' } }, langSelect, langChips)),
+        mayCard, permCard, mfaCard),
       buttons: [
         { label: 'حفظ', kind: 'primary', validate: () => {
+          if (mayBox.checked && trackSel.value === 'field' && !chosen.size) {
+            toast('سجّل لغات المرشد أولًا، فالإسناد يكون بحسب لغته.', 'bad'); return false; }
           const nid = fld.national_id.value.trim().toUpperCase();
           if (nid && fld.id_type.value === 'passport' && !/^[A-Z0-9]{5,15}$/.test(nid)) {
             toast('رقم الجواز من خمسة إلى خمسة عشر حرفًا ورقمًا.', 'bad'); return false; }
@@ -162,6 +210,8 @@ export async function render(ctx, opts = {}) {
           if (fld.full_name.value.trim().length < 3) { toast('اكتب الاسم الكامل.', 'bad'); return false; }
           return true;
         }, value: () => ({ role: role.value, languages: [...chosen], track: trackSel.value,
+          may: mayBox.checked && trackSel.value === 'field',
+          perms: Object.fromEntries([...permBoxes].filter(([, c]) => !c.checked).map(([k]) => [k, false])),
           contact: { full_name: fld.full_name.value.trim(), whatsapp: fld.whatsapp.value.trim(),
             nationality: fld.nationality.value.trim(), national_id: fld.national_id.value.trim().toUpperCase(),
             id_type: fld.id_type.value, residence: fld.residence.value.trim() } }) },
@@ -178,6 +228,19 @@ export async function render(ctx, opts = {}) {
       if (result.track !== trackOf(m)) {
         await db.rpc('set_member_track', { p_member: m.id, p_track: result.track });
         toast(`نُقل ${m.full_name} إلى ${TRACK_LABEL[result.track]}.`, 'ok');
+      }
+      // المرشد المتميّز، والصلاحيات، وإلزام التحقق — كلٌّ في موضعه (ملاحظات ١٧١–١٧٣)
+      if (result.track === 'field' && result.may !== !!m.may_translate) {
+        await db.rpc('set_member_may_translate', { p_member: m.id, p_on: result.may });
+      }
+      if (isManager() && ['coordinator', 'supervisor'].includes(result.role)) {
+        const before = JSON.stringify(m.perms || {});
+        if (before !== JSON.stringify(result.perms)) {
+          await db.rpc('set_member_perms', { p_member: m.id, p_perms: result.perms });
+        }
+      }
+      if (isManager() && mfaBox.checked !== !!m.mfa_required) {
+        await db.rpc('set_member_mfa_required', { p_member: m.id, p_on: mfaBox.checked });
       }
       toast('حُفظت بيانات العضو.', 'ok'); reload();
     } catch (err) { toast(err.message, 'bad'); }
@@ -422,7 +485,13 @@ export async function render(ctx, opts = {}) {
         h('td', { 'data-label': 'السرية' }, signOf[m.id]
           ? h('span.badge.ok', { title: fmtDateTime(signOf[m.id].accepted_at) }, 'موقّعة')
           : h('span.badge.warn', 'لم توقّع')),
-        h('td', { 'data-label': 'الحالة' }, h('span.badge', { class: m.status === 'active' ? 'ok' : 'bad' }, STATUS_LABEL[m.status])),
+        h('td', { 'data-label': 'الحالة' },
+          h('span.badge', { class: m.status === 'active' ? 'ok' : 'bad' }, STATUS_LABEL[m.status]),
+          m.may_translate ? h('span.badge.gold', { title: 'تُسنَد إليه الترجمة بلغته' }, 'يترجم') : null,
+          m.mfa_required ? h('span.badge', { title: 'مُلزَم بالتحقق بخطوتين' }, 'تحقق') : null,
+          Object.values(m.perms || {}).some(v => v === false)
+            ? h('span.badge.warn', { title: 'بعض الصلاحيات مغلقة' },
+                `${Object.values(m.perms).filter(v => v === false).length} مغلقة`) : null),
         h('td', canManage(m) && m.id !== state.profile.id && h('div.row',
           showPerf && h('button.btn.sm', { type: 'button', onclick: () => performance(m) }, 'الأداء والتقييم'),
           h('button.btn.sm', { type: 'button', onclick: () => edit(m) }, 'الملف والتعديل'),

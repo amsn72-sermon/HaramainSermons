@@ -4,6 +4,7 @@ import { db, storage } from '../sb.js';
 import { state, MATERIAL_TYPES, SERMON_TYPES, MOSQUE, PRIORITY, langName, stageName, needsMosque, GENERAL_MOSQUE } from '../store.js';
 import { createEditor } from '../editor.js';
 import { plainText } from '../sanitize.js';
+import { AUDIO_EXTS, isAllowedAudio, audioInfo, specLine } from '../audiofile.js';
 
 const DRAFT = 'hs.material-draft';
 // ٣. المدة الكلية تُحدَّد تلقائيًا حسب الأهمية (بالأيام)، وتبقى قابلة للتعديل
@@ -11,10 +12,12 @@ const PRIORITY_DAYS = { emergency: 1, urgent: 2, normal: 3 };
 
 export async function render(ctx) {
   const everyone = await db.select('profiles', {
-    select: 'id,full_name,role,track,member_languages(language_code)', status: 'eq.active', order: 'full_name.asc'
+    select: 'id,full_name,role,track,may_translate,member_languages(language_code)',
+    status: 'eq.active', order: 'full_name.asc'
   });
   // فريق الإرشاد المكاني لا تُسنَد إليه أعمال ترجمة (ملاحظة ٩٩)
-  const members = everyone.filter(m => m.track !== 'field');
+  // فريق الإرشاد المكاني لا تُسنَد إليه ترجمة، إلا المتميّز فبلغته (ملاحظة ١٧٣)
+  const members = everyone.filter(m => m.track !== 'field' || m.may_translate);
   const langsOf = m => new Set((m.member_languages || []).map(x => x.language_code));
   const activeStages = state.stages.filter(s => s.is_active);
   const slaStages = activeStages.filter(s => !s.outside_sla);
@@ -35,8 +38,12 @@ export async function render(ctx) {
     sermon_date: h('input', { type: 'date' }),
     author: h('input'),
     instructions: h('textarea', { placeholder: 'السياق، متطلبات الصياغة، وطريقة الاستخدام' }),
-    source_mode: h('select', h('option', { value: 'text' }, 'إدخال النص مباشرة'), h('option', { value: 'pdf' }, 'إرفاق ملف PDF عربي')),
+    source_mode: h('select', h('option', { value: 'text' }, 'إدخال النص مباشرة'),
+      h('option', { value: 'pdf' }, 'إرفاق ملف PDF عربي'),
+      h('option', { value: 'audio' }, 'رفع مقطع صوتي عربي (نص صوتي)')),
     pdf: h('input', { type: 'file', accept: 'application/pdf' }),
+    audio: h('input', { type: 'file', accept: '.wav,.mp3,audio/wav,audio/x-wav,audio/mpeg',
+      'aria-label': 'المقطع الصوتي العربي' }),
     deliverable: h('select', h('option', { value: 'text_audio' }, 'ترجمة كتابية مع تسجيل صوتي'), h('option', { value: 'text' }, 'ترجمة كتابية فقط')),
     priority: h('select', Object.entries(PRIORITY).map(([k, v]) => h('option', { value: k }, v))),
     total: h('input', { type: 'number', min: 1, value: PRIORITY_DAYS.normal }),
@@ -66,6 +73,34 @@ export async function render(ctx) {
   // الخطب والدروس تتبع مسجدًا؛ الكتب والمطويات والإعلانات والتوجيهات عامة (ملاحظة ٦٩)
   const mosqueWrap = h('label.field', req('مكان الخطبة / الموقع'), f.mosque);
   const pdfWrap = h('label.field', req('ملف الأصل العربي (PDF)'), h('small', 'حتى ٢٠ ميغابايت'), f.pdf);
+  // أصلٌ صوتي: درسٌ أو مادة تصل مقطعًا صوتيًّا فيترجمها المترجم سماعًا (ملاحظة ١٥٧)
+  const audioPrev = h('div.stack.src-audio-prev');
+  const audioWrap = h('div.field',
+    h('label.field', req('المقطع الصوتي العربي'),
+      h('small', `الصيغ المعتمدة ${AUDIO_EXTS.map(x => x.toUpperCase()).join(' أو ')} — حتى ٢٠٠ ميغابايت`), f.audio),
+    audioPrev,
+    h('p.small.muted', 'يسمعه المترجم في مكان الأصل، ويكتب ترجمته على الكليشة أمامه.'));
+  f.audio.onchange = async () => {
+    audioPrev.replaceChildren();
+    const file = f.audio.files[0];
+    if (!file) return;
+    if (!isAllowedAudio(file)) {
+      audioPrev.append(h('p.small.bad', `الصيغة غير معتمدة — ${AUDIO_EXTS.map(x => x.toUpperCase()).join(' أو ')} فقط.`));
+      f.audio.value = ''; return;
+    }
+    const url = URL.createObjectURL(file);
+    audioPrev.append(h('audio', { controls: true, src: url, style: { width: '100%' } }));
+    try {
+      const info = await audioInfo(file);
+      srcAudioSeconds = Math.round(info?.duration || 0) || null;
+      audioPrev.append(h('span.small.muted', specLine(info)));
+      if (info?.video) {
+        audioPrev.replaceChildren(h('p.small.bad', 'هذا مقطع فيديو — ارفع صوتًا فقط.'));
+        f.audio.value = '';
+      }
+    } catch { /* المتصفح لا يقرأ المواصفات أحيانًا، والصيغة كافية */ }
+  };
+  let srcAudioSeconds = null;
   // المواد العامة لا خطيب لها، فالمؤلف أو الجهة المصدرة إلزامي فيها (ملاحظة ١٤٢)
   const authorLabel = h('span');
   const authorWrap = h('label.field', authorLabel, f.author);
@@ -80,6 +115,7 @@ export async function render(ctx) {
     mosqueWrap.hidden = !needsMosque(f.material_type.value);
     pdfWrap.hidden = f.source_mode.value !== 'pdf';
     textWrap.hidden = f.source_mode.value !== 'text';
+    audioWrap.hidden = f.source_mode.value !== 'audio';
     // اسم الحقل وإلزامه يتغيران بتغير نوع المادة
     authorLabel.replaceChildren(isSermon()
       ? h('span', 'المؤلف أو الجهة المصدرة', h('small.muted', ' (اختياري للخطب)'))
@@ -126,6 +162,7 @@ export async function render(ctx) {
   function candidates(stage, code) {
     if (stage.assignee_role === 'manager') return members.filter(m => m.role === 'manager');
     if (stage.assignee_role === 'coordinator') return members.filter(m => m.role === 'coordinator' || m.role === 'manager');
+    // والمرشد المتميّز لا يظهر إلا في لغته المسجَّلة (ملاحظة ١٧٣)
     return members.filter(m => langsOf(m).has(code));
   }
   function suggest(code) {
@@ -224,7 +261,7 @@ export async function render(ctx) {
       h('div.grid-2', h('label.field', req('التاريخ'), f.sermon_date), authorWrap),
       h('label.field', 'تفاصيل المادة وتعليمات الترجمة', f.instructions),
       h('div.grid-2', h('label.field', 'طريقة إدخال النص العربي', f.source_mode), h('label.field', 'المطلوب تسليمه', f.deliverable)),
-      textWrap, pdfWrap),
+      textWrap, pdfWrap, audioWrap),
     h('div.stack',
       h('div.grid-2', h('label.field', 'مدى الأهمية', h('small', 'تضبط المدة الكلية تلقائيًا'), f.priority),
         h('div.field', h('b', 'المدة الكلية للتنفيذ'), h('div.row', f.total, f.unit)),
@@ -275,6 +312,12 @@ export async function render(ctx) {
         else if (file.type !== 'application/pdf') need(f.pdf, true, 'الملف ليس PDF', e);
         else if (file.size > 20 * 1024 * 1024) need(f.pdf, true, 'حجم الملف أكبر من ٢٠ ميغابايت', e);
       }
+      if (f.source_mode.value === 'audio') {
+        const file = f.audio.files[0];
+        if (!file) need(f.audio, true, 'ارفع المقطع الصوتي العربي — لا تُرسَل مادة بلا أصل', e);
+        else if (!isAllowedAudio(file)) need(f.audio, true, `صيغة المقطع غير معتمدة — ${AUDIO_EXTS.map(x => x.toUpperCase()).join(' أو ')} فقط`, e);
+        else if (file.size > 200 * 1024 * 1024) need(f.audio, true, 'حجم المقطع أكبر من ٢٠٠ ميغابايت', e);
+      }
     }
     if (i === 1) {
       const sum = slaStages.reduce((a, s) => a + Number(stageInputs[s.key].value || 0), 0);
@@ -305,7 +348,7 @@ export async function render(ctx) {
     saveDraft();
   }
 
-  function payload(sourcePdfPath) {
+  function payload(sourcePdfPath, sourceAudioPath) {
     const stage_minutes = Object.fromEntries(slaStages.map(s => [s.key, Number(stageInputs[s.key].value || 0)]));
     return {
       material: {
@@ -317,6 +360,7 @@ export async function render(ctx) {
         instructions: f.instructions.value.trim() || null,
         source_html: f.source_mode.value === 'text' ? source.html : null,
         source_pdf_path: sourcePdfPath || null,
+        source_audio_path: sourceAudioPath || null,
         deliverable: f.deliverable.value, priority: f.priority.value,
         receipt_minutes: Number(f.receipt.value), reminder_minutes: Number(f.reminder.value),
         escalate_to_manager: f.escalate.checked,
@@ -346,9 +390,19 @@ export async function render(ctx) {
     if (!await confirm('إرسال المادة', `ستُسند «${f.title.value.trim()}» إلى ${picked.size} لغة (${langs})، وتظهر فورًا في مهام المسؤولين. متابعة؟`, 'إسناد وإرسال')) return;
     await busy(btn, async () => {
       try {
-        let pdfPath = null;
+        let pdfPath = null, audioPath = null;
         if (f.source_mode.value === 'pdf') pdfPath = await storage.upload('sources', `${crypto.randomUUID()}.pdf`, f.pdf.files[0]);
-        await db.rpc('create_material', { p: payload(pdfPath) });
+        if (f.source_mode.value === 'audio') {
+          const file = f.audio.files[0];
+          const ext = (file.name.split('.').pop() || 'mp3').toLowerCase().replace(/[^a-z0-9]/g, '');
+          audioPath = await storage.upload('sources', `${crypto.randomUUID()}.${ext}`, file);
+        }
+        const newId = await db.rpc('create_material', { p: payload(pdfPath, audioPath) });
+        // مدة الأصل الصوتي تُقاس في المتصفح، فتُحفظ ليظهر طولها للمترجم
+        if (audioPath && srcAudioSeconds && newId) {
+          db.rpc('set_source_audio_seconds', { p_material: String(newId).replace(/"/g, ''), p_seconds: srcAudioSeconds })
+            .catch(() => {});
+        }
         try { localStorage.removeItem(DRAFT); } catch { /* */ }
         toast('أُسندت المادة. تنتظر الآن استلام المترجمين.', 'ok');
         ctx.navigate('/app');

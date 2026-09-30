@@ -1,6 +1,6 @@
 import { h } from '../ui.js';
 import { auth, db } from '../sb.js';
-import { state, isAdmin, isManager, isSupervisor, ROLE_LABEL } from '../store.js';
+import { state, isAdmin, isManager, isSupervisor, can, ROLE_LABEL } from '../store.js';
 
 export function themeToggle() {
   // الداكن هو الأصل كما في النسخة الأولى
@@ -46,14 +46,29 @@ export function policyChip() {
   return chip;
 }
 
+// شاشةُ كلِّ صلاحية: ما أُغلق منها لا يظهر في القائمة أصلًا (ملاحظة ١٧٢)
+const NAV_PERM = {
+  '/app/new': 'materials',
+  '/app/staff': 'team', '/app/staff/admins': 'team', '/app/field': 'team',
+  '/app/cards': 'cards', '/app/payroll': 'payroll', '/app/bank-accounts': 'banks',
+  '/app/shifts': 'shifts', '/app/evaluation': 'evaluation',
+  '/app/interpretation': 'interpretation',
+  '/app/languages': 'settings', '/app/khateebs': 'settings', '/app/workflow': 'settings',
+  '/app/stats': 'reports', '/app/archive': 'reports'
+};
+
 export function staffShell(view, path) {
   const p = state.profile;
-  const link = (href, text) => h('a', { href, 'aria-current': (href === path || (href !== '/app' && path.startsWith(href + '/'))) ? 'page' : null }, text);
+  const link = (href, text) => (NAV_PERM[href] && !can(NAV_PERM[href])) ? null
+    : h('a', { href, 'aria-current': (href === path || (href !== '/app' && path.startsWith(href + '/'))) ? 'page' : null }, text);
   // القائمة مرتَّبة بمسار العمل: من إدخال المادة إلى أرشفتها، ثم الفريق،
   // ثم المراسلات، ثم الإعدادات المرجعية، وآخرها حساب العضو نفسه (ملاحظة ٩٢)
   const mail = link('/app/circulars', 'المراسلات');
   const mine = link('/app/me', 'بياناتي');
-  const group = (title, links) => h('div.nav-group', h('span.nav-head', title), links);
+  const group = (title, links) => {
+    const list = (Array.isArray(links) ? links : [links]).filter(Boolean);
+    return list.length ? h('div.nav-group', h('span.nav-head', title), list) : null;
+  };
   // روابط موقع البث العام داخل المنصة: تُفتح في صفحة جديدة (ملاحظة ١٠٤)
   const cfg = window.HS_CONFIG || {};
   const pub = cfg.publicHost ? `https://${cfg.publicHost}` : '';
@@ -133,7 +148,7 @@ export function staffShell(view, path) {
   }).catch(() => {});
 
   // في الجوال تُطوى القائمة خلف زر، فلا تسبق المحتوى بجدار روابط (ملاحظة ١٠٦)
-  const navEl = h('nav#sidenav.sidenav', { 'aria-label': 'التنقل' }, nav);
+  const navEl = h('nav#sidenav.sidenav', { 'aria-label': 'التنقل' }, nav.filter(Boolean));
   const navBtn = h('button.btn.sm.nav-toggle', { type: 'button', 'aria-controls': 'sidenav', 'aria-expanded': 'false' },
     h('span.bars', { 'aria-hidden': 'true' }, '☰'), 'القائمة');
   const setNav = on => {

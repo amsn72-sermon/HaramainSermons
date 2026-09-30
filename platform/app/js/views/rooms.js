@@ -3,7 +3,7 @@
 //   ولكل قاعة رابطها الدائم، يُقترح تلقائيًّا ويُعدَّل عند الحاجة (ملاحظة ١٦٦).
 import { h, dialog, toast, busy, confirm, fmtDateTime, req, markBad } from '../ui.js';
 import { db } from '../sb.js';
-import { isAdmin, isManager, ROLE_LABEL } from '../store.js';
+import { isAdmin, isManager, can, ROLE_LABEL } from '../store.js';
 
 export const KINDS = ['دورة تدريبية', 'اجتماع', 'ورشة عمل', 'أخرى'];
 const KIND_ICON = { 'دورة تدريبية': '🎓', 'اجتماع': '🗂', 'ورشة عمل': '🛠', 'أخرى': '📌' };
@@ -308,7 +308,8 @@ function guideDialog(kind) {
 // ---------------------------------------------------------------------
 export async function render(ctx) {
   const data = await load();
-  const admin = isAdmin();
+  // جدولة اللقاءات وإدارة القاعات تتبع صلاحية «القاعات»، والرؤية للجميع (ملاحظة ١٧٢)
+  const admin = isAdmin() && can('rooms');
   let level = ctx.query.get('kind') || '';
   if (!ROOM_KINDS[level]) level = '';
 
@@ -451,7 +452,7 @@ export async function render(ctx) {
         admin ? iconBtn('log', 'سجلّ الحضور', () => attendance(m)) : null,
         admin ? iconBtn('edit', 'تعديل البيانات والموعد والرابط والمدعوّين', () => edit(m)) : null,
         admin ? iconBtn('cancel', 'إلغاء اللقاء', () => cancel(m), 'danger') : null,
-        isManager() ? iconBtn('trash', 'حذف الاجتماع', () => removeMeeting(m), 'danger') : null));
+        isManager() && can('rooms') ? iconBtn('trash', 'حذف الاجتماع', () => removeMeeting(m), 'danger') : null));
   }
 
   // ---------------- سطر لقاءٍ منتهٍ (ملاحظة ١٦٧) ----------------
@@ -464,7 +465,7 @@ export async function render(ctx) {
       h('span.row.mr-acts',
         admin ? iconBtn('log', 'سجلّ الحضور', () => attendance(m)) : null,
         admin ? iconBtn('edit', 'تعديل البيانات والموعد والرابط والمدعوّين', () => edit(m)) : null,
-        isManager() ? iconBtn('trash', 'حذف الاجتماع', () => removeMeeting(m), 'danger') : null));
+        isManager() && can('rooms') ? iconBtn('trash', 'حذف الاجتماع', () => removeMeeting(m), 'danger') : null));
   }
 
   // ---------------- الرسم ----------------
@@ -528,7 +529,7 @@ export async function render(ctx) {
             : h('span.small.muted', 'لا باب لها بعد — اضبط رابطها من إعداد القاعة.'),
           r.join_url ? iconBtn('qr', 'رمز القاعة', () => roomCard(r)) : null,
           admin ? iconBtn('edit', 'إعداد القاعة: الاسم والسعة والرابط', () => saveRoom(k, r)) : null,
-          isManager() ? iconBtn('trash', 'حذف القاعة', () => removeRoom(r), 'danger') : null))))
+          isManager() && can('rooms') ? iconBtn('trash', 'حذف القاعة', () => removeRoom(r), 'danger') : null))))
         : h('p.muted', 'لا قاعات بعد — أضف أولاها.'));
 
     box.replaceChildren(
