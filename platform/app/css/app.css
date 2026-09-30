@@ -647,6 +647,17 @@ dialog:has(.card-show) { width: min(760px, calc(100vw - 24px)); }
   display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .counter-cell b { font-size: 3rem; line-height: 1.1; color: var(--accent-text); font-variant-numeric: tabular-nums; }
 .counter-cell span { font-size: .76rem; color: var(--muted); }
+/* عدّادات كل قسمٍ بوحدته، لا عدّادٌ واحد في الأعلى (ملاحظة ١٦٩) */
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(122px, 1fr)); gap: 8px; }
+.stat-tile { border: 1px solid var(--border); border-radius: 12px; padding: 12px 8px; background: var(--bg);
+  display: flex; flex-direction: column; align-items: center; gap: 1px; text-align: center; }
+.stat-tile:first-child { border-color: var(--gold); background: rgba(188, 150, 97, .08); }
+.stat-num { font-size: 1.7rem; line-height: 1.15; color: var(--accent-text); font-variant-numeric: tabular-nums; }
+.stat-tile:first-child .stat-num { font-size: 2.1rem; }
+.stat-label { font-size: .76rem; color: var(--muted); }
+.stat-note { font-size: .7rem; color: var(--muted); opacity: .8; }
+@media (max-width: 520px) { .stat-tiles { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); } }
+
 .prod-table tfoot .total-row td { font-weight: 700; background: rgba(188, 150, 97, .10); border-top: 2px solid var(--gold); }
 .grand-total { border-color: var(--gold); font-size: 1.02rem; }
 .prod-chip { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 999px;
@@ -1087,3 +1098,38 @@ button.arch-tile:hover { border-color: var(--gold); }
 .inv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 12px; }
 .inv-row { min-height: 28px; }
 @media (max-width: 560px) { .inv-grid { grid-template-columns: 1fr; } }
+
+/* بطاقتا الدخول، وسطر اللقاء المنتهي (ملاحظة ١٦٧) */
+.room-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+button.room-tile { cursor: pointer; text-align: center; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 8px; min-height: 240px;
+  padding: 38px 22px 30px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 14px; color: inherit; font: inherit;
+  transition: border-color .15s, transform .15s, box-shadow .15s; }
+button.room-tile:hover { border-color: var(--gold); transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .07); }
+.room-tile .rt-art { color: var(--gold); line-height: 0; }
+.room-tile .rt-title { font-size: 1.32rem; font-weight: 700; margin-top: 4px; }
+.room-tile .rt-lead { color: var(--muted); font-size: .88rem; max-width: 30ch; }
+.room-tile .rt-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+  justify-content: center; margin-top: 6px; font-size: .86rem; color: var(--muted); }
+.room-tile .rt-meta b { color: var(--text); }
+.room-tile .rt-meta .sep { opacity: .5; }
+.room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.room-item { gap: 6px; }
+.room-item a { overflow-wrap: anywhere; font-size: .8rem; }
+
+.meet-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.meet-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px;
+  align-items: center; padding: 7px 12px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--surface); }
+.meet-row.off { opacity: .65; }
+.meet-row .mr-title { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.meet-row .mr-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meet-row .mr-acts { gap: 2px; }
+@media (max-width: 680px) {
+  .meet-row { grid-template-columns: 1fr auto; }
+  .meet-row .mr-meta { grid-column: 1 / -1; order: 3; }
+}
+.guide ul { margin: 0; padding-inline-start: 18px; }
+.guide li { margin-bottom: 3px; }
