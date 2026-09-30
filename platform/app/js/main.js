@@ -1,6 +1,6 @@
 import { auth, configured, db } from './sb.js';
 import { h, toast } from './ui.js';
-import { state, loadProfile, loadReference, loadPolicyState, loadCircularState, loadMfaState, isAdmin, isManager, isActive, isSupervisor } from './store.js';
+import { state, loadProfile, loadReference, loadPolicyState, loadCircularState, loadMfaState, isAdmin, isManager, isActive, isSupervisor, can } from './store.js';
 import { staffShell } from './views/shell.js';
 import { start as idleStart, stop as idleStop } from './idle.js';
 
@@ -46,6 +46,20 @@ const routes = [
   ['/app/rooms', () => import('./views/rooms.js'), true],
   ['/app/revise/:material', () => import('./views/revise.js'), true, true]
 ];
+
+// مسارُ كل شاشةٍ وصلاحيتُها (ملاحظة ١٧٢)
+const PERM_OF = {
+  '/app/new': 'materials',
+  '/app/staff': 'team', '/app/staff/admins': 'team', '/app/team': 'team', '/app/field': 'team',
+  '/app/cards': 'cards',
+  '/app/payroll': 'payroll',
+  '/app/bank-accounts': 'banks',
+  '/app/shifts': 'shifts',
+  '/app/evaluation': 'evaluation',
+  '/app/interpretation': 'interpretation',
+  '/app/languages': 'settings', '/app/khateebs': 'settings', '/app/workflow': 'settings',
+  '/app/stats': 'reports', '/app/archive': 'reports'
+};
 
 function match(path) {
   // الصفحات ذات الملفات المستقلة (بطاقة الرابط) قد تُفتح بامتدادها، فتُعامل معاملة مسارها (ملاحظة ١٤٠)
@@ -139,6 +153,12 @@ async function render() {
         && !NOT_FOR_SUPERVISOR.includes(path) && !path.startsWith('/app/revise');
       const mayView = route.adminOnly === 'manager' ? isManager() : isAdmin() || supervisorMay;
       if (route.adminOnly && !mayView) return navigate('/app', { replace: true });
+      // قائمة الصلاحيات: ما أُغلق على الحساب لا يُفتح ولو كُتب مساره (ملاحظة ١٧٢)
+      const need = PERM_OF[path] || (path.startsWith('/app/revise') ? 'materials' : null);
+      if (need && !can(need)) {
+        toast('هذه الشاشة مغلقة على حسابك — راجع مدير المشروع.', 'bad');
+        return navigate('/app', { replace: true });
+      }
       if (isSupervisor() && NOT_FOR_SUPERVISOR.includes(path)) return navigate('/app', { replace: true });
       if (isSupervisor()) db.rpc('log_supervisor_view', { p_screen: path }).catch(() => {});
     }

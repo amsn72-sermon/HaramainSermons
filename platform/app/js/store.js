@@ -54,6 +54,29 @@ export const isActive = () => state.profile?.status === 'active';
 export const isSupervisor = () => state.profile?.role === 'supervisor' && state.profile?.status === 'active';
 export const canViewReports = () => isAdmin() || isSupervisor();
 
+// ---------------------------------------------------------------------
+// قائمة الصلاحيات: الأصل الفتح، ويغلق مدير المشروع ما يشاء لحسابٍ بعينه
+// (ملاحظة ١٧٢). ومدير المشروع يملكها كلها دائمًا.
+// ---------------------------------------------------------------------
+export const PERM_LABEL = {
+  materials: 'إضافة المواد وإسنادها وإعادتها',
+  approve: 'الاعتماد وإغلاق المراجعات والتسجيلات',
+  team: 'بيانات الأعضاء وتقييمهم ووثائقهم',
+  cards: 'بطاقات العمل وإصدارها',
+  payroll: 'الرواتب والمستحقات',
+  banks: 'الحسابات المصرفية',
+  circulars: 'المراسلات الداخلية',
+  shifts: 'الحضور والانصراف',
+  evaluation: 'تقييم المرشدين المكانيين',
+  interpretation: 'سجلّ الترجمة الفورية',
+  glossary: 'اعتماد الدليل المصطلحي',
+  rooms: 'القاعات واللقاءات وجدولتها',
+  settings: 'اللغات والخطباء وإعداد سير العمل',
+  reports: 'دليل الإنتاج والأرشيف والتصدير'
+};
+export const PERM_KEYS = Object.keys(PERM_LABEL);
+export const can = key => (isManager() ? true : state.profile?.perms?.[key] !== false);
+
 export async function loadProfile() {
   if (!auth.session) { state.profile = null; return null; }
   const uid = auth.user?.id || (await auth.loadUser())?.id;
@@ -146,7 +169,9 @@ export async function loadMfaState(force = false) {
     ]);
     state.mfaRequired = rows[0] ? rows[0].mfa_required_admins !== false : true;
     enrolled = list.some(f => f.status === 'verified');
-    ok = enrolled ? auth.aal === 'aal2' : !(isAdmin() && state.mfaRequired);
+    // يلزمه إن فعّله، أو أُلزم حسابه بعينه، أو كان من الإدارة والإلزام عام (ملاحظة ١٧١)
+    const mine = state.profile?.mfa_required === true;
+    ok = enrolled ? auth.aal === 'aal2' : !(mine || (isAdmin() && state.mfaRequired));
   } catch { ok = true; }   // تعذّر الفحص لا يُقفل الباب على العضو
   state.mfaEnrolled = enrolled;
   state.mfaOk = ok;
