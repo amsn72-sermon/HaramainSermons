@@ -3,7 +3,8 @@
 //   ولكل قاعة رابطها الدائم، يُقترح تلقائيًّا ويُعدَّل عند الحاجة (ملاحظة ١٦٦).
 import { h, dialog, toast, busy, confirm, fmtDateTime, req, markBad } from '../ui.js';
 import { db } from '../sb.js';
-import { isAdmin, isManager, can, ROLE_LABEL } from '../store.js';
+import { state, isAdmin, isManager, can, ROLE_LABEL, CITY } from '../store.js';
+import { agendaDialog, minutesDialog } from '../meetingdoc.js';
 
 export const KINDS = ['دورة تدريبية', 'اجتماع', 'ورشة عمل', 'أخرى'];
 const KIND_ICON = { 'دورة تدريبية': '🎓', 'اجتماع': '🗂', 'ورشة عمل': '🛠', 'أخرى': '📌' };
@@ -13,7 +14,8 @@ const KIND_ICON = { 'دورة تدريبية': '🎓', 'اجتماع': '🗂', '
 export const AUDIENCE = {
   all: 'للجميع',
   translation: 'الترجمة التخصصية',
-  field: 'الإرشاد المكاني'
+  field: 'الإرشاد المكاني',
+  admins: 'الإداريون'
 };
 
 export const ROOM_KINDS = {
@@ -37,7 +39,11 @@ const ICONS = {
   qr: '<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z"/>',
   cancel: '<circle cx="12" cy="12" r="9"/><path d="M8 8l8 8M16 8l-8 8"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.3 9.2a2.7 2.7 0 1 1 3.4 2.6c-.5.2-.7.6-.7 1.1v.6"/>'
-    + '<path d="M12 16.6h.01"/>'
+    + '<path d="M12 16.6h.01"/>',
+  agenda: '<path d="M8 4h11a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H8z"/><path d="M8 4H5a1 1 0 0 0-1 1v15a1 1 0 0 0 1 1h3"/>'
+    + '<path d="M11 9h6M11 13h6M11 17h4"/>',
+  minutes: '<path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>'
+    + '<path d="M15 3v5h5"/><path d="M9 13h7M9 17h5"/>'
 };
 function icon(name, size = 18) {
   const s = h('span.ico', { 'aria-hidden': 'true' });
@@ -84,7 +90,7 @@ export async function load() {
   const [meetings, rooms, members] = await Promise.all([
     db.select('meeting_rows', { select: '*', order: 'starts_at.desc' }).catch(() => []),
     db.select('rooms', { select: '*', order: 'sort' }).catch(() => []),
-    db.select('profiles', { select: 'id,full_name,role,track,status', status: 'eq.active', order: 'full_name' })
+    db.select('profiles', { select: 'id,full_name,role,track,city,status', status: 'eq.active', order: 'full_name' })
       .catch(() => [])
   ]);
   return { meetings, rooms, members };
@@ -107,7 +113,12 @@ function meetingDialog(data, kind, row = null) {
       'aria-label': 'المدة بالدقائق' }),
     url: h('input', { value: row?.join_url || '', dir: 'ltr', placeholder: 'https://meet.jit.si/…',
       'aria-label': 'رابط الانضمام' }),
-    desc: h('textarea', { rows: 2, 'aria-label': 'وصف اللقاء' }, row?.description || '')
+    desc: h('textarea', { rows: 2, 'aria-label': 'وصف اللقاء' }, row?.description || ''),
+    // التدريب إمّا لمرةٍ واحدة وإمّا جلساتٍ متتابعة (ملاحظة ١٨٤)
+    days: h('input', { type: 'number', min: 1, max: 60, value: 1, 'aria-label': 'عدد الجلسات' }),
+    content: h('textarea', { rows: 2, 'aria-label': 'المحتوى التدريبي',
+      placeholder: 'روابط المادة التدريبية أو عناوينها — سطرٌ لكل واحد' },
+      (row?.content || []).map(c => (typeof c === 'string' ? c : c.url || c.title || '')).join('\n'))
   };
 
   // الرابط: من القاعة إن كان لها رابط دائم، وإلا اقتُرح واحدٌ يُقبل أو يُغيَّر (ملاحظة ١٦٦)
@@ -133,9 +144,14 @@ function meetingDialog(data, kind, row = null) {
   // المدعوّون بمجموعاتهم — ومدير المشروع من الهيئة منهم
   const picked = new Set(row?.invitees || []);
   const boxes = new Map();
+  // والمرشدون يُفرزون بمدينتهم، فاجتماع مكة لأهلها واجتماع المدينة لأهلها
+  // (ملاحظة ١٨٥)
   const groupOf = m => (m.role === 'supervisor' ? 'مديرو المشروع من الهيئة'
     : ['manager', 'coordinator'].includes(m.role) ? 'الحسابات الإدارية'
-      : m.track === 'field' ? 'المرشدون المكانيون' : 'المترجمون المتخصصون');
+      : m.track === 'answers' ? 'المخصَّصون لإجابة السائلين'
+        : m.track === 'field'
+          ? `المرشدون المكانيون — ${CITY[m.city] || 'بلا مدينة'}`
+          : 'المترجمون المتخصصون');
   const groups = [...new Set(data.members.map(groupOf))];
   const count = h('span.badge');
   const paint = () => { count.textContent = `${picked.size} مدعوًّا`; };
@@ -166,6 +182,15 @@ function meetingDialog(data, kind, row = null) {
       h('label.field', req('المدة بالدقائق'), f.minutes)),
     h('label.field', req('رابط الانضمام'), urlHint, h('div.row', f.url, fresh)),
     h('label.field', 'وصف اللقاء وجدول أعماله', f.desc),
+    kind === 'training' && !row ? h('div.card.stack',
+      h('b', 'التكرار'),
+      h('p.small.muted', 'الدورة إمّا جلسةٌ واحدة وإمّا جلساتٌ متتابعة في الأيام التالية، '
+        + 'بالموعد والمدة نفسيهما. ولكل جلسة حضورها ومحضرها.'),
+      h('div.grid-2',
+        h('label.field', 'عدد الجلسات', f.days,
+          h('small', 'جلسةٌ واحدة، أو خمسٌ مثلًا تبدأ من الموعد أعلاه يومًا بعد يوم')))) : null,
+    kind === 'training' ? h('label.field', 'المحتوى التدريبي (اختياري)',
+      h('small', 'روابط أو عناوين، سطرٌ لكل واحد — تظهر للمتدربين'), f.content) : null,
     h('div.card.stack',
       h('div.row.between', h('b', 'المدعوّون'), count),
       h('p.small.muted', 'تصل الدعوة في بريد كل مدعوّ، ويظهر له زرّ الدخول قبل الموعد بربع ساعة. '
@@ -199,7 +224,9 @@ function meetingDialog(data, kind, row = null) {
         id: row?.id || null, title: f.title.value.trim(), kind: f.kind.value,
         room_id: f.room.value || null, starts_at: new Date(f.at.value).toISOString(),
         minutes: Number(f.minutes.value), description: f.desc.value.trim(),
-        provider: 'external', join_url: f.url.value.trim(), invitees: [...picked]
+        provider: 'external', join_url: f.url.value.trim(), invitees: [...picked],
+        days: (kind === 'training' && !row) ? Math.max(1, Number(f.days.value) || 1) : 1,
+        content: f.content.value.split('\n').map(x => x.trim()).filter(Boolean)
       }) }
     ]
   });
@@ -238,7 +265,7 @@ function roomDialog(kind, row = null) {
         h('div.row', f.url, suggest)),
       h('p.small.muted', 'الرابط لا يظهر في الشاشة ولا يُتداول، والدخول بزرّ «الدخول للقاعة». '
         + 'واجعله مميّزًا لا كلمةً شائعة — فهو مفتاح الجلسة، ومن وصله وصل إلى بابها. '
-        + 'وغرفة الانتظار تُفعَّل متى دخل المنسق، فتردّ من لا يُؤذن له.')),
+        + 'وغرفة الانتظار يفعّلها المنسق أول ما يدخل، فتردّ من لا يُؤذن له.')),
     buttons: [
       { label: 'إلغاء', value: null },
       { label: 'حفظ', kind: 'primary',
@@ -263,7 +290,7 @@ const GUIDE = {
     ['قبل الاجتماع',
       ['تصلك الدعوة في بريد المنصة (الأجراس أعلى الشاشة) بموعدها ومدتها وعنوانها.',
         'زرّ «الدخول للاجتماع» يظهر في بطاقته قبل الموعد بربع ساعة، ويبقى حتى نصف ساعة بعد انتهائه.',
-        'تُفتح الجلسة داخل المنصة نفسها، وتدخلها باسمك كما هو مسجَّل — فلا تُسأل عن اسم.',
+        'يُفتح لك باب الجلسة باسمك كما هو مسجَّل في المنصة — فلا تُسأل عن اسم ولا تكتب غيره.',
         'قد تنتظر في غرفة الانتظار حتى يأذن لك المنسق، فلا تُغلق الصفحة.',
         'جرّب الميكروفون والكاميرا قبل الموعد بدقائق، وادخل من حاسب أو جوّال متصل باتصال ثابت.']],
     ['أثناء الاجتماع',
@@ -275,16 +302,16 @@ const GUIDE = {
       ['يُقيَّد حضورك ومدة بقائك تلقائيًّا، ويظهر الاجتماع في «المنتهي والملغى» بسطرٍ واحد.',
         'يفتح المنسق سجلّ الحضور بأيقونة السجلّ أمام سطر الاجتماع.']],
     ['للمنسق ومدير المشروع',
-      ['ادخل الاجتماع أولًا، فغرفة الانتظار تُفعَّل بدخولك، ولا تعمل قبله.',
-        'كل من يطلب الدخول يصلك إشعارٌ باسمه في بطاقة «طلبات الدخول» أعلى الجلسة، '
-          + 'ومعه بيانٌ أمِن المدعوّين هو أم لا — فتقبله أو تردّه.',
-        'القبول والردّ لك ولمدير المشروع وحدكما، لا لغيركما.']]
+      ['ادخل الاجتماع أولًا قبل الفريق، فغرفة الانتظار لا تُفعَّل إلا بيد المضيف.',
+        'من شريط الجلسة: الأمان (Security) ثم فعّل «غرفة الانتظار (Lobby)».',
+        'بعدها يصلك إشعارٌ باسم كل من يطلب الدخول، فتأذن له أو تردّه من داخل الجلسة.',
+        'وأسماء المدعوّين معروضةٌ لك في صفحة اللقاء بالمنصة، فتقابلها بما يصلك.']]
   ],
   training: [
     ['قبل الدورة',
       ['لكل قاعة تدريب بابها الثابت: تدخلها من المنصة بزرّ «الدخول للقاعة» طول الدورة.',
         'تصلك دعوة كل لقاء في بريد المنصة، وزرّ «الدخول للاجتماع» يظهر قبل الموعد بربع ساعة.',
-        'تُفتح الجلسة داخل المنصة باسمك المسجَّل، وقد تنتظر حتى يأذن لك المدرّب أو المنسق.',
+        'يُفتح باب الجلسة باسمك المسجَّل، وقد تنتظر حتى يأذن لك المدرّب أو المنسق.',
         'احضر من حاسب إن قدرت — فالعرض والشرح أوضح على شاشةٍ واسعة.']],
     ['أثناء الدورة',
       ['ادخل والميكروفون مكتوم، والكاميرا مفتوحة إن تيسّر، فحضورك أدعى للتفاعل.',
@@ -364,8 +391,17 @@ export async function render(ctx) {
     }
     const p = await meetingDialog(data, level || 'meeting', full);
     if (!p) return;
-    try { await db.rpc('save_meeting', { p }); toast('حُفظ اللقاء وأُرسلت الدعوات.', 'ok'); await reload(); }
-    catch (err) { toast(err.message, 'bad'); }
+    try {
+      if (!row && Number(p.days) > 1) {
+        const r = await db.rpc('save_meeting_series', { p });
+        const n = (Array.isArray(r) ? r[0] : r)?.sessions?.length || p.days;
+        toast(`جُدولت ${n} جلسات وأُرسلت الدعوات.`, 'ok');
+      } else {
+        await db.rpc('save_meeting', { p });
+        toast('حُفظ اللقاء وأُرسلت الدعوات.', 'ok');
+      }
+      await reload();
+    } catch (err) { toast(err.message, 'bad'); }
   };
 
   // الدخول داخل المنصة: باسم العضو، وبغرفة انتظار يأذن منها المنسق (ملاحظة ١٧٥)
@@ -383,6 +419,37 @@ export async function render(ctx) {
   const removeMeeting = async m => {
     if (!await confirm('حذف اللقاء', `يُحذف «${m.title}» وسجلّ حضوره حذفًا لا رجعة فيه. متابعة؟`, 'حذف', 'bad')) return;
     try { await db.rpc('delete_meeting', { p_id: m.id }); toast('حُذف اللقاء.', 'ok'); await reload(); }
+    catch (err) { toast(err.message, 'bad'); }
+  };
+
+  // المحاور: يكتبها المنسق وأمين السرّ، ويقرؤها المدعوّ (ملاحظتا ١٨٢ و١٨٣)
+  const mayWrite = m => admin || m.secretary_id === state.profile?.id;
+  const openAgenda = async m => {
+    if (await agendaDialog(m, { readOnly: !mayWrite(m) })) await reload();
+  };
+  const openMinutes = async m => {
+    if (await minutesDialog(m, data.members, { readOnly: !mayWrite(m) })) await reload();
+  };
+
+  // أمين السرّ: من مدعوّي الاجتماع، يعيّنه المنسق
+  const pickSecretary = async m => {
+    const inv = await db.select('meeting_invitees', {
+      select: 'member_id,profiles(full_name)', meeting_id: `eq.${m.id}` }).catch(() => []);
+    if (!inv.length) return toast('ادعُ أعضاءً أولًا، فأمين السرّ منهم.', 'bad');
+    const sel = h('select', { 'aria-label': 'أمين السرّ' },
+      h('option', { value: '' }, '— بلا أمين سرّ —'),
+      inv.map(x => h('option', { value: x.member_id, selected: m.secretary_id === x.member_id },
+        x.profiles?.full_name || '—')));
+    const res = await dialog({
+      title: `أمين سرّ ${m.title}`,
+      body: h('div.stack',
+        h('p.small.muted', 'أمين السرّ يكتب محاور الاجتماع ومحضره، ويبقى الاعتماد للمنسق.'),
+        h('label.field', 'أمين السرّ', sel)),
+      buttons: [{ label: 'حفظ', kind: 'primary', value: () => sel.value || null },
+                { label: 'إلغاء', value: null }]
+    });
+    if (res === undefined) return;
+    try { await db.rpc('set_secretary', { p_id: m.id, p_member: res }); toast('حُفظ أمين السرّ.', 'ok'); await reload(); }
     catch (err) { toast(err.message, 'bad'); }
   };
 
@@ -462,10 +529,29 @@ export async function render(ctx) {
         m.organizer ? h('span.sep', '·') : null,
         m.organizer ? h('span', `نظّمه ${m.organizer}`) : null),
       m.description ? h('p.small', m.description) : null,
+      // المحتوى التدريبي يراه المتدربون قبل الجلسة (ملاحظة ١٨٤)
+      (m.content || []).length ? h('div.small',
+        h('b', 'المحتوى التدريبي'),
+        h('ul', { style: { margin: '2px 0 0', paddingInlineStart: '18px' } },
+          m.content.map(c => {
+            const t = typeof c === 'string' ? c : (c.title || c.url || '');
+            return h('li', /^https?:\/\//i.test(t)
+              ? h('a', { href: t, target: '_blank', rel: 'noopener', dir: 'ltr' }, t)
+              : h('span', t));
+          }))) : null,
+      h('div.row.wrap.small.muted',
+        m.agenda_count ? h('span', `${ar(m.agenda_count)} محورًا`) : h('span', 'بلا محاور بعد'),
+        m.secretary_name ? h('span.sep', '·') : null,
+        m.secretary_name ? h('span', `أمين السرّ ${m.secretary_name}`) : null,
+        m.session_no ? h('span.sep', '·') : null,
+        m.session_no ? h('span', `الجلسة ${ar(m.session_no)}`) : null),
       h('div.row.wrap',
         open ? joinBtn : h('span.small.muted', 'يُفتح زرّ الدخول قبل الموعد بربع ساعة.'),
+        iconBtn('agenda', 'محاور الاجتماع', () => openAgenda(m)),
         admin ? iconBtn('log', 'سجلّ الحضور', () => attendance(m)) : null,
         admin ? iconBtn('edit', 'تعديل البيانات والموعد والرابط والمدعوّين', () => edit(m)) : null,
+        admin ? h('button.icon-btn', { type: 'button', title: 'أمين السرّ', 'aria-label': 'أمين السرّ',
+          onclick: () => pickSecretary(m) }, h('span.ico', { 'aria-hidden': 'true' }, '✎')) : null,
         admin ? iconBtn('cancel', 'إلغاء اللقاء', () => cancel(m), 'danger') : null,
         isManager() && can('rooms') ? iconBtn('trash', 'حذف الاجتماع', () => removeMeeting(m), 'danger') : null));
   }
@@ -476,8 +562,14 @@ export async function render(ctx) {
       h('span.mr-title', h('b', m.title),
         m.status === 'cancelled' ? h('span.badge.bad', 'ملغًى') : null),
       h('span.small.muted.mr-meta',
-        `${fmtDateTime(m.starts_at)} · ${m.room_name || '—'} · حضر ${ar(m.attended)} من ${ar(m.invited)}`),
+        `${fmtDateTime(m.starts_at)} · ${m.room_name || '—'} · حضر ${ar(m.attended)} من ${ar(m.invited)}`,
+        m.minutes_state === 'final' ? h('span.badge.ok', 'محضرٌ معتمَد')
+          : m.minutes_state === 'draft' ? h('span.badge.warn', 'محضرٌ مسودة') : null),
       h('span.row.mr-acts',
+        iconBtn('agenda', 'محاور الاجتماع', () => openAgenda(m)),
+        iconBtn('minutes', m.minutes_state === 'final' ? 'محضر الاجتماع (معتمَد)'
+          : m.minutes_state === 'draft' ? 'محضر الاجتماع (مسودة)' : 'محضر الاجتماع',
+          () => openMinutes(m), m.minutes_state === 'final' ? 'ok' : ''),
         admin ? iconBtn('log', 'سجلّ الحضور', () => attendance(m)) : null,
         admin ? iconBtn('edit', 'تعديل البيانات والموعد والرابط والمدعوّين', () => edit(m)) : null,
         isManager() && can('rooms') ? iconBtn('trash', 'حذف الاجتماع', () => removeMeeting(m), 'danger') : null));
@@ -538,6 +630,7 @@ export async function render(ctx) {
           h('span.row', { style: { gap: '4px' } },
             r.audience && r.audience !== 'all'
               ? h('span.badge.gold', { title: 'لا يراها غير فريقها' }, AUDIENCE[r.audience]) : null,
+            r.is_fixed ? h('span.badge', { title: 'قاعةٌ أصلية: تُعدَّل بياناتها ولا تُحذف' }, 'ثابتة') : null,
             h('span.badge', `${ar(r.capacity)} مقعدًا`))),
         r.description ? h('p.small.muted', r.description) : null,
         h('div.row.wrap',
@@ -547,7 +640,9 @@ export async function render(ctx) {
             : h('span.small.muted', 'لا باب لها بعد — اضبط رابطها من إعداد القاعة.'),
           r.join_url ? iconBtn('qr', 'رمز القاعة', () => roomCard(r)) : null,
           admin ? iconBtn('edit', 'إعداد القاعة: الاسم والسعة والرابط', () => saveRoom(k, r)) : null,
-          isManager() && can('rooms') ? iconBtn('trash', 'حذف القاعة', () => removeRoom(r), 'danger') : null))))
+          // القاعات الستّ الأصلية تُعدَّل ولا تُحذف (ملاحظة ١٧٨)
+          isManager() && can('rooms') && !r.is_fixed
+            ? iconBtn('trash', 'حذف القاعة', () => removeRoom(r), 'danger') : null))))
         : h('p.muted', 'لا قاعات بعد — أضف أولاها.'));
 
     box.replaceChildren(
@@ -566,8 +661,7 @@ export async function render(ctx) {
   const timer = setInterval(() => { if (!document.body.contains(box)) return clearInterval(timer); draw(); }, 30000);
 
   return h('div', head, box,
-    h('p.small.muted', 'الجلسة تُفتح داخل المنصة، ويدخلها العضو باسمه المسجَّل. '
-      + 'وغرفة الانتظار تُفعَّل متى دخل المنسق، فيصله إشعارٌ باسم كل طارق فيقبله أو يردّه — '
-      + 'والقبول والردّ للمنسق ومدير المشروع وحدهما. والرابط مفتاح الجلسة فلا يُنشر، '
-      + 'ومجرى الصوت والصورة اليوم من خدمةٍ خارجية.'));
+    h('p.small.muted', 'يدخل العضو الجلسة باسمه المسجَّل في المنصة، في نافذةٍ مستقلة. '
+      + 'ويفعّل المنسق غرفة الانتظار أول ما يدخل، فيصله اسم كل طارق فيأذن له أو يردّه. '
+      + 'والرابط مفتاح الجلسة فلا يُنشر، ومجرى الصوت والصورة من خدمةٍ خارجية.'));
 }

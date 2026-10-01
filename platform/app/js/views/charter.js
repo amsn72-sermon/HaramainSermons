@@ -7,9 +7,10 @@ import { POLICY_KEY, POLICY_VERSION, POLICY_TITLE } from '../policy.js';
 import { policyText } from './policy.js';
 import { exportExcel, exportPdf, exportWord } from '../teamexport.js';
 
-const GROUP_NAME = { admins: 'الحسابات الإدارية', translators: 'المترجمون المتخصصون', field: 'المرشدون المكانيون' };
+const GROUP_NAME = { admins: 'الحسابات الإدارية', translators: 'المترجمون المتخصصون',
+  field: 'المرشدون المكانيون', answers: 'المخصَّصون لإجابة السائلين' };
 const groupOf = m => (['manager', 'coordinator'].includes(m.role) ? 'admins'
-  : (m.track === 'field' ? 'field' : 'translators'));
+  : m.track === 'answers' ? 'answers' : (m.track === 'field' ? 'field' : 'translators'));
 
 export async function render(ctx) {
   if (!isAdmin()) { ctx.navigate('/app', { replace: true }); return h('div'); }

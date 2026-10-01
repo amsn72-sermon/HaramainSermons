@@ -3,8 +3,10 @@
 //   ولا تُحسم غرامة ولا يُربط بها أجر عضو.
 import { h, toast, busy, fmtDate } from '../ui.js';
 import { db } from '../sb.js';
-import { isAdmin } from '../store.js';
+import { isManager } from '../store.js';
 import { buildXlsx, downloadBlob } from '../xlsx.js';
+import { scopeSection } from './scope.js';
+import { opsSection } from '../opsreport.js';
 
 const ar = n => Number(n || 0).toLocaleString('en-US');
 const money = n => Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -22,9 +24,17 @@ function bar(done, total) {
 }
 
 export async function render(ctx) {
-  const rows = await db.rpc('contract_progress').catch(() => []);
+  if (!isManager()) {
+    return h('div.card.stack', h('h1', 'بنود العقد والمستخلص'),
+      h('p.muted', 'هذه الشاشة لمدير المشروع وحده.'));
+  }
+  const [rows, initRows] = await Promise.all([
+    db.rpc('contract_progress').catch(() => []),
+    db.rpc('initiative_languages').catch(() => [])
+  ]);
   const items = Array.isArray(rows) ? rows : [];
-  const admin = isAdmin();
+  const inits = Array.isArray(initRows) ? initRows : [];
+  const admin = isManager();
 
   // ---------------- شريط الكميات ----------------
   const started = h('input', { type: 'month', 'aria-label': 'بداية العقد' });
@@ -53,6 +63,11 @@ export async function render(ctx) {
         h('div.row.between.small',
           h('span', total > 0 ? `المنجَز ${qty(done)} من ${qty(total)}` : `المنجَز ${qty(done)}`),
           h('span.muted', total > 0 ? `${pct(done, total).toFixed(1)}٪ · المتبقي ${qty(Math.max(0, total - done))}` : 'كميته تُحدَّد إداريًّا')),
+        // المتطوَّع به يُعرض ولا يدخل الكمية المحتسَبة (ملاحظة ١٩٤)
+        Number(it.qty_initiative) > 0
+          ? h('p.small.gold', `وزيادةً ${qty(it.qty_initiative)} من مبادرة المتعاقد — بلا مقابل، `
+              + 'فلا تدخل الكمية المحتسَبة.')
+          : null,
         it.note ? h('p.small.muted', it.note) : null);
     }));
 
@@ -74,16 +89,19 @@ export async function render(ctx) {
   function claimRows() {
     const show = withPrices.checked;
     const head = show
-      ? ['البند', 'الوحدة', 'الكمية', 'سعر الوحدة', 'القيمة']
-      : ['البند', 'الوحدة', 'الكمية'];
+      ? ['البند', 'الوحدة', 'الكمية المحتسَبة', 'مبادرة بلا مقابل', 'سعر الوحدة', 'القيمة']
+      : ['البند', 'الوحدة', 'الكمية المحتسَبة', 'مبادرة بلا مقابل'];
+    const initQ = r => (Number(r.qty_initiative) > 0 ? qty(r.qty_initiative) : '—');
     const body = claim.map(r => show
-      ? [r.name, r.unit, qty(r.qty_done), r.unit_price == null ? '—' : money(r.unit_price), r.unit_price == null ? '—' : money(r.amount)]
-      : [r.name, r.unit, qty(r.qty_done)]);
+      ? [r.name, r.unit, qty(r.qty_done), initQ(r),
+         r.unit_price == null ? '—' : money(r.unit_price),
+         r.unit_price == null ? '—' : money(r.amount)]
+      : [r.name, r.unit, qty(r.qty_done), initQ(r)]);
     if (show) {
       const sum = claim.reduce((s, r) => s + Number(r.amount || 0), 0);
-      body.push(['الإجمالي قبل الضريبة', '', '', '', money(sum)]);
-      body.push(['ضريبة القيمة المضافة ١٥٪', '', '', '', money(sum * 0.15)]);
-      body.push(['الإجمالي المطالَب به', '', '', '', money(sum * 1.15)]);
+      body.push(['الإجمالي قبل الضريبة', '', '', '', '', money(sum)]);
+      body.push(['ضريبة القيمة المضافة ١٥٪', '', '', '', '', money(sum * 0.15)]);
+      body.push(['الإجمالي المطالَب به', '', '', '', '', money(sum * 1.15)]);
     }
     return { head, body };
   }
@@ -99,7 +117,8 @@ export async function render(ctx) {
           : [h('tr', h('td', { colspan: String(head.length) }, h('p.muted', 'لا كميات في هذا الشهر.')))]))),
       withPrices.checked
         ? h('p.small.muted', CLAIM_NOTE)
-        : h('p.small.muted', 'الكميات وحدها. وبتأشير «إظهار قيم الكراسة» تُطبَّق أسعار العقد فتخرج مسودّة المطالبة.'));
+        : h('p.small.muted', 'الكميات وحدها. وبتأشير «إظهار قيم الكراسة» تُطبَّق أسعار العقد فتخرج مسودّة المطالبة.'),
+      h('p.small.gold', 'وعمودُ المبادرة بيانٌ لما تطوّع به المتعاقد: لا يُسعَّر ولا يدخل المطالبة.'));
   }
 
   monthIn.onchange = loadClaim;
@@ -145,17 +164,49 @@ export async function render(ctx) {
       h('td', { colspan: '5' }, 'إجمالي قيمة العقد قبل الضريبة'),
       h('td', money(items.reduce((s, r) => s + Number(r.total_value || 0), 0)))))));
 
-  return h('div',
-    h('div.page-head',
-      h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'بنود العقد والمستخلص'),
-        h('p.muted', 'كميات الإنجاز أمام الكميات التعاقدية، ومسودّة مستخلصٍ شهري تُطبع وتُرفع للهيئة.'))),
+  // ---------------- مبادرةُ المتعاقد: لغاتٌ بلا مقابل (ملاحظة ١٩٤) ----------------
+  const initCard = inits.length ? h('section.card.stack.init-card',
+    h('div.row.between',
+      h('h3', 'مبادرةُ المتعاقد — لغاتٌ بلا مقابل'),
+      h('span.badge.gold', `${ar(inits.length)} لغة`)),
+    h('p.small.muted', 'العقد يطلب إحدى عشرة لغةً بالخطبة الأسبوعية. وهذه لغاتٌ زادها المتعاقد '
+      + 'من عنده ولا يأخذ عليها شيئًا: تُنجز أعمالُها في المنصة كما تُنجز غيرها، '
+      + 'وتُستثنى من كميات المستخلص.'),
+    h('div.table-wrap', h('table.responsive',
+      h('thead', h('tr', ['اللغة', 'الخطب', 'النصوص', 'كلمات الأصل', 'مجموع الأعمال', 'من تاريخ']
+        .map(t => h('th', t)))),
+      h('tbody', inits.map(r => h('tr',
+        h('td', { 'data-label': 'اللغة' }, h('b', r.name_ar),
+          r.note ? h('span.sub', r.note) : null),
+        h('td', { 'data-label': 'الخطب' }, qty(r.sermons)),
+        h('td', { 'data-label': 'النصوص' }, qty(r.texts)),
+        h('td', { 'data-label': 'كلمات الأصل' }, qty(r.words)),
+        h('td', { 'data-label': 'مجموع الأعمال' }, h('b', qty(r.tracks))),
+        h('td', { 'data-label': 'من تاريخ' }, r.since ? fmtDate(r.since) : '—')))),
+      h('tfoot', h('tr.total-row',
+        h('td', 'المجموع'),
+        h('td', qty(inits.reduce((a, r) => a + Number(r.sermons || 0), 0))),
+        h('td', qty(inits.reduce((a, r) => a + Number(r.texts || 0), 0))),
+        h('td', qty(inits.reduce((a, r) => a + Number(r.words || 0), 0))),
+        h('td', qty(inits.reduce((a, r) => a + Number(r.tracks || 0), 0))),
+        h('td', ''))))),
+    h('p.small.muted', 'تُضمّ اللغة إلى المبادرة أو تُخرج منها من شاشة «اللغات».')) : null;
 
+  // ---------------- التبويبات: النطاق أولًا، ثم الكميات والمستخلص والتقرير ----------------
+  const quantitiesPane = () => h('div.stack',
     h('section.card.stack',
       h('h3', 'شريط الكميات التعاقدية'),
       h('label.field', { style: { maxWidth: '18rem' } }, 'شهر بداية العقد', started),
       elapsed),
     quantities,
+    initCard,
+    h('section.card.stack',
+      h('h3', 'جدول الكميات والأسعار كما في كراسة المواصفات'),
+      refTable,
+      h('p.small.muted', 'هذا الجدول مرجعٌ من العقد. لا تُطبَّق قيمه على أجور الفريق، ولا يُحسم بها شيء آليًّا؛ '
+        + 'والغرامات ونسب التقييم تُعرض بيانًا للإدارة لا تطبيقًا.')));
 
+  const claimPane = () => h('div.stack',
     h('section.card.stack',
       h('div.row.between', h('h3', 'مسودّة المستخلص الشهري'),
         h('div.row', fmtSel, expBtn)),
@@ -163,13 +214,47 @@ export async function render(ctx) {
         h('label.field', 'الشهر', monthIn),
         h('label.field.row', { style: { alignItems: 'center', gap: '8px' } },
           withPrices, h('span', 'إظهار قيم الكراسة (مسودّة مطالبة)'))),
-      claimBox),
+      claimBox));
 
-    h('section.card.stack',
-      h('h3', 'جدول الكميات والأسعار كما في كراسة المواصفات'),
-      refTable,
-      h('p.small.muted', 'هذا الجدول مرجعٌ من العقد. لا تُطبَّق قيمه على أجور الفريق، ولا يُحسم بها شيء آليًّا؛ '
-        + 'والغرامات ونسب التقييم تُعرض بيانًا للإدارة لا تطبيقًا.')),
+  const TABS = [
+    ['scope', 'نطاق العقد'],
+    ['qty', 'البنود والكميات'],
+    ['claim', 'مسودّة المستخلص'],
+    ['ops', 'التقرير الشهري']
+  ];
+  const want = TABS.some(t => t[0] === ctx.query?.get('tab')) ? ctx.query.get('tab') : 'scope';
+  const panel = h('div.staff-panel');
+  const btns = TABS.map(([key, label]) => {
+    const b2 = h('button.btn.tab', { type: 'button', role: 'tab' }, label);
+    b2.onclick = () => show(key);
+    return b2;
+  });
 
+  async function show(key) {
+    btns.forEach((b2, i) => {
+      const on = TABS[i][0] === key;
+      b2.classList.toggle('on', on);
+      b2.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    history.replaceState(null, '', key === 'scope' ? '/app/contract' : `/app/contract?tab=${key}`);
+    panel.replaceChildren(h('p.small.muted', 'جارٍ التحميل…'));
+    try {
+      panel.replaceChildren(
+        key === 'qty' ? quantitiesPane()
+        : key === 'claim' ? claimPane()
+        : key === 'ops' ? await opsSection()
+        : scopeSection());
+    } catch (err) { panel.replaceChildren(h('p.small.bad', err.message)); }
+  }
+
+  const view = h('div',
+    h('div.page-head',
+      h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'بنود العقد والمستخلص'),
+        h('p.muted', 'نطاقُ العقد كما نصّ عليه، وكمياتُ الإنجاز أمام الكميات التعاقدية، '
+          + 'ومسودّةُ مستخلصٍ شهري، والتقريرُ الشهري للتكاليف التشغيلية.'))),
+    h('div.tabs', { role: 'tablist' }, btns),
+    panel,
     admin ? null : h('p.small.muted', 'اطّلاعٌ فقط.'));
+  await show(want);
+  return view;
 }

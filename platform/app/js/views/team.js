@@ -1,24 +1,25 @@
 // فريق العمل: طلبات التسجيل، التفعيل، الأدوار، واللغات
 import { h, fill, toast, busy, dialog, emptyState, fmtDate, fmtDateTime, confirm } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, isManager, PERM_LABEL, PERM_KEYS, ROLE_LABEL, STATUS_LABEL, langName, stageName } from '../store.js';
+import { state, isManager, PERM_LABEL, PERM_KEYS, ROLE_LABEL, STATUS_LABEL,
+  TRACK_LABEL, trackOf, CITY, NO_FATWA, langName, stageName } from '../store.js';
 import { POLICY_KEY, POLICY_VERSION } from '../policy.js';
 import { TEAM_FIELDS, teamRows, exportExcel, exportWord, exportPdf } from '../teamexport.js';
 import { nationalitySelect } from '../nationalities.js';
 
-// الفريقان مستقلّان تمامًا: فريق الترجمة المتخصصة، وفريق الإرشاد المكاني (ملاحظة ٩٩)
-export const TRACK_LABEL = { translation: 'الترجمة التخصصية', field: 'الإرشاد المكاني' };
-export const trackOf = m => (m.track === 'field' ? 'field' : 'translation');
+// الفرق مستقلّة: الترجمة التخصصية، والإرشاد المكاني، وإجابة السائلين (ملاحظتا ٩٩ و١٨٦)
+export { TRACK_LABEL, trackOf };
 
 // ثلاث قوائم مستقلة تحت «الفريق»: الحسابات الإدارية، والمترجمون المتخصصون،
 // والمرشدون المكانيون — لكلٍّ بياناته واعتماداته (ملاحظة ١٠١)
 export const GROUP_LABEL = {
-  admins: 'الحسابات الإدارية', translators: 'المترجمون المتخصصون', field: 'المرشدون المكانيون'
+  admins: 'الحسابات الإدارية', translators: 'المترجمون المتخصصون',
+  field: 'المرشدون المكانيون', answers: 'المخصَّصون لإجابة السائلين'
 };
 
 export async function render(ctx, opts = {}) {
   const group = GROUP_LABEL[opts.group] ? opts.group : (opts.track === 'field' ? 'field' : 'translators');
-  const track = group === 'field' ? 'field' : 'translation';
+  const track = group === 'field' ? 'field' : group === 'answers' ? 'answers' : 'translation';
   const [all, priv, perf, rateSum, signed, bank] = await Promise.all([
     db.select('profiles', { select: '*,member_languages(language_code)', order: 'created_at.desc' }),
     db.select('profile_private', { select: '*' }),
@@ -35,11 +36,13 @@ export async function render(ctx, opts = {}) {
       const as = (privOf[m.id] || {}).applied_as;
       if (group === 'admins') return as === 'coordinator';
       if (group === 'field') return as === 'field' || trackOf(m) === 'field';
+      if (group === 'answers') return false;   // لا يُسجَّل فيها أحد (ملاحظة ١٨٦)
       return as !== 'coordinator' && as !== 'field' && trackOf(m) !== 'field';
     }
     // وحساب مشرف الهيئة يُدار مع الحسابات الإدارية (ملاحظة ١٤٦)
     if (group === 'admins') return ['manager', 'coordinator', 'supervisor'].includes(m.role);
     if (group === 'field') return trackOf(m) === 'field';
+    if (group === 'answers') return trackOf(m) === 'answers';
     return m.role === 'translator' && trackOf(m) === 'translation';
   };
   const members = all.filter(belongs);
@@ -70,6 +73,50 @@ export async function render(ctx, opts = {}) {
   // الصفة التي تقدّم بها العضو عند التسجيل — إفصاح للاسترشاد لا صلاحية (ملاحظة ٦٣)
   const APPLIED_LABEL = { translator: 'مترجم أو مراجع', coordinator: 'منسق أو إداري', field: 'مترجم ميداني — إرشاد مكاني' };
 
+  // حال بيانات العضو: علامةٌ في صفّه، ونافذةُ تدقيقٍ للمنسق (ملاحظة ١٧٩)
+  const DATA_BADGE = {
+    incomplete: ['warn', 'بياناته ناقصة'],
+    submitted: ['gold', 'بيانات للتدقيق'],
+    returned: ['bad', 'بيانات أُعيدت'],
+    accepted: null
+  };
+  const dataBadge = m => {
+    const st = (privOf[m.id] || {}).data_status || 'incomplete';
+    const b = DATA_BADGE[st];
+    if (!b || m.status === 'pending') return null;
+    return h('span.badge', { class: b[0], title: 'بيانات العضو التي يستكملها بعد التفعيل' }, b[1]);
+  };
+
+  async function reviewData(m) {
+    const missing = await db.rpc('profile_missing', { p_id: m.id }).catch(() => []);
+    const note = h('textarea', { rows: 2, 'aria-label': 'ما ينقص العضو',
+      placeholder: 'ما يلزمه استدراكه — يُرسَل إليه' });
+    const res = await dialog({
+      title: `تدقيق بيانات ${m.full_name}`,
+      body: h('div.stack',
+        h('p.small.muted', 'رفع العضو بياناته بعد التفعيل. راجعها في ملفه، '
+          + 'ثم اقبلها أو أعدها إليه ببيان ما ينقص.'),
+        (missing || []).length
+          ? h('div.card.stack', h('b.small', 'ما زال ناقصًا عندنا'),
+              h('ul.small.tight', missing.map(x => h('li', x))))
+          : h('p.small.ok', 'لا ينقصها شيء من البيانات اللازمة.'),
+        h('label.field', 'ملاحظة الإعادة', h('small', 'تلزم إن أعدتها، وتُترك إن قبلتها'), note)),
+      buttons: [
+        { label: 'قبول البيانات', kind: 'primary', value: () => ({ accept: true }) },
+        { label: 'إعادتها بملاحظة', kind: 'danger',
+          validate: () => (note.value.trim() ? true : 'اكتب ما ينقص العضو ليستدركه'),
+          value: () => ({ accept: false, note: note.value.trim() }) },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
+    try {
+      await db.rpc('review_profile_data', { p_id: m.id, p_accept: res.accept, p_note: res.note || null });
+      toast(res.accept ? 'قُبلت بيانات العضو.' : 'أُعيدت إليه بملاحظتك.', 'ok');
+      reload();
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
   async function edit(m) {
     const role = h('select', { disabled: !isManager() || m.id === state.profile.id },
       Object.entries(ROLE_LABEL).map(([k, v]) => h('option', { value: k, selected: m.role === k }, v)));
@@ -86,8 +133,25 @@ export async function render(ctx, opts = {}) {
       h('p.small.muted', 'الأصل في فريق الإرشاد المكاني ألّا تُسنَد إليه ترجمة. '
         + 'وهذا استثناءٌ للمتميّز، ولا يتجاوز لغاته المسجَّلة أعلاه. '
         + 'ولا تُرفع الإتاحة وفي يده عملٌ لم يُنجز.'));
+    // مدينة المرشد: عليها تُبنى دعوات التدريب والاجتماعات (ملاحظة ١٨٥)
+    const citySel = h('select', { 'aria-label': 'مدينة العمل' },
+      h('option', { value: '' }, '— غير محدَّدة —'),
+      Object.entries(CITY).map(([k, v]) => h('option', { value: k, selected: m.city === k }, v)));
+    const cityCard = h('fieldset.stack', { style: { display: trackOf(m) === 'field' ? '' : 'none' } },
+      h('legend', 'مدينة العمل'),
+      h('label.field', 'المسجد الذي يرشد فيه', citySel),
+      h('p.small.muted', 'تُبنى عليها دعواته: فاجتماعُ مكة لأهل مكة، واجتماعُ المدينة لأهلها.'));
+
+    // وفريق إجابة السائلين: لا فتوى لأحدٍ البتّة (ملاحظة ١٨٦)
+    const answersCard = h('fieldset.stack', { style: { display: trackOf(m) === 'answers' ? '' : 'none' } },
+      h('legend', 'إجابة السائلين'),
+      h('p.small', NO_FATWA),
+      h('p.small.muted', 'ولا يُسجَّل في هذه القائمة أحد ابتداءً: إنما يُنقل إليها من هنا.'));
+
     trackSel.addEventListener('change', () => {
       mayCard.style.display = trackSel.value === 'field' ? '' : 'none';
+      cityCard.style.display = trackSel.value === 'field' ? '' : 'none';
+      answersCard.style.display = trackSel.value === 'answers' ? '' : 'none';
       if (trackSel.value !== 'field') mayBox.checked = false;
     });
 
@@ -193,11 +257,9 @@ export async function render(ctx, opts = {}) {
         h('div.grid-2',
           h('label.field', 'الدور', role, !isManager() && h('small', 'تغيير الأدوار الإدارية بيد مدير المشروع')),
           h('label.field', 'الفريق', trackSel,
-            h('small', track === 'field'
-              ? 'ينتقل المتميّز إلى الترجمة التخصصية فتُسنَد إليه الأعمال'
-              : 'الإرشاد المكاني: توثيق بيانات فقط بلا إسناد أعمال ترجمة'))),
+            h('small', 'ومن هنا يُنقل العضو إلى إجابة السائلين: نقلُ السؤال ونقلُ الجواب، بلا فتوى'))),
         h('fieldset', h('legend', 'اللغات المؤهل فيها'), h('div.stack', { style: { gap: '10px' } }, langSelect, langChips)),
-        mayCard, permCard, mfaCard),
+        mayCard, cityCard, answersCard, permCard, mfaCard),
       buttons: [
         { label: 'حفظ', kind: 'primary', validate: () => {
           if (mayBox.checked && trackSel.value === 'field' && !chosen.size) {
@@ -211,6 +273,7 @@ export async function render(ctx, opts = {}) {
           return true;
         }, value: () => ({ role: role.value, languages: [...chosen], track: trackSel.value,
           may: mayBox.checked && trackSel.value === 'field',
+          city: trackSel.value === 'field' ? (citySel.value || null) : null,
           perms: Object.fromEntries([...permBoxes].filter(([, c]) => !c.checked).map(([k]) => [k, false])),
           contact: { full_name: fld.full_name.value.trim(), whatsapp: fld.whatsapp.value.trim(),
             nationality: fld.nationality.value.trim(), national_id: fld.national_id.value.trim().toUpperCase(),
@@ -232,6 +295,9 @@ export async function render(ctx, opts = {}) {
       // المرشد المتميّز، والصلاحيات، وإلزام التحقق — كلٌّ في موضعه (ملاحظات ١٧١–١٧٣)
       if (result.track === 'field' && result.may !== !!m.may_translate) {
         await db.rpc('set_member_may_translate', { p_member: m.id, p_on: result.may });
+      }
+      if ((result.city || null) !== (m.city || null)) {
+        await db.rpc('set_member_city', { p_member: m.id, p_city: result.city });
       }
       if (isManager() && ['coordinator', 'supervisor'].includes(result.role)) {
         const before = JSON.stringify(m.perms || {});
@@ -491,8 +557,12 @@ export async function render(ctx, opts = {}) {
           m.mfa_required ? h('span.badge', { title: 'مُلزَم بالتحقق بخطوتين' }, 'تحقق') : null,
           Object.values(m.perms || {}).some(v => v === false)
             ? h('span.badge.warn', { title: 'بعض الصلاحيات مغلقة' },
-                `${Object.values(m.perms).filter(v => v === false).length} مغلقة`) : null),
+                `${Object.values(m.perms).filter(v => v === false).length} مغلقة`) : null,
+          dataBadge(m)),
         h('td', canManage(m) && m.id !== state.profile.id && h('div.row',
+          (privOf[m.id] || {}).data_status === 'submitted'
+            ? h('button.btn.sm.primary', { type: 'button',
+                onclick: () => reviewData(m) }, 'تدقيق البيانات') : null,
           showPerf && h('button.btn.sm', { type: 'button', onclick: () => performance(m) }, 'الأداء والتقييم'),
           h('button.btn.sm', { type: 'button', onclick: () => edit(m) }, 'الملف والتعديل'),
           m.status === 'active'

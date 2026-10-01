@@ -26,6 +26,14 @@ const weekStart = d => {
   return x.toISOString().slice(0, 10);
 };
 const monthOf = d => String(d || '').slice(0, 7);
+// الأسبوع قد يبدأ في شهرٍ وينتهي في الذي بعده، فيُحسب في الشهر الذي فيه
+// أكثرُ أيامه — فلا يسقط تقييمٌ من شاشة الشهر عند مفصل الشهور.
+const weekMonth = d => {
+  const start = new Date(`${d}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return monthOf(d);
+  const mid = new Date(start.getTime() + 3 * 86400000);   // رابع أيام الأسبوع
+  return `${mid.getFullYear()}-${String(mid.getMonth() + 1).padStart(2, '0')}`;
+};
 const totalOf = r => CRITERIA.reduce((s, [k]) => s + Number(r[k] || 0), 0);
 
 function scoreDialog(members, row = null) {
@@ -124,7 +132,7 @@ export async function render() {
   };
 
   function draw() {
-    const list = rows.filter(r => !monthIn.value || monthOf(r.week_start) === monthIn.value);
+    const list = rows.filter(r => !monthIn.value || weekMonth(r.week_start) === monthIn.value);
     const head = ['الأسبوع', 'المرشد', ...CRITERIA.map(([, l]) => l), 'المجموع', 'المشرف', ...(admin ? [''] : [])];
     table.replaceChildren(h('div.table-wrap', h('table.responsive',
       h('thead', h('tr', head.map(t => h('th', t)))),
@@ -177,7 +185,7 @@ export async function render() {
     h('option', { value: 'pdf' }, 'PDF على كليشة الهيئة'));
   const expBtn = h('button.btn.sm', { type: 'button' }, 'تصدير التقييم');
   expBtn.onclick = () => busy(expBtn, async () => {
-    const list = rows.filter(r => !monthIn.value || monthOf(r.week_start) === monthIn.value);
+    const list = rows.filter(r => !monthIn.value || weekMonth(r.week_start) === monthIn.value);
     const out = [['الأسبوع', 'المرشد', ...CRITERIA.map(([, l]) => l), 'المجموع', 'مشرف الهيئة', 'ملاحظات']];
     for (const r of list) {
       out.push([r.week_start, nameOf(r.member_id), ...CRITERIA.map(([k]) => String(r[k] ?? '')),

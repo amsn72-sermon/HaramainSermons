@@ -73,6 +73,58 @@ export async function render(ctx) {
   // الخطب والدروس تتبع مسجدًا؛ الكتب والمطويات والإعلانات والتوجيهات عامة (ملاحظة ٦٩)
   const mosqueWrap = h('label.field', req('مكان الخطبة / الموقع'), f.mosque);
   const pdfWrap = h('label.field', req('ملف الأصل العربي (PDF)'), h('small', 'حتى ٢٠ ميغابايت'), f.pdf);
+
+  // كلمات الأصل العربي: عليها يُحتسب العمل في العقد، تُحصى آليًّا ويصحّحها
+  // المنسق إن أخطأت الآلة (ملاحظة ١٨٨)
+  let autoWords = null;
+  const wordsIn = h('input', { type: 'number', min: 0, max: 5000000,
+    'aria-label': 'كلمات الأصل العربي', placeholder: 'تُحصى آليًّا' });
+  const wordsNote = h('div.small.muted');
+  const wordsBtn = h('button.btn.xs', { type: 'button' }, 'أحصِ الكلمات');
+  const setWords = (n, note, kind = 'muted') => {
+    autoWords = n;
+    wordsIn.value = n == null ? '' : String(n);
+    wordsNote.className = `small ${kind}`;
+    wordsNote.textContent = note || '';
+  };
+  const countNow = async () => {
+    if (f.source_mode.value === 'text') {
+      const txt = (source.html || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ')
+        .replace(/\s+/g, ' ').trim();
+      const n = txt ? txt.split(' ').filter(Boolean).length : 0;
+      setWords(n, n ? `أُحصيت ${n.toLocaleString('en-US')} كلمة من النص المكتوب.`
+        : 'لا نصّ بعد — اكتب الأصل العربي ثم أعد الإحصاء.', n ? 'ok' : 'warn');
+      return;
+    }
+    if (f.source_mode.value === 'pdf') {
+      const file = f.pdf.files[0];
+      if (!file) return setWords(null, 'أرفق ملف PDF أولًا.', 'warn');
+      setWords(null, 'جارٍ قراءة الملف…');
+      try {
+        const { pdfWordCount } = await import('../pdfview.js');
+        const r = await pdfWordCount(file);
+        if (r.scanned) {
+          setWords(null, `الملف ${r.pages} صفحة ممسوحة صورةً بلا نصّ — اكتب العدد بنفسك.`, 'warn');
+        } else {
+          setWords(r.words, `أُحصيت ${r.words.toLocaleString('en-US')} كلمة من ${r.pages} صفحة. `
+            + 'راجعها وصحّحها إن أخطأت.', 'ok');
+        }
+      } catch (e) {
+        setWords(null, `تعذّرت قراءة الملف: ${e.message} — اكتب العدد بنفسك.`, 'warn');
+      }
+      return;
+    }
+    setWords(null, 'المادة الصوتية لا كلمات أصلٍ مكتوبة لها — اتركه فارغًا أو اكتبه بعد النسخ.', 'muted');
+  };
+  wordsBtn.onclick = () => busy(wordsBtn, countNow);
+  f.pdf.addEventListener('change', () => { if (f.source_mode.value === 'pdf') countNow(); });
+
+  const wordsWrap = h('div.card.stack.words-card',
+    h('div.row.between', h('b', 'كلمات الأصل العربي'), wordsBtn),
+    h('p.small.muted', 'عليها يُحتسب العمل في العقد، وتُحصى مرةً واحدة للمادة لا لكل لغة. '
+      + 'تُحصيها المنصة وتصحّحها إن أخطأت.'),
+    h('div.row', wordsIn, h('span.small.muted', 'كلمة')),
+    wordsNote);
   // أصلٌ صوتي: درسٌ أو مادة تصل مقطعًا صوتيًّا فيترجمها المترجم سماعًا (ملاحظة ١٥٧)
   const audioPrev = h('div.stack.src-audio-prev');
   const audioWrap = h('div.field',
@@ -114,6 +166,7 @@ export async function render(ctx) {
     sermonOnly.hidden = !isSermon();
     mosqueWrap.hidden = !needsMosque(f.material_type.value);
     pdfWrap.hidden = f.source_mode.value !== 'pdf';
+    wordsWrap.hidden = f.source_mode.value === 'audio';
     textWrap.hidden = f.source_mode.value !== 'text';
     audioWrap.hidden = f.source_mode.value !== 'audio';
     // اسم الحقل وإلزامه يتغيران بتغير نوع المادة
@@ -146,10 +199,62 @@ export async function render(ctx) {
     sumLine.className = 'small ' + (diff < 0 ? 'err' : 'muted');
     sumLine.textContent = `مجموع المراحل: ${fmtMinutes(sum)} من ${fmtMinutes(totalMinutes())}` + (diff < 0 ? ' — يتجاوز المدة الكلية' : diff > 0 ? ` · احتياطي ${fmtMinutes(diff)}` : '');
   }
+  // ---------------- نافذة الخطبة (ملاحظة ١٨٩) ----------------
+  // الخطبة تصل الثلاثاء أو الأربعاء، والتسليم قبل الجمعة بساعات أمان.
+  // فالمدة الكلية تُؤخذ من الباقي فعلًا، لا من عدد أيامٍ مقطوع.
+  const winNote = h('div.small.muted');
+  const winBtn = h('button.btn.sm', { type: 'button' }, 'وزّع على ما بقي حتى الخطبة');
+  let win = null;
+  const winCard = h('div.card.stack.window-card', { hidden: true },
+    h('div.row.between', h('b', 'نافذة التسليم'), winBtn), winNote);
+
+  const fitWindow = () => {
+    if (!win || !win.minutes) return;
+    f.unit.value = '60';
+    f.total.value = String(Math.max(1, Math.round(win.minutes / 60)));
+    const sp = win.split || {};
+    let any = false;
+    slaStages.forEach(st => {
+      if (sp[st.key] != null) { stageInputs[st.key].value = Number(sp[st.key]); any = true; }
+    });
+    if (!any) distribute(); else updateSum();
+  };
+  winBtn.onclick = () => fitWindow();
+
+  const loadWindow = async () => {
+    win = null;
+    const isSermon = f.material_type.value === 'خطب';
+    if (!isSermon || !f.sermon_date.value) { winCard.hidden = true; return; }
+    winCard.hidden = false;
+    winNote.className = 'small muted';
+    winNote.textContent = 'جارٍ احتساب ما بقي…';
+    try {
+      const r = await db.rpc('sermon_window', { p_sermon_date: f.sermon_date.value });
+      win = Array.isArray(r) ? r[0] : r;
+    } catch { win = null; }
+    if (!win) { winNote.textContent = 'تعذّر احتساب النافذة — وزّع المدة بنفسك.'; return; }
+    const hrs = Number(win.hours || 0);
+    if (!win.minutes) {
+      winNote.className = 'small bad';
+      winNote.textContent = 'مضى موعد التسليم لهذا التاريخ — راجع تاريخ الخطبة.';
+      return;
+    }
+    winNote.className = 'small ' + (win.tight ? 'warn' : 'muted');
+    winNote.textContent = `بقي حتى التسليم ${hrs.toLocaleString('en-US')} ساعة `
+      + `(ينتهي العمل قبل الخطبة بـ${win.cutoff_hours} ساعات). `
+      + (win.arrived_on_time
+          ? 'وصلت المادة في موعدها المعتاد: الثلاثاء أو الأربعاء.'
+          : 'وصلت المادة خارج الثلاثاء والأربعاء، فالنافذة أضيق من المعتاد.')
+      + (win.tight ? ' وهي أقل من يوم: راجع الأهمية والإسناد.' : '');
+  };
+  f.sermon_date.addEventListener('change', loadWindow);
+  f.material_type.addEventListener('change', loadWindow);
+
   Object.values(stageInputs).forEach(i => i.addEventListener('input', updateSum));
   f.total.addEventListener('input', distribute); f.unit.addEventListener('change', distribute);
   f.priority.addEventListener('change', () => { f.total.value = PRIORITY_DAYS[f.priority.value] || 3; f.unit.value = '1440'; distribute(); });
   if (draft.stage_minutes) { slaStages.forEach(s => stageInputs[s.key].value = draft.stage_minutes[s.key] ?? 0); updateSum(); } else distribute();
+  if (draft.sermon_date || f.sermon_date.value) loadWindow();
 
   // ---------------- الخطوة ٣: الإسناد ----------------
   const picked = new Map(); // code -> { stages: Map(key -> assigneeId), audio: stageKey }
@@ -261,7 +366,7 @@ export async function render(ctx) {
       h('div.grid-2', h('label.field', req('التاريخ'), f.sermon_date), authorWrap),
       h('label.field', 'تفاصيل المادة وتعليمات الترجمة', f.instructions),
       h('div.grid-2', h('label.field', 'طريقة إدخال النص العربي', f.source_mode), h('label.field', 'المطلوب تسليمه', f.deliverable)),
-      textWrap, pdfWrap, audioWrap),
+      textWrap, pdfWrap, audioWrap, wordsWrap),
     h('div.stack',
       h('div.grid-2', h('label.field', 'مدى الأهمية', h('small', 'تضبط المدة الكلية تلقائيًا'), f.priority),
         h('div.field', h('b', 'المدة الكلية للتنفيذ'), h('div.row', f.total, f.unit)),
@@ -270,6 +375,7 @@ export async function render(ctx) {
       h('fieldset', h('legend', 'الوقت المخصص لكل مرحلة (بالدقائق)'),
         h('div.grid', slaStages.map(s => h('label.field', s.name_ar, stageInputs[s.key], stageHints[s.key]))),
         h('div.row', sumLine, h('button.btn.sm', { type: 'button', onclick: distribute }, 'إعادة التوزيع التلقائي')),
+        winCard,
         h('p.small.muted', 'تُحدَّد المدة الكلية تلقائيًا حسب الأهمية: طارئة يوم، عاجلة يومان، اعتيادية ثلاثة أيام، وتُوزَّع على المراحل بالنسبة (الترجمة أطول من المراجعة، والاستلام أقصر). المدة تبدأ من قبول المترجم، والموعد النهائي ثابت: إن تأخرت مرحلة قلّ وقت ما بعدها، وإن سبقت زاد. إن اختُصر مسار لغة، يُوزَّع وقت المراحل المتجاوزة على مراحلها. اعتماد المدير خارج المدة.')),
       h('label.check', f.escalate, 'عند تجاوز الوقت: تنبيه مدير المشروع إضافةً إلى المسؤول والمنسق')),
     h('div.stack',
@@ -398,6 +504,13 @@ export async function render(ctx) {
           audioPath = await storage.upload('sources', `${crypto.randomUUID()}.${ext}`, file);
         }
         const newId = await db.rpc('create_material', { p: payload(pdfPath, audioPath) });
+        // كلمات الأصل تُحفظ مع المادة، فيقوم عليها احتساب العقد (ملاحظة ١٨٨)
+        const wn = wordsIn.value === '' ? null : Number(wordsIn.value);
+        if (newId && wn != null && wn >= 0) {
+          db.rpc('set_material_words', {
+            p_material: String(newId).replace(/"/g, ''), p_words: wn, p_auto: autoWords })
+            .catch(() => {});
+        }
         // مدة الأصل الصوتي تُقاس في المتصفح، فتُحفظ ليظهر طولها للمترجم
         if (audioPath && srcAudioSeconds && newId) {
           db.rpc('set_source_audio_seconds', { p_material: String(newId).replace(/"/g, ''), p_seconds: srcAudioSeconds })

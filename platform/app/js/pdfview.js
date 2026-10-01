@@ -135,3 +135,23 @@ export function pdfViewer({ url, lines, marks = [], onDraw = null, onPage = null
   el.goToPage = n => { if (doc && n >= 1 && n <= doc.numPages) { page = n; render(); } };
   return el;
 }
+
+// ---------------------------------------------------------------------
+// إحصاء كلمات الأصل العربي من ملف PDF: نصُّه لا صورتُه (ملاحظة ١٨٨).
+// يُقرأ الملف في المتصفح، فلا يرتفع إلى الخادم قبل حاجته.
+// ---------------------------------------------------------------------
+export async function pdfWordCount(file) {
+  const js = await pdfjs();
+  const buf = await file.arrayBuffer();
+  const doc = await js.getDocument({ data: buf }).promise;
+  let words = 0, chars = 0;
+  for (let n = 1; n <= doc.numPages; n++) {
+    const page = await doc.getPage(n);
+    const txt = await page.getTextContent();
+    const line = txt.items.map(i => i.str).join(' ').replace(/\s+/g, ' ').trim();
+    chars += line.length;
+    if (line) words += line.split(' ').filter(Boolean).length;
+  }
+  // ملفٌّ ممسوحٌ صورةً لا نصّ فيه: يُقال ذلك صريحًا ولا يُزعم عددٌ
+  return { words, pages: doc.numPages, scanned: chars < doc.numPages * 20 };
+}

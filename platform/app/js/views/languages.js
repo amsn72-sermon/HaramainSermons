@@ -1,7 +1,7 @@
 // اللغات: مرجع واحد تستخدمه المنصة والموقع العام
 import { h, toast, busy, dialog } from '../ui.js';
 import { db } from '../sb.js';
-import { state, loadReference } from '../store.js';
+import { state, loadReference, isManager } from '../store.js';
 
 export async function render(ctx) {
   await loadReference(true);
@@ -43,18 +43,57 @@ export async function render(ctx) {
     catch (err) { toast(err.message, 'bad'); }
   });
 
+  // لغةُ المبادرة: يخدمها المتعاقد بلا مقابل، فتُستثنى من المستخلص
+  // وتبقى أعمالُها محسوبةً في المنصة (ملاحظة ١٩٤)
+  const initDialog = async l => {
+    const on = h('input', { type: 'checkbox', checked: l.is_initiative ? true : null,
+      'aria-label': 'لغة مبادرة بلا مقابل' });
+    const note = h('input', { value: l.initiative_note || '', 'aria-label': 'بيان المبادرة',
+      placeholder: 'مبادرةٌ من المتعاقد: بلا مقابل' });
+    const res = await dialog({
+      title: `${l.name_ar} — المبادرة`,
+      body: h('div.stack',
+        h('p.small.muted', 'العقد يطلب إحدى عشرة لغةً بالخطبة الأسبوعية. وما زاده المتعاقد '
+          + 'من عنده بلا مقابل يُوسَم هنا: تبقى أعمالُه محسوبةً في المنصة ودليل الإنتاج '
+          + 'والأرشيف، وتُستثنى من كميات المستخلص، وتُعرض في بنود العقد سطرًا مستقلًّا.'),
+        h('label.check', on, h('span', 'لغةُ مبادرة — بلا مقابل')),
+        h('label.field', 'بيانُها كما يُعرض', note)),
+      buttons: [
+        { label: 'حفظ', kind: 'primary',
+          value: () => ({ on: on.checked, note: note.value.trim() || null }) },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
+    try {
+      await db.rpc('set_language_initiative', { p_code: l.code, p_on: res.on, p_note: res.note });
+      toast(res.on ? 'وُسِمت لغةَ مبادرة.' : 'أُخرجت من المبادرة.', 'ok');
+      reload();
+    } catch (err) { toast(err.message, 'bad'); }
+  };
+
   function card(l) {
     const members = n(l.code);
-    const state2 = l.is_core ? 'core' : (l.is_active ? 'active' : 'off');
-    const el = h(l.is_core ? 'div.lang-card' : 'button.lang-card',
-      { class: state2, type: l.is_core ? null : 'button',
-        title: l.is_core ? 'لغة رئيسية ثابتة' : (l.is_active ? 'اضغط لتعطيلها' : 'اضغط لتفعيلها') },
+    const state2 = l.is_initiative ? 'init' : (l.is_core ? 'core' : (l.is_active ? 'active' : 'off'));
+    const fixed = l.is_core || l.is_initiative;
+    const el = h(fixed ? 'div.lang-card' : 'button.lang-card',
+      { class: state2, type: fixed ? null : 'button',
+        title: l.is_initiative ? (l.initiative_note || 'لغةُ مبادرة بلا مقابل')
+          : l.is_core ? 'لغة رئيسية ثابتة' : (l.is_active ? 'اضغط لتعطيلها' : 'اضغط لتفعيلها') },
       h('div.row.between', h('b', l.name_ar), h('span.lang-code', { dir: 'ltr' }, l.code)),
       h('span.lang-native', { dir: l.dir }, l.native_name),
       h('div.row.between',
         members ? h('span.small.muted', `${members} مترجمًا`) : h('span.badge.warn', 'لا أحد'),
-        l.is_core ? h('span.badge.gold', 'ثابتة') : h('span.badge', { class: l.is_active ? 'ok' : '' }, l.is_active ? 'مفعّلة' : 'معطّلة')));
-    if (!l.is_core) el.onclick = () => toggle(l, el);
+        h('span.row', { style: { gap: '4px' } },
+          l.is_initiative ? h('span.badge.gold', { title: 'بلا مقابل' }, 'مبادرة') : null,
+          l.is_core ? h('span.badge.gold', 'ثابتة')
+            : h('span.badge', { class: l.is_active ? 'ok' : '' }, l.is_active ? 'مفعّلة' : 'معطّلة'))),
+      isManager()
+        ? h('button.btn.xs', { type: 'button', style: { marginTop: '6px' },
+            onclick: e => { e.stopPropagation(); initDialog(l); } },
+            l.is_initiative ? 'إخراجٌ من المبادرة' : 'ضمٌّ إلى المبادرة')
+        : null);
+    if (!fixed) el.onclick = () => toggle(l, el);
     return el;
   }
 
@@ -67,8 +106,9 @@ export async function render(ctx) {
       && (filter.value !== 'empty' || !n(l.code));
     const list = state.languages.filter(match);
     const groups = [
-      ['اللغات الرئيسية الثابتة', list.filter(l => l.is_core)],
-      ['المفعّلة', list.filter(l => !l.is_core && l.is_active)],
+      ['لغاتُ المبادرة — بلا مقابل', list.filter(l => l.is_initiative)],
+      ['اللغات الرئيسية الثابتة', list.filter(l => l.is_core && !l.is_initiative)],
+      ['المفعّلة', list.filter(l => !l.is_core && !l.is_initiative && l.is_active)],
       ['المعطّلة', list.filter(l => !l.is_active)]
     ].filter(([, g]) => g.length);
     counter.textContent = `${list.length} من ${state.languages.length} لغة`;

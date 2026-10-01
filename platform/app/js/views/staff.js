@@ -26,11 +26,18 @@ const SCREEN = {
   field: {
     path: '/app/field', title: 'المرشدون المكانيون', tab: 'المرشدون',
     lead: 'فريق الإرشاد المكاني: تسجيل وتوثيق بيانات ومستندات وحسابات بنكية، بلا إسناد أعمال ترجمة. ومن تميّز منهم يُنقل إلى الترجمة التخصصية.'
+  },
+  // لا يُسجَّل فيها أحد: ينقل إليها المنسق أو مدير المشروع من يراه (ملاحظة ١٨٦)
+  answers: {
+    path: '/app/answers', title: 'المخصَّصون لإجابة السائلين', tab: 'إجابة السائلين',
+    lead: 'من يُنقل إليهم نقلُ أسئلة الزوّار إلى أهل الفتوى ونقلُ جوابهم. '
+      + 'ولا يُسجَّل في هذه القائمة أحد ابتداءً، بل ينقل إليها المنسق أو مدير المشروع من يراه.'
   }
 };
 
 export const admins = ctx => render(ctx, 'admins');
 export const field = ctx => render(ctx, 'field');
+export const answers = ctx => render(ctx, 'answers');
 
 export async function render(ctx, group = 'translators') {
   const scr = SCREEN[group] || SCREEN.translators;
@@ -52,7 +59,9 @@ export async function render(ctx, group = 'translators') {
   // لكل قائمة عدّادها: ما ينتظر تدقيقه فيها هي (ملاحظة ١٢٠)
   const mineCount = byGroup.find(r => r.grp === group);
   if (mineCount) {
+    // والبيانات المرفوعة للتدقيق تُعدّ مع المستندات (ملاحظة ١٧٩)
     TABS[1][2] = Number(mineCount.photos || 0) + Number(mineCount.iqamas || 0);
+    TABS[0][2] = Number(TABS[0][2] || 0) + Number(mineCount.data || 0);
     TABS[2][2] = Number(mineCount.banks || 0);
   } else if (group === 'translators') {
     TABS[1][2] = Number(counts.photos || 0) + Number(counts.iqamas || 0);
@@ -185,7 +194,7 @@ function securityCard(ctx0) {
 // فلا يفوت مستند رُفع (ملاحظتا ٩٨ و١٢٠)
 // ---------------------------------------------------------------------
 const GROUP_OF = m => (['manager', 'coordinator', 'supervisor'].includes(m.role) ? 'admins'
-  : (m.track === 'field' ? 'field' : 'translators'));
+  : m.track === 'answers' ? 'answers' : (m.track === 'field' ? 'field' : 'translators'));
 const GROUP_NAME = { admins: 'الحسابات الإدارية', translators: 'المترجمون المتخصصون', field: 'المرشدون المكانيون' };
 
 async function docsSection(ctx, team, scr, group = 'translators') {

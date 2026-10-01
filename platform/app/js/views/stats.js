@@ -23,7 +23,8 @@ const sums = list => ({
 const TYPE_ORDER = MATERIAL_TYPES;
 const isSermonType = t => t === 'خطب' || t === 'دروس علمية';
 
-// وحدات المناقصة الثلاث: الخطبة (لكل لغة) · الساعة (ترجمة فورية) · الكلمة (بقية المواد)
+// وحدات العقد: الخطبة (لكل لغة) · الساعة (ترجمة فورية) · الكلمة من الأصل العربي
+// (بقية المواد) · الحضور (إجابة السائلين) · الفرد × الفترة (الإرشاد المكاني)
 export const UNIT_OF = type => (type === 'خطب' ? 'sermon' : type === 'دروس علمية' ? 'hour' : 'word');
 // الخطب تُحتسب بالخطبة، فلا يُحصى لها عدد كلمات (ملاحظة ١٥٦)
 export const countsWords = type => type !== 'خطب';
@@ -115,6 +116,7 @@ export async function render(ctx) {
     return true;
   };
 
+  const contractBox = h('section.card.stack.contract-box');
   const unitsBox = h('div.stack');
   const audioBox = h('div.stack');
 
@@ -181,12 +183,51 @@ export async function render(ctx) {
           h('td', 'المجموع'), h('td', ar(hours.length)), h('td', hrs(hoursTotal)))))),
       h('p.small.muted', 'تُدوَّن في سجلّ الترجمة الفورية بعد إتمامها، بشهادة مشرف الهيئة.'));
 
+    // أساس العقد: كلمات الأصل العربي مرةً واحدة، بجانب ما سُلّم من ترجمة
+    // (ملاحظة ١٨٨)
+    Promise.all([
+      db.rpc('production_contract').then(r => (Array.isArray(r) ? r[0] : r)),
+      db.rpc('initiative_totals').then(r => (Array.isArray(r) ? r[0] : r)).catch(() => null)
+    ]).then(([c, ini]) => {
+      if (!c) return;
+      contractBox.replaceChildren(
+        h('div.row.between',
+          h('b', 'أساس العقد في الاحتساب'),
+          c.missing > 0
+            ? h('a.badge.warn', { href: '/app', title: 'مواد لم يُحصَ أصلها العربي بعد' },
+                `${ar(c.missing)} مادة بلا إحصاء`)
+            : h('span.badge.ok', 'أُحصيت كل المواد')),
+        tiles(
+          tile(ar(c.source_words), 'كلمة في الأصل العربي', 'ما يُحتسب به العقد'),
+          tile(ar(c.material_words), 'منها في النصوص والكتب', 'عدا الخطب، فهي بالخطبة'),
+          tile(ar(c.sermons), 'خطبة مُنجزة', 'تُحتسب بالخطبة لكل لغة'),
+          tile(ar(c.lang_tracks), 'مسار لغة مكتمل', 'لكل لغة مسارها'),
+          tile(ar(Math.round(Number(c.interp_hours || 0))), 'ساعة ترجمة فورية', 'من سجلّ الدروس والندوات')),
+        // مبادرةُ المتعاقد: لغاتٌ زادها بلا مقابل (ملاحظة ١٩٤)
+        ini && Number(ini.langs) > 0
+          ? h('div.card.stack.init-card',
+              h('div.row.between',
+                h('b', 'مبادرةُ المتعاقد — بلا مقابل'),
+                h('span.badge.gold', `${ar(ini.langs)} لغة`)),
+              h('p.small.muted', 'لغاتٌ زادها المتعاقد على ما طلبه العقد ولا يأخذ عليها شيئًا. '
+                + 'أعمالُها محسوبةٌ هنا، ومستثناةٌ من كميات المستخلص.'),
+              tiles(
+                tile(ar(ini.tracks), 'عملًا مُنجزًا', 'في لغات المبادرة'),
+                tile(ar(ini.sermons), 'خطبةً مترجَمة', 'بلا مقابل'),
+                tile(ar(ini.words), 'كلمة في الأصل', 'من نصوص المبادرة')))
+          : null,
+        c.missing > 0
+          ? h('p.small.warn', 'بعض المواد لم يُحصَ أصلها العربي بعد، فأرقامها ناقصة. '
+              + 'يُحصى من شاشة المادة، وتصحّحه إن أخطأت الآلة.')
+          : null);
+    }).catch(() => { contractBox.replaceChildren(); });
+
     // ٣) النصوص والكتب والمطويات وغيرها — بالكلمة
     const wsumAll = sums(words);
     const wordKinds = [...new Set([...MATERIAL_TYPES.filter(t => UNIT_OF(t) === 'word'),
       ...words.map(r => r.material_type)])].filter(Boolean);
     const wordTiles = tiles(
-      tile(ar(wsumAll.words), 'كلمة مترجَمة', `${ar(wsumAll.pages)} صفحة تقديرًا`),
+      tile(ar(wsumAll.words), 'كلمة في الترجمة المسلَّمة', `${ar(wsumAll.pages)} صفحة تقديرًا`),
       ...wordKinds.map(t => {
         const l = words.filter(r => (r.material_type || 'مادة') === t);
         return tile(ar(sums(l).words), `كلمات ${t}`, `${ar(l.length)} عملًا`);
@@ -214,9 +255,14 @@ export async function render(ctx) {
 
     unitsBox.replaceChildren(
       h('div.card.units-head',
-        h('b', 'وحدات المناقصة الثلاث'),
-        h('p.small.muted', 'لا تُخلط الوحدات في مجموع واحد: الخطب بالخطبة، والدروس بالساعة، وبقية المواد بالكلمة.')),
-      sermonTable, hourTable, wordTable);
+        h('b', 'وحدات العقد الخمس'),
+        h('p.small.muted', 'لا تُخلط الوحدات في مجموع واحد: الخطب بالخطبة لكل لغة، '
+          + 'والنصوص والكتب والمطويات بالكلمة، والدروس والندوات بالساعة، '
+          + 'وإجابة السائلين بالحضور من سجلّ الورديات، '
+          + 'والإرشاد المكاني بالفرد في الفترة مربوطًا بالتقييم.'),
+        h('p.small.muted', 'والكلمة في العقد كلمةُ النص العربي الأصل، لا كلمةُ الترجمة — '
+          + 'وتُحصى مرةً واحدة للمادة.')),
+      contractBox, sermonTable, hourTable, wordTable);
   }
 
   // ---------------- الدقائق الصوتية: قسمٌ مستقل، تسجيلًا تسجيلًا ----------------
@@ -227,7 +273,7 @@ export async function render(ctx) {
     audioBox.replaceChildren(h('section.card.stack',
       h('div.row.between', h('h3', 'الدقائق الصوتية'),
         h('span.badge', `${ar(minutes(sec))} دقيقة · ${ar(list.length)} تسجيلًا`)),
-      h('p.small.muted', 'قسمٌ مستقل: الدقائق لا تدخل وحدات المناقصة، وتُوثَّق ببيانات كل تسجيل ليخرج التقرير واضحًا.'),
+      h('p.small.muted', 'قسمٌ مستقل: الدقائق لا تدخل وحدات العقد، وتُوثَّق ببيانات كل تسجيل ليخرج التقرير واضحًا.'),
       tiles(
         tile(ar(minutes(sec)), 'دقيقة صوتية', `${ar(list.length)} تسجيلًا`),
         tile(ar(list.filter(a => a.is_approved).length), 'تسجيل معتمد'),

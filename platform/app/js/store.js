@@ -35,6 +35,16 @@ export const MOSQUE_ANY = { ...MOSQUE, general: 'مادة عامة' };
 export const SERMON_MATERIALS = ['خطب', 'دروس علمية'];
 export const needsMosque = type => SERMON_MATERIALS.includes(type);
 export const CITY = { makkah: 'مكة المكرمة', madinah: 'المدينة المنورة' };
+// الفرق الثلاثة: والثالث يُنقل إليه ولا يُسجَّل فيه (ملاحظة ١٨٦)
+export const TRACK_LABEL = {
+  translation: 'الترجمة التخصصية',
+  field: 'الإرشاد المكاني',
+  answers: 'إجابة السائلين'
+};
+export const trackOf = m => (TRACK_LABEL[m?.track] ? m.track : 'translation');
+// لا فتوى لأحدٍ من الفريق البتّة: ينقل السؤال ثم ينقل الجواب (ملاحظة ١٨٦)
+export const NO_FATWA = 'ليس لأحد من الفريق أن يفتي بشيء: ينقل السؤال إلى أهل الفتوى، '
+  + 'ثم ينقل جوابهم كما هو، لا يزيد فيه ولا ينقص.';
 export const PRIORITY = { normal: 'اعتيادية', urgent: 'عاجلة', emergency: 'طارئة' };
 export const MATERIAL_TYPES = ['خطب', 'دروس علمية', 'إعلانات', 'توجيهات', 'كتب', 'مطويات', 'منشورات'];
 // أنواع الخطب — ولكل نوع رمزه في ترقيم التوثيق (ملاحظة ١٣٤)

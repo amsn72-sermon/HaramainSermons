@@ -26,7 +26,6 @@ function readerCard(c, mine, onDone) {
     db.rpc('log_circular_view', { p_circular: c.id }).catch(() => {});
     storage.signedUrl('circulars', c.pdf_path, 900)
       .then(url => box.replaceChildren(
-        h('p.small.muted', 'المرفق يُعرض داخل المنصة فقط: لا تنزيل ولا طباعة، وعليه علامة مائية تحمل هويتك، وكل فتح يُسجَّل.'),
         pdfViewer({ url, lines: [who],
           onPage: (page, total) => {
             if (page >= total) { seenAll = true; ackBtn.disabled = false; seenNote.hidden = true; }
@@ -231,6 +230,33 @@ export async function render(ctx) {
       f.blocking.disabled = !f.require_ack.checked;
     });
 
+    // المرفق يُقرأ إلى الذاكرة حال اختياره: بعض المتصفحات تُسقط إشارة الملف
+    // متى أُغلقت النافذة، فيموت الرفع صامتًا (ملاحظة ١٨١)
+    const att = { blob: null, name: '', size: 0, reading: false, error: '' };
+    const attNote = h('div.small.muted');
+    f.pdf.addEventListener('change', async () => {
+      const file = f.pdf.files[0];
+      att.blob = null; att.name = ''; att.size = 0; att.error = '';
+      if (!file) { attNote.textContent = ''; return; }
+      att.name = file.name; att.size = file.size;
+      if (file.size > 20 * 1024 * 1024) {
+        attNote.textContent = `«${file.name}» حجمه ${(file.size / (1024 * 1024)).toFixed(1)} ميغابايت — والحد ٢٠.`;
+        attNote.className = 'small bad';
+        return;
+      }
+      att.reading = true;
+      attNote.className = 'small muted';
+      attNote.textContent = `جارٍ تهيئة «${file.name}»…`;
+      try {
+        att.blob = new Blob([await file.arrayBuffer()], { type: file.type || 'application/pdf' });
+        attNote.textContent = `«${file.name}» جاهز — ${(file.size / 1024).toFixed(0)} كيلوبايت.`;
+      } catch (err) {
+        att.error = err.message || 'تعذّرت قراءة الملف';
+        attNote.className = 'small bad';
+        attNote.textContent = `تعذّرت قراءة «${file.name}» — أعد اختياره.`;
+      } finally { att.reading = false; }
+    });
+
     const members = await db.select('profiles', {
       select: 'id,full_name,role,track', status: 'eq.active', order: 'full_name.asc' });
     const picked = new Set(d.members || []);
@@ -270,7 +296,8 @@ export async function render(ctx) {
         pickWrap,
         h('label.field', req('العنوان'), f.title),
         h('label.field', req('نص الرسالة'), f.body),
-        h('label.field', 'مرفق PDF (اختياري)', h('small', 'حتى ٢٠ ميغابايت — زيادةً على ما كتبتَه لا بديلًا عنه'), f.pdf),
+        h('label.field', 'مرفق PDF (اختياري)',
+          h('small', 'حتى ٢٠ ميغابايت — زيادةً على ما كتبتَه لا بديلًا عنه'), f.pdf, attNote),
         h('label.check', f.require_ack, 'يلزم توقيع العضو بالعلم'),
         h('label.check.top', f.blocking,
           h('span', h('b', 'تعميم ملزم: '),
@@ -288,14 +315,16 @@ export async function render(ctx) {
             return 'اكتب نص الرسالة. والمرفق — إن أرفقتَه — زيادةٌ على النص لا بديل عنه.';
           }
           if (f.audience.value === 'selected' && !picked.size) return 'اختر عضوًا واحدًا على الأقل من قائمة الأعضاء المحددين.';
-          const file = f.pdf.files[0];
-          if (file && file.size > 20 * 1024 * 1024) {
-            return `حجم المرفق ${(file.size / (1024 * 1024)).toFixed(1)} ميغابايت، والحد الأقصى ٢٠ ميغابايت.`;
+          if (att.size > 20 * 1024 * 1024) {
+            return `حجم المرفق ${(att.size / (1024 * 1024)).toFixed(1)} ميغابايت، والحد الأقصى ٢٠ ميغابايت.`;
           }
+          if (att.reading) return 'ما زال المرفق قيد التهيئة — انتظر لحظة ثم أعد الضغط.';
+          if (att.error) return `تعذّرت قراءة المرفق: ${att.error}. أعد اختيار الملف أو أرسل النص وحده.`;
           return true;
         }, value: () => ({
           title: f.title.value.trim(), kind: f.kind.value, audience: f.audience.value,
-          body: f.body.value.trim() || null, file: f.pdf.files[0] || null,
+          body: f.body.value.trim() || null,
+          file: att.blob, fileName: att.name, fileSize: att.size,
           require_ack: f.require_ack.checked, blocking: f.blocking.checked, members: [...picked]
         }) },
         { label: 'إلغاء', value: null }
@@ -307,13 +336,18 @@ export async function render(ctx) {
     try {
       if (res.file) {
         path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pdf`;
-        await storage.upload('circulars', path, res.file);
+        // لا يُترك الرفع معلّقًا بلا جواب: دقيقتان ثم رسالةٌ صريحة
+        await Promise.race([
+          storage.upload('circulars', path, res.file),
+          new Promise((_, rej) => setTimeout(
+            () => rej(new Error('لم يُجب الخادم خلال دقيقتين')), 120000))
+        ]);
       }
     } catch (err) {
       console.error('[circulars] upload failed', err);
-      const size = (res.file.size / (1024 * 1024)).toFixed(1);
+      const size = (res.fileSize / (1024 * 1024)).toFixed(1);
       return compose({ ...res, file: null },
-        `تعذّر رفع المرفق «${res.file.name}» (${size} ميغابايت): ${err.message}. `
+        `تعذّر رفع المرفق «${res.fileName}» (${size} ميغابايت): ${err.message}. `
         + 'أعد اختيار الملف أو أرسل النص بلا مرفق.');
     }
     try {

@@ -1,5 +1,5 @@
 // لوحة المتابعة (المنسق والمدير)، والمترجم يُحوَّل إلى مهامه
-import { h, fill, emptyState, fmtSermonDate, toast, busy, dialog, confirm } from '../ui.js';
+import { h, fill, emptyState, fmtSermonDate, fmtDate, toast, busy, dialog, confirm } from '../ui.js';
 import { db } from '../sb.js';
 import { state, isAdmin, isManager, MATERIAL_SELECT, MOSQUE, MOSQUE_ANY, CITY, PRIORITY, sortStages, currentStage, trackProgress,
   isLateNow, hadLateness, langName, stageName } from '../store.js';
@@ -58,6 +58,8 @@ export async function render(ctx) {
       h('option', { value: 'had_late' }, 'سُجّل فيها تأخير'))
   };
   const out = h('div');
+  // المنجز مطويٌّ أسفل القائمة حتى يُطلب (ملاحظة ١٩١)
+  let showDone = false;
   Object.values(filters).forEach(el => el.addEventListener('input', draw));
 
   function rows() {
@@ -115,11 +117,18 @@ export async function render(ctx) {
     };
     const soon = list.filter(r => urgency(r.t) === 1);
 
+    // غير المنجز أولًا، والمنجز في سطوره المختصرة أسفل — إلا أن تُطلب
+    // «مكتملة» صراحةً فيُعرض في الجدول نفسه (ملاحظة ١٩١)
+    const wantDone = filters.status.value === 'completed';
+    const open = wantDone ? list : list.filter(r => r.t.status !== 'completed');
+    const done = wantDone ? [] : list.filter(r => r.t.status === 'completed');
+    drawDone(done);
+
     const clearBtn = h('button.btn.sm', { type: 'button' }, 'إزالة التصفية');
     clearBtn.onclick = () => { filters.status.value = ''; filters.q.value = ''; draw(); };
     workHead.replaceChildren(
       h('div.row.between',
-        h('h3', `قائمة العمل (${list.length})`),
+        h('h3', `قائمة العمل القائم (${open.length})`),
         (filters.status.value || filters.q.value.trim())
           ? h('div.row', { style: { gap: '8px' } },
               h('span.badge.gold', filters.status.value ? focusLabel(filters.status.value) : `بحث: ${filters.q.value.trim()}`),
@@ -203,12 +212,13 @@ export async function render(ctx) {
       })(),
 
       workHead,
+      doneBox,
       // كل عمل في سطرٍ واحد: نوعه واسمه وصاحبه ولغته، ثم مرحلته وإنجازه ووقته،
       // ثم أيقونات الفتح والتفصيل والحذف (ملاحظة ١٧٨)
-      list.length ? h('div.table-wrap', h('table.responsive.work-table',
+      open.length ? h('div.table-wrap', h('table.responsive.work-table',
         h('thead', h('tr', ['النوع', 'العمل', 'الخطيب أو المؤلف', 'اللغة',
           'المرحلة / المسؤول', 'الإنجاز', 'الوقت', ''].map(t => h('th', t)))),
-        h('tbody', list.map(({ m, t, cur }) => h('tr', { class: URGENCY_CLASS[urgency(t)] },
+        h('tbody', open.map(({ m, t, cur }) => h('tr', { class: URGENCY_CLASS[urgency(t)] },
           h('td', { 'data-label': 'النوع' }, h('span.small', workKind(m)),
             m.priority !== 'normal' ? h('span.badge.warn', PRIORITY[m.priority]) : null),
           h('td', { 'data-label': 'العمل' }, h('b.w-title', { title: m.title }, m.title), lateSummary(t)),
@@ -227,9 +237,56 @@ export async function render(ctx) {
                 try { if (await deleteDialog({ material: m, track: t, langLabel: langName(t.language_code) })) { toast('حُذفت من الأرشيف، ويمكن استرجاعها.', 'ok'); reload(); } }
                 catch (err) { toast(err.message, 'bad'); }
               }) }, wIcon('trash')))))))))
-        : emptyState(materials.length ? 'لا نتائج مطابقة' : 'جاهز لأول مادة', materials.length ? 'غيّر عوامل التصفية.' : 'أضف الخطبة وحدد لغاتها وفريقها لتظهر متابعتها هنا.',
+        : emptyState(materials.length ? (done.length ? 'لا عملٌ قائم' : 'لا نتائج مطابقة') : 'جاهز لأول مادة',
+          materials.length
+            ? (done.length ? 'ما في التصفية الحالية أُنجز كلُّه — انظر المنجز أسفله.' : 'غيّر عوامل التصفية.')
+            : 'أضف الخطبة وحدد لغاتها وفريقها لتظهر متابعتها هنا.',
           !materials.length && h('a.btn.primary', { href: '/app/new' }, '＋ إضافة مادة')),
       details);
+  }
+
+  // المنجز: سطرٌ مختصر لكل عمل، أخضر إن سُلّم في وقته وأحمر إن تأخّر
+  // — بتنسيق أرشيف الترجمة (ملاحظة ١٩١)
+  const doneBox = h('div.stack.done-box');
+  function drawDone(done) {
+    if (!done.length) { doneBox.replaceChildren(); return; }
+    const late = done.filter(r => hadLateness(r.t)).length;
+    const toggle = h('button.btn.sm', { type: 'button', 'aria-expanded': String(showDone) },
+      showDone ? 'إخفاء المنجز' : `عرض المنجز (${done.length})`);
+    toggle.onclick = () => { showDone = !showDone; draw(); };
+
+    const head = h('div.row.between.done-head',
+      h('div.row', { style: { gap: '8px' } },
+        h('h3', 'المنجز'),
+        h('span.badge.ok', `${done.length - late} في وقته`),
+        late ? h('span.badge.bad', `${late} متأخر`) : null),
+      toggle);
+
+    doneBox.replaceChildren(head, showDone
+      ? h('ul.meet-list.done-list', done
+          .slice()
+          .sort((a, b) => new Date(b.t.completed_at || 0) - new Date(a.t.completed_at || 0))
+          .slice(0, 120)
+          .map(({ m, t }) => {
+            const wasLate = hadLateness(t);
+            return h('li.meet-row', { class: wasLate ? 'late' : 'ontime' },
+              h('span.done-mark', { class: wasLate ? 'bad' : 'ok',
+                title: wasLate ? 'سُلّم متأخرًا' : 'سُلّم في وقته', 'aria-hidden': 'true' },
+                wasLate ? '!' : '✓'),
+              h('span.mr-title', h('b', { title: m.title }, m.title),
+                h('span.small.muted', ` · ${langName(t.language_code)}`)),
+              h('span.small.muted.mr-meta',
+                `${workKind(m)} · ${workAuthor(m)}`,
+                t.completed_at ? h('span.sep', ' · ') : null,
+                t.completed_at ? h('span', fmtDate(t.completed_at)) : null,
+                wasLate ? h('span.bad', ' · سُجّل فيه تأخير') : null),
+              h('span.row.mr-acts',
+                h('a.icon-btn', { href: `/app/tasks/${t.id}`, title: 'فتح العمل',
+                  'aria-label': 'فتح العمل' }, wIcon('open')),
+                h('button.icon-btn', { type: 'button', title: 'تفاصيل', 'aria-label': 'تفاصيل',
+                  onclick: () => showDetails(m) }, wIcon('info'))));
+          }))
+      : h('p.small.muted', 'أُنجزت وأُغلقت — تُفتح عند الحاجة، وتفصيلها في أرشيف الترجمة.'));
   }
 
   // تفصيل المرحلة: من عنده العمل الآن وكم بقي له (ملاحظة ١٢٨)

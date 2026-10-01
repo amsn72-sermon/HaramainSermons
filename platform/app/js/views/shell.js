@@ -49,7 +49,7 @@ export function policyChip() {
 // شاشةُ كلِّ صلاحية: ما أُغلق منها لا يظهر في القائمة أصلًا (ملاحظة ١٧٢)
 const NAV_PERM = {
   '/app/new': 'materials',
-  '/app/staff': 'team', '/app/staff/admins': 'team', '/app/field': 'team',
+  '/app/staff': 'team', '/app/staff/admins': 'team', '/app/field': 'team', '/app/answers': 'team',
   '/app/cards': 'cards', '/app/payroll': 'payroll', '/app/bank-accounts': 'banks',
   '/app/shifts': 'shifts', '/app/evaluation': 'evaluation',
   '/app/interpretation': 'interpretation',
@@ -90,6 +90,7 @@ export function staffShell(view, path) {
          link('/app/staff/admins', 'الحسابات الإدارية'),
          link('/app/staff', 'المترجمون المتخصصون'),
          link('/app/field', 'المرشدون المكانيون'),
+        link('/app/answers', 'إجابة السائلين'),
          link('/app/cards', 'بطاقات العمل'),
          link('/app/charter', 'ميثاق العمل'),
          link('/app/shifts', 'الحضور والانصراف'),
@@ -116,6 +117,7 @@ export function staffShell(view, path) {
          link('/app/staff/admins', 'الحسابات الإدارية'),
          link('/app/staff', 'المترجمون المتخصصون'),
          link('/app/field', 'المرشدون المكانيون'),
+        link('/app/answers', 'إجابة السائلين'),
          link('/app/cards', 'بطاقات العمل'),
          link('/app/charter', 'ميثاق العمل'),
          link('/app/payroll', 'الرواتب'),
@@ -131,8 +133,9 @@ export function staffShell(view, path) {
          link('/app/audio-guide', 'دليل التسجيل الصوتي')]),
        broadcast,
        group('حسابي', [mine, link('/about', 'عن المنصة')])]
-    : p.track === 'field'
-      // الإرشاد المكاني: لا تُسنَد إليه أعمال ترجمة، فلا قائمة مهام (ملاحظة ٩٩)
+    : ['field', 'answers'].includes(p.track) && !p.may_translate
+      // الإرشاد وإجابة السائلين: لا تُسنَد إليهما ترجمة، فلا قائمة مهام
+      // (ملاحظتا ٩٩ و١٨٦)
       ? [group('عملي', [link('/app/rooms', 'القاعات واللقاءات')]),
          broadcast, group('حسابي', [mine, mail, link('/about', 'عن المنصة')])]
       : [group('عملي', [link('/app/tasks', 'مهامي'), mail,

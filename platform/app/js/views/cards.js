@@ -435,6 +435,7 @@ export async function render(ctx) {
       return h('label.check', cb, h('span', m.full_name,
         h('span.small.muted', ` — ${ROLE_LABEL[m.role]}`),
         m.track === 'field' && h('span.badge', 'إرشاد مكاني'),
+        m.track === 'answers' && h('span.badge', 'إجابة السائلين'),
         !photoOf[m.id] && h('span.badge.warn', 'بلا صورة'),
         issuedOf[m.id] && h('span.badge.ok', 'بطاقته معتمَدة')));
     }));

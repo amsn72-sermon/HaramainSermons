@@ -25,7 +25,7 @@ function ask() {
   dialogEl = h('dialog.idle-dlg', { 'aria-labelledby': 'idle-t' },
     h('div.dlg-body',
       h('h3#idle-t', 'هل ما زلت هنا؟'),
-      h('p', 'لم يُسجَّل أي نشاط منذ مدة. سيُغلق حسابك تلقائيًّا خلال ', count, ' ثانية حفظًا لبياناتك.'),
+      h('p', 'مضت مدةٌ بلا نشاط. سيُغلق حسابك تلقائيًّا خلال ', count, ' ثانية حفظًا لبياناتك.'),
       h('div.row', stay, out)));
   document.body.append(dialogEl);
   dialogEl.showModal();

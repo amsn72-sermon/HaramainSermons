@@ -1,7 +1,7 @@
 // «بياناتي»: بيانات العضو كاملة، وصورته الشخصية، وحسابه البنكي أسفلها (ملاحظة ٨٥)
 import { h, toast, busy, dialog, fmtDate, fmtDateTime } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, ROLE_LABEL, STATUS_LABEL, langName } from '../store.js';
+import { state, ROLE_LABEL, STATUS_LABEL, TRACK_LABEL, CITY, NO_FATWA, langName } from '../store.js';
 import { PHOTO_RULES, preparePhoto, readStashed, clearStashed, dataUrlToBlob, urlToDataUrl } from '../photo.js';
 import { bankSection } from './bank.js';
 import { normalizeLayout, staticCard, HARAMAIN_LOGO, CARD } from '../carddesign.js';
@@ -20,6 +20,8 @@ export async function render(ctx) {
   ]);
   const priv = privRows[0] || {};
   const langs = langRows.map(r => r.language_code);
+  const missing = await db.rpc('profile_missing', { p_id: me.id }).catch(() => []);
+  const dataState = priv.data_status || 'incomplete';
 
   // ------------------------------------------------------------------
   // الصورة الشخصية
@@ -90,15 +92,114 @@ export async function render(ctx) {
       h('div', h('dt', 'رقم العضوية'), h('dd', { dir: 'ltr' }, me.member_no ?? '—')),
       h('div', h('dt', 'البريد الإلكتروني'), h('dd', { dir: 'ltr' }, me.email)),
       h('div', h('dt', 'الصفة'), h('dd', ROLE_LABEL[me.role] || me.role)),
-      h('div', h('dt', 'الفريق'), h('dd', me.track === 'field' ? 'الإرشاد المكاني' : 'الترجمة التخصصية')),
+      h('div', h('dt', 'الفريق'), h('dd', TRACK_LABEL[me.track] || TRACK_LABEL.translation,
+        // لا فتوى لأحدٍ البتّة: ينقل السؤال ثم ينقل الجواب (ملاحظة ١٨٦)
+        me.track === 'answers' ? h('div.small.bad', NO_FATWA) : null)),
+      me.track === 'field' ? h('div', h('dt', 'مدينة العمل'),
+        h('dd', CITY[me.city] || '—')) : null,
       priv.iqama_path ? h('div', h('dt', 'صورة الهوية أو الإقامة'),
         h('dd', docState(priv.iqama_status, priv.iqama_note, 'iqama'))) : null,
       h('div', h('dt', 'حالة الحساب'), h('dd', STATUS_LABEL[me.status] || me.status)),
       h('div', h('dt', 'تاريخ التسجيل'), h('dd', fmtDate(me.created_at))),
       h('div', h('dt', 'اللغات'),
         h('dd', langs.length ? langs.map(c => h('span.chip', langName(c))) : '—',
-          h('div.small.muted', 'تُسنَد اللغات من المنسق بحسب الاختبار.')))),
+          h('div.small.muted', dataState === 'accepted'
+            ? 'دُقِّقت لغاتك وقُبلت — تعديلها من المنسق.'
+            : 'اخترها من بطاقة «أكمل بياناتك» أعلاه، ويدققها المنسق.')))),
     h('p.small.muted', 'لتصحيح الاسم أو رقم الهوية راسل منسق المشروع — فهما يظهران في بطاقة العمل والتصاريح.'));
+
+  // ------------------------------------------------------------------
+  // أكمل بياناتك: ما بقي منها، ولغاتك، وصورة هويتك (ملاحظة ١٧٩)
+  // ------------------------------------------------------------------
+  const DATA_STATE = {
+    incomplete: ['warn', 'بياناتك لم تُرفع بعد'],
+    submitted: ['gold', 'مرفوعة للتدقيق'],
+    accepted: ['ok', 'دُقِّقت وقُبلت'],
+    returned: ['bad', 'أُعيدت لاستكمالها']
+  };
+
+  // اللغات: يختارها العضو بنفسه حتى تُقبل بياناته
+  const picked = new Set(langs);
+  const langSel = h('select', { 'aria-label': 'أضف لغة' });
+  const langChips = h('div.lang-pills.chosen');
+  const drawPicked = () => {
+    const rest = state.languages.filter(l => l.is_active && !picked.has(l.code));
+    langSel.replaceChildren(
+      h('option', { value: '' }, rest.length ? '— أضف لغة —' : '— أُضيفت كل اللغات —'),
+      ...rest.map(l => h('option', { value: l.code }, l.name_ar)));
+    langChips.replaceChildren(...(picked.size
+      ? [...picked].map(code => h('button', { type: 'button', title: 'إزالة اللغة',
+          'aria-label': `إزالة ${langName(code)}`,
+          onclick: () => { picked.delete(code); drawPicked(); } },
+          h('span.tick', { 'aria-hidden': 'true' }, '✓'), langName(code),
+          h('span.x', { 'aria-hidden': 'true' }, '×')))
+      : [h('span.small.muted', 'لم تُختر لغة بعد')]));
+  };
+  langSel.onchange = () => { if (langSel.value) { picked.add(langSel.value); drawPicked(); } };
+  drawPicked();
+
+  const langSave = h('button.btn.sm', { type: 'button' }, 'حفظ اللغات');
+  langSave.onclick = () => busy(langSave, async () => {
+    try {
+      await db.rpc('set_my_languages', { p_codes: [...picked] });
+      toast('حُفظت لغاتك.', 'ok');
+      ctx.navigate('/app/me', { replace: true });
+    } catch (e) { toast(e.message, 'bad'); }
+  });
+
+  // صورة الهوية أو الإقامة
+  const idFile = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp,application/pdf',
+    'aria-label': 'صورة الهوية أو الإقامة' });
+  const idUp = h('button.btn.sm', { type: 'button' }, priv.iqama_path ? 'تغيير الصورة' : 'رفع الصورة');
+  idUp.onclick = () => busy(idUp, async () => {
+    const file = idFile.files[0];
+    if (!file) return toast('اختر الملف أولًا.', 'bad');
+    if (file.size > 10 * 1024 * 1024) return toast('الحد الأقصى ١٠ ميغابايت.', 'bad');
+    try {
+      const ext = (file.type === 'application/pdf' ? 'pdf' : file.type.split('/')[1]) || 'jpg';
+      const path = `${me.id}/iqama-${Date.now()}.${ext}`;
+      await storage.upload('private-docs', path, file);
+      await db.update('profile_private', { id: `eq.${me.id}` }, { iqama_path: path });
+      toast('رُفعت الصورة.', 'ok');
+      ctx.navigate('/app/me', { replace: true });
+    } catch (e) { toast(e.message, 'bad'); }
+  });
+
+  const sendBtn = h('button.btn.primary', { type: 'button' }, 'أرسل بياناتي للتدقيق');
+  sendBtn.onclick = () => busy(sendBtn, async () => {
+    try {
+      await db.rpc('submit_profile_data');
+      toast('رُفعت بياناتك، ويدققها المنسق.', 'ok');
+      ctx.navigate('/app/me', { replace: true });
+    } catch (e) { toast(e.message, 'bad'); }
+  });
+
+  const [badgeKind, badgeText] = DATA_STATE[dataState] || DATA_STATE.incomplete;
+  const completeCard = dataState === 'accepted' ? null : h('section.card.stack.complete-card',
+    h('div.row.between',
+      h('h3', 'أكمل بياناتك'),
+      h('span.badge', { class: badgeKind }, badgeText)),
+    dataState === 'returned' && priv.data_note
+      ? h('p.small.bad', `ملاحظة المنسق: ${priv.data_note}`) : null,
+    h('p.small.muted', 'سجّلت عند التسجيل أربعة بيانات لا غير. وهذه بقيتها، '
+      + 'تستكملها على مهل ثم ترسلها، فيدققها المنسق ويقبلها.'),
+    (missing || []).length
+      ? h('div.stack',
+          h('b.small', 'بقي عليك'),
+          h('ul.small.tight', missing.map(x => h('li', x))))
+      : h('p.small.ok', 'اكتملت بياناتك — أرسلها للتدقيق.'),
+    h('div.card.stack',
+      h('b', 'لغاتك'),
+      h('p.small.muted', 'اللغات التي تترجم بها أو ترشد بها — لغةٌ واحدة على الأقل.'),
+      langSel, langChips, h('div.row', langSave)),
+    h('div.card.stack',
+      h('b', 'صورة الهوية أو الإقامة'),
+      h('p.small.muted', 'صورةٌ أو ملف PDF، ولا يطّلع عليها إلا المنسق ومدير المشروع.'),
+      h('div.row', idFile, idUp),
+      priv.iqama_path ? h('span.small.ok', 'مرفوعة') : null),
+    h('p.small.muted', 'والجنسية ومكان الإقامة والصورة الشخصية من بطاقتيهما في هذه الصفحة.'),
+    h('div.row', sendBtn,
+      dataState === 'submitted' ? h('span.small.muted', 'بياناتك عند المنسق الآن.') : null));
 
   // ------------------------------------------------------------------
   // بيانات يعدّلها العضو
@@ -218,6 +319,7 @@ export async function render(ctx) {
         h('label.field', 'رفع الصورة أو تغييرها', h('small', 'تُقصّ تلقائيًّا إلى مقاس ٤×٦'), picker),
         rules),
       fixed),
+    completeCard,
     shifts,
     salary,
     editable,
