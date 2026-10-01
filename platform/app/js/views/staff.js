@@ -1,10 +1,9 @@
 // شؤون الفريق: الانضمام والأعضاء، وتدقيق المستندات، والحسابات البنكية في شاشة واحدة (ملاحظة ٩٨)
 // وتحت «الفريق» ثلاث قوائم مستقلة: الإداريون، والمترجمون المتخصصون،
 // والمرشدون المكانيون (ملاحظتا ٩٩ و١٠١)
-import { h, toast, busy, dialog, fmtDateTime } from '../ui.js';
+import { h, toast, busy, dialog, fmtDateTime, confirm } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { state, isManager } from '../store.js';
-import { applyPattern } from '../page.js';
 import { render as teamRender } from './team.js';
 import { adminList as bankAdmin } from './bank.js';
 
@@ -79,8 +78,9 @@ export async function render(ctx, group = 'translators') {
     panel.replaceChildren(h('p.muted.small', 'جارٍ التحميل…'));
     try {
       if (key === 'team') panel.replaceChildren(...[
+        group === 'admins' ? registrationCard(ctx) : null,
         group === 'admins' ? securityCard(ctx) : null,
-        group === 'admins' ? namingCard() : null, team.joins, team.filters, team.table].filter(Boolean));
+        team.joins, team.filters, team.table].filter(Boolean));
       else if (key === 'docs') panel.replaceChildren(await docsSection(ctx, team, scr, group));
       else panel.replaceChildren(await bankAdmin(ctx, { parts: true, only: ids, reloadPath: `${scr.path}?tab=bank` }));
     } catch (err) { panel.replaceChildren(h('p.small.bad', err.message)); }
@@ -98,37 +98,64 @@ export async function render(ctx, group = 'translators') {
 // ---------------------------------------------------------------------
 // حماية حسابات الإدارة: إلزام التحقق بخطوتين — بيد مدير المشروع (ملاحظة ١٠٣)
 // ---------------------------------------------------------------------
-// نمط تسمية الملفات المسلَّمة — شرطٌ في العقد، ويضبطه مدير المشروع (ملاحظة ١٤٤)
-function namingCard() {
-  const TOKENS = [['doc_no', 'رقم التوثيق'], ['kind', 'نوع العمل'], ['sub', 'النوع الفرعي'],
-    ['mosque', 'الجهة'], ['hijri', 'التاريخ الهجري'], ['date', 'التاريخ الميلادي'],
-    ['lang', 'اللغة'], ['title', 'العنوان'], ['khateeb', 'الخطيب أو المؤلف']];
-  const SAMPLE = { doc_no: 'H48-EN-110001', kind: 'خطبة الجمعة من المسجد الحرام', sub: 'خطبة جمعة',
-    mosque: 'المسجد الحرام', hijri: '١٦ ربيع الآخر ١٤٤٨', date: '2026-09-18',
-    lang: 'الإنجليزية', title: 'فضل الإحسان', khateeb: 'الشيخ صالح بن حميد' };
-  const input = h('input', { value: state.filePattern || '', dir: 'ltr',
-    'aria-label': 'نمط تسمية الملفات', style: { fontFamily: 'ui-monospace, monospace' } });
-  const preview = h('div.small.muted');
-  const paint = () => { preview.textContent = 'مثال: ' + (applyPattern(input.value || '', SAMPLE) || '—'); };
-  input.addEventListener('input', paint); paint();
-  const save = h('button.btn.sm.primary', { type: 'button' }, 'حفظ النمط');
-  save.onclick = () => busy(save, async () => {
-    try {
-      await db.rpc('set_file_name_pattern', { p_pattern: input.value.trim() });
-      state.filePattern = input.value.trim();
-      toast('حُفظ نمط التسمية، ويُطبَّق على كل ما يُنزَّل بعده.', 'ok');
-    } catch (err) { toast(err.message, 'bad'); }
-  });
-  return h('div.card.stack',
-    h('h3', 'نمط تسمية الملفات المسلَّمة'),
-    h('p.small.muted', 'يُطبَّق على ملفات Word وPDF والتسجيلات وكشوف التصدير، فتخرج بأسماء موحَّدة يسهل أرشفتها واسترجاعها — كما يشترط العقد.'),
-    h('label.field', 'النمط', input),
-    preview,
-    h('div.row.wrap', TOKENS.map(([k, label]) =>
-      h('button.btn.xs', { type: 'button', title: label,
-        onclick: () => { input.value = `${input.value} {${k}}`.trim(); paint(); input.focus(); } },
-        `${label} {${k}}`))),
-    isManager() ? h('div.row', save) : h('p.small.muted', 'ضبط النمط بيد مدير المشروع.'));
+// ---------------------------------------------------------------------
+// باب التسجيل: يُفتح مدةً معلومة ثم يُغلق بنفسه (ملاحظة ١٧٤)
+// ---------------------------------------------------------------------
+function registrationCard(ctx0) {
+  const card = h('div.card.stack');
+  const url = location.origin + '/register';
+
+  const paint = async () => {
+    let st = { open: true };
+    try { st = (await db.rpc('registration_state')) || {}; st = Array.isArray(st) ? st[0] : st; }
+    catch { /* تعذّر الفحص لا يحجب الشاشة */ }
+    const open = st.open !== false;
+    const until = st.closes_at ? new Date(st.closes_at) : null;
+    const left = until ? Math.max(0, Math.round((until - Date.now()) / 60000)) : null;
+    const leftText = left === null ? null
+      : left >= 60 ? `${Math.floor(left / 60)} ساعة و${left % 60} دقيقة`
+        : `${left} دقيقة`;
+
+    const hours = h('select', { 'aria-label': 'مدة الفتح' },
+      h('option', { value: '' }, 'حتى أُغلقه بنفسي'),
+      [6, 12, 24, 48, 72, 168].map(n => h('option', { value: String(n), selected: n === 48 ? true : null },
+        n < 24 ? `${n} ساعات` : n === 24 ? 'يومًا واحدًا' : n === 168 ? 'أسبوعًا' : `${n / 24} أيام`)));
+
+    const set = (on, btn) => busy(btn, async () => {
+      if (!isManager()) return toast('فتح التسجيل وإغلاقه لمدير المشروع.', 'bad');
+      if (!on && !await confirm('إغلاق التسجيل',
+        'يُغلق باب التسجيل، فلا يُنشأ حساب جديد حتى تفتحه — ولك أن تُنشئ الحسابات يدويًّا في كل حال. متابعة؟',
+        'إغلاق التسجيل')) return;
+      try {
+        await db.rpc('set_registration', { p_open: on, p_hours: on && hours.value ? Number(hours.value) : null });
+        toast(on ? 'فُتح باب التسجيل.' : 'أُغلق باب التسجيل.', 'ok');
+        paint();
+      } catch (err) { toast(err.message, 'bad'); }
+    });
+
+    const openBtn = h('button.btn.sm.primary', { type: 'button' }, open ? 'تمديد المدة' : 'فتح التسجيل');
+    openBtn.onclick = e => set(true, e.currentTarget);
+    const closeBtn = h('button.btn.sm.danger', { type: 'button' }, 'إغلاق التسجيل');
+    closeBtn.onclick = e => set(false, e.currentTarget);
+    const copy = h('button.btn.xs', { type: 'button' }, '⧉ نسخ رابط التسجيل');
+    copy.onclick = () => navigator.clipboard.writeText(url)
+      .then(() => toast('نُسخ رابط التسجيل.', 'ok')).catch(() => toast('انسخه من شريط العنوان.', 'bad'));
+
+    card.replaceChildren(
+      h('div.row.between', h('h3', 'باب التسجيل في المنصة'),
+        h('span.badge', { class: open ? 'ok' : 'bad' }, open ? 'مفتوح' : 'مغلق')),
+      h('p.small.muted', 'العدد معروف وقليل، فالأصل إغلاقه. افتحه مدةً معلومة حتى يُسجّل من دُعي، '
+        + 'ثم يُغلق بنفسه — فلا يدخل غريبٌ لو انتشر الرابط. والمنع في قاعدة البيانات لا في الشاشة وحدها.'),
+      open && leftText
+        ? h('p.small', 'يُغلق تلقائيًّا بعد ', h('b', leftText), ' — في ', fmtDateTime(st.closes_at), '.')
+        : open ? h('p.small.warn', 'مفتوح بلا مدة — يبقى حتى تغلقه بنفسك.') : null,
+      isManager()
+        ? h('div.row.wrap', h('label.field', 'مدة الفتح', hours), openBtn, open ? closeBtn : null)
+        : h('p.small.muted', 'فتح التسجيل وإغلاقه بيد مدير المشروع.'),
+      h('p.small.muted', 'رابط التسجيل: ', h('span', { dir: 'ltr' }, url), ' ', copy));
+  };
+  paint();
+  return card;
 }
 
 function securityCard(ctx0) {

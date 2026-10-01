@@ -5,6 +5,25 @@ import { state, isAdmin, isManager, MATERIAL_SELECT, MOSQUE, MOSQUE_ANY, CITY, P
   isLateNow, hadLateness, langName, stageName } from '../store.js';
 import { statusBadge, trackTimer, progressBar, stageStrip, timelineTable, lateSummary, deleteDialog } from './parts.js';
 
+// أيقونات سطر العمل (ملاحظة ١٧٨)
+const WORK_ICONS = {
+  open: '<path d="M14 4h6v6"/><path d="M20 4L10 14"/><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>',
+  trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>'
+};
+function wIcon(name) {
+  const sp = document.createElement('span');
+  sp.className = 'ico';
+  sp.setAttribute('aria-hidden', 'true');
+  sp.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+    stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${WORK_ICONS[name]}</svg>`;
+  return sp;
+}
+// نوع العمل: الخطبة بنوعها، وغيرها بنوع مادته
+const workKind = m => m.sermon_type || m.material_type || 'مادة';
+// صاحب العمل: الخطيب أو المؤلف أو من نُسب إليه
+const workAuthor = m => m.khateeb?.name || m.author || '—';
+
 // موعد ما هو قائم الآن: الاستلام قبل القبول، ثم موعد المرحلة الجارية
 const dueOf = t => (t.status === 'awaiting_receipt' ? t.receipt_due_at : currentStage(t)?.due_at) || null;
 const hoursLeft = t => { const d = dueOf(t); return d ? (new Date(d) - Date.now()) / 36e5 : null; };
@@ -184,20 +203,30 @@ export async function render(ctx) {
       })(),
 
       workHead,
-      list.length ? h('div.table-wrap', h('table.responsive',
-        h('thead', h('tr', ['المادة واللغة', 'المرحلة / المسؤول', 'الإنجاز', 'الوقت', ''].map(t => h('th', t)))),
+      // كل عمل في سطرٍ واحد: نوعه واسمه وصاحبه ولغته، ثم مرحلته وإنجازه ووقته،
+      // ثم أيقونات الفتح والتفصيل والحذف (ملاحظة ١٧٨)
+      list.length ? h('div.table-wrap', h('table.responsive.work-table',
+        h('thead', h('tr', ['النوع', 'العمل', 'الخطيب أو المؤلف', 'اللغة',
+          'المرحلة / المسؤول', 'الإنجاز', 'الوقت', ''].map(t => h('th', t)))),
         h('tbody', list.map(({ m, t, cur }) => h('tr', { class: URGENCY_CLASS[urgency(t)] },
-          h('td', { 'data-label': 'المادة' }, h('b', m.title), h('span.sub', `${langName(t.language_code)} · ${MOSQUE_ANY[m.mosque] || '—'}${m.priority !== 'normal' ? ' · ' + PRIORITY[m.priority] : ''}`), lateSummary(t)),
+          h('td', { 'data-label': 'النوع' }, h('span.small', workKind(m)),
+            m.priority !== 'normal' ? h('span.badge.warn', PRIORITY[m.priority]) : null),
+          h('td', { 'data-label': 'العمل' }, h('b.w-title', { title: m.title }, m.title), lateSummary(t)),
+          h('td', { 'data-label': 'الخطيب أو المؤلف' }, h('span.small', workAuthor(m)),
+            h('span.sub', MOSQUE_ANY[m.mosque] || '')),
+          h('td', { 'data-label': 'اللغة' }, h('span.small', langName(t.language_code))),
           h('td', { 'data-label': 'المرحلة' }, statusBadge(t), h('span.sub', cur?.assignee?.full_name || (t.status === 'awaiting_receipt' ? t.stages[0]?.assignee?.full_name : '') || '')),
           h('td', { 'data-label': 'الإنجاز' }, progressBar(t)),
           h('td', { 'data-label': 'الوقت' }, trackTimer(t)),
-          h('td', h('div.row',
-            h('a.btn.sm', { href: `/app/tasks/${t.id}` }, 'فتح'),
-            h('button.btn.sm', { type: 'button', onclick: () => showDetails(m) }, 'تفاصيل'),
-            isManager() && h('button.btn.sm.danger', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
-              try { if (await deleteDialog({ material: m, track: t, langLabel: langName(t.language_code) })) { toast('حُذفت من الأرشيف، ويمكن استرجاعها.', 'ok'); reload(); } }
-              catch (err) { toast(err.message, 'bad'); }
-            }) }, 'حذف'))))))))
+          h('td', h('div.row.w-acts',
+            h('a.icon-btn', { href: `/app/tasks/${t.id}`, title: 'فتح العمل', 'aria-label': 'فتح العمل' }, wIcon('open')),
+            h('button.icon-btn', { type: 'button', title: 'تفاصيل', 'aria-label': 'تفاصيل',
+              onclick: () => showDetails(m) }, wIcon('info')),
+            isManager() && h('button.icon-btn.danger', { type: 'button', title: 'حذف', 'aria-label': 'حذف',
+              onclick: e => busy(e.currentTarget, async () => {
+                try { if (await deleteDialog({ material: m, track: t, langLabel: langName(t.language_code) })) { toast('حُذفت من الأرشيف، ويمكن استرجاعها.', 'ok'); reload(); } }
+                catch (err) { toast(err.message, 'bad'); }
+              }) }, wIcon('trash')))))))))
         : emptyState(materials.length ? 'لا نتائج مطابقة' : 'جاهز لأول مادة', materials.length ? 'غيّر عوامل التصفية.' : 'أضف الخطبة وحدد لغاتها وفريقها لتظهر متابعتها هنا.',
           !materials.length && h('a.btn.primary', { href: '/app/new' }, '＋ إضافة مادة')),
       details);

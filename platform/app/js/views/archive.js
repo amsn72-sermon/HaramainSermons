@@ -1,10 +1,10 @@
 // أرشيف أعمال الترجمة: يُدخَل ببطاقات الأنواع كبطاقات المتابعة، ثم بطاقات الخطب
 // بأنواعها، ثم قائمة الأعمال — وفي كل مستوى بحثٌ وفلترة وتصدير (ملاحظتا ١٣٧ و١٣٨)
-import { h, toast, busy, dialog, emptyState, fmtDate, fmtDateTime, fmtSermonDate } from '../ui.js';
+import { h, toast, busy, dialog, emptyState, fmtDate, fmtDateTime, fmtSermonDate, fmtHijri } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { state, langName, hadLateness, isManager, MATERIAL_TYPES, SERMON_TYPES } from '../store.js';
 import { downloadDocx, printTranslation } from '../export.js';
-import { heading, fileName } from '../page.js';
+import { heading, fileName, applyPattern } from '../page.js';
 import { exportExcel, exportPdf, exportWord } from '../teamexport.js';
 import { reopenDialog } from './revise.js';
 import { deleteDialog, restoreFromArchive } from './parts.js';
@@ -44,6 +44,66 @@ const todayMonth = () => { const d = new Date(); return `${d.getFullYear()}-${tw
 
 let player = null;          // مشغّل واحد للأرشيف كله
 let playingBtn = null;
+
+// ---------------------------------------------------------------------
+// نمط تسمية الملفات المسلَّمة: سطرٌ مختصر في الأرشيف حيث تُصدَّر الملفات،
+// لا بطاقةٌ في شاشة الحسابات (ملاحظتا ١٤٤ و١٧٦)
+// ---------------------------------------------------------------------
+const NAME_TOKENS = [['doc_no', 'رقم التوثيق'], ['kind', 'نوع العمل'], ['sub', 'النوع الفرعي'],
+  ['mosque', 'الجهة'], ['hijri', 'التاريخ الهجري'], ['date', 'التاريخ الميلادي'],
+  ['lang', 'اللغة'], ['title', 'العنوان'], ['khateeb', 'الخطيب أو المؤلف']];
+const NAME_SAMPLE = { doc_no: 'H48-EN-110001', kind: 'خطبة الجمعة من المسجد الحرام',
+  sub: 'خطبة جمعة', mosque: 'المسجد الحرام', hijri: '١٦ ربيع الآخر ١٤٤٨', date: '2026-09-18',
+  lang: 'الإنجليزية', title: 'فضل الإحسان', khateeb: 'الشيخ صالح بن حميد' };
+
+function namingLine() {
+  const line = h('div.naming-line');
+  const paint = () => {
+    const sample = applyPattern(state.filePattern || '', NAME_SAMPLE) || '—';
+    const btn = h('button.btn.xs', { type: 'button' }, isManager() ? 'تغيير' : 'عرض');
+    btn.onclick = () => openNaming(paint);
+    line.replaceChildren(
+      h('span.small.muted', 'تسمية الملفات المسلَّمة:'),
+      h('code.small', { dir: 'ltr', title: state.filePattern || '' }, sample),
+      btn);
+  };
+  paint();
+  return line;
+}
+
+async function openNaming(done) {
+  const input = h('input', { value: state.filePattern || '', dir: 'ltr',
+    'aria-label': 'نمط تسمية الملفات', disabled: !isManager() || null,
+    style: { fontFamily: 'ui-monospace, monospace' } });
+  const preview = h('div.small.muted');
+  const paint = () => { preview.textContent = 'مثال: ' + (applyPattern(input.value || '', NAME_SAMPLE) || '—'); };
+  input.addEventListener('input', paint); paint();
+
+  const res = await dialog({
+    title: 'نمط تسمية الملفات المسلَّمة',
+    body: h('div.stack',
+      h('p.small.muted', 'يُطبَّق على ملفات Word وPDF والتسجيلات وكشوف التصدير، '
+        + 'فتخرج بأسماء موحَّدة يسهل أرشفتها واسترجاعها — كما يشترط العقد.'),
+      h('label.field', 'النمط', input),
+      preview,
+      isManager() ? h('div.row.wrap', NAME_TOKENS.map(([k, label]) =>
+        h('button.btn.xs', { type: 'button', title: label,
+          onclick: () => { input.value = `${input.value} {${k}}`.trim(); paint(); input.focus(); } },
+          `${label} {${k}}`))) : null,
+      isManager() ? null : h('p.small.muted', 'ضبط النمط بيد مدير المشروع.')),
+    buttons: isManager()
+      ? [{ label: 'حفظ النمط', kind: 'primary', value: () => input.value.trim() },
+         { label: 'إلغاء', value: null }]
+      : [{ label: 'إغلاق', value: null }]
+  });
+  if (res === null || res === undefined) return;
+  try {
+    await db.rpc('set_file_name_pattern', { p_pattern: res });
+    state.filePattern = res;
+    toast('حُفظ نمط التسمية، ويُطبَّق على كل ما يُنزَّل بعده.', 'ok');
+    done && done();
+  } catch (err) { toast(err.message, 'bad'); }
+}
 
 export async function render(ctx) {
   const fetched = await db.select('tracks', {
@@ -128,7 +188,7 @@ export async function render(ctx) {
       String(i + 1), t.doc_no || '—', t.material.material_type || '—', t.material.sermon_type || '—',
       SCOPE_LABEL[t.material.mosque] || 'مادة عامة', t.material.title || '—',
       t.material.khateeb?.name || t.material.author || '—',
-      t.material.sermon_date ? fmtSermonDate(t.material.sermon_date) : '—',
+      t.material.sermon_date ? fmtHijri(t.material.sermon_date) : '—',
       langName(t.language_code), t.completed_at ? fmtDateTime(t.completed_at) : '—',
       t.is_published ? 'منشورة' : 'غير منشورة', doneBy(t).join('، ') || '—'
     ]);
@@ -420,7 +480,8 @@ export async function render(ctx) {
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'الأرشيف'), h('h1', 'أرشيف أعمال الترجمة'),
       h('p.muted', 'كل عمل مكتمل برقم توثيقه، مرتَّبًا بأنواعه — تصفّحٌ بالبطاقات، وكشفٌ يُطبع ويُسلَّم.')),
-      h('span.badge.gold', `${rows.length} ترجمة نهائية`)),
+      h('div.row', { style: { marginInlineStart: 'auto', order: 2 } },
+        namingLine(), h('span.badge.gold', `${rows.length} ترجمة نهائية`))),
     h('div.grid.arch-filters', { style: { marginBottom: '16px' } },
       h('label.field', 'البحث', q), h('label.field', 'اللغة', lang),
       h('label.field', 'الجهة', scope), h('label.field', 'المدة', mode),
