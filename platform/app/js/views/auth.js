@@ -72,6 +72,19 @@ export async function login(ctx) {
 
 // ---------------------------------------------------------------------
 export async function register(ctx) {
+  // باب التسجيل: يفتحه مدير المشروع ويغلقه، فلا يُملأ نموذجٌ يُردّ (ملاحظة ١٧٤)
+  const reg = await db.rpc('registration_state').then(r => (Array.isArray(r) ? r[0] : r) || {})
+    .catch(() => ({ open: true }));
+  if (reg.open === false) {
+    return frame(h('div.card.auth-card.stack',
+      h('h2', 'التسجيل مغلق حاليًّا'),
+      h('p', reg.note || 'باب التسجيل في المنصة مغلق في الوقت الحالي. '
+        + 'إن كنت مدعوًّا للانضمام إلى فريق الترجمة فراجع منسق المشروع، '
+        + 'فيُفتح لك أو يُنشأ حسابك مباشرة.'),
+      h('div.row', h('a.btn', { href: '/login' }, 'لديك حساب؟ الدخول'),
+        h('a.btn.ghost', { href: '/about' }, 'عن المنصة'))));
+  }
+
   const f = {
     full_name: h('input', { autocomplete: 'name', required: true }),
     email: h('input', { type: 'email', autocomplete: 'email', required: true, dir: 'ltr' }),
