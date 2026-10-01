@@ -1135,5 +1135,31 @@ button.room-tile:hover { border-color: var(--gold); transform: translateY(-2px);
   .meet-row { grid-template-columns: 1fr auto; }
   .meet-row .mr-meta { grid-column: 1 / -1; order: 3; }
 }
+/* قائمة العمل: سطرٌ واحد لكل عمل، وأيقوناتٌ لا أزرارٌ عريضة (ملاحظة ١٧٨) */
+.work-table td { vertical-align: middle; }
+.work-table .w-title { display: inline-block; max-width: 30ch; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.work-table .w-acts { gap: 2px; flex-wrap: nowrap; justify-content: flex-end; }
+.work-table .icon-btn { width: 30px; height: 30px; }
+@media (max-width: 900px) { .work-table .w-title { max-width: 22ch; } }
+
+/* سطر نمط التسمية في الأرشيف — مختصر لا بطاقة (ملاحظة ١٧٦) */
+.naming-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
+.naming-line code { max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--accent-text); font-size: .76rem; }
+@media (max-width: 640px) { .naming-line code { max-width: 18ch; } }
+
+/* قاعة اللقاء داخل المنصة (ملاحظة ١٧٥) */
+.meet-frame { width: 100%; height: min(72vh, 720px); min-height: 380px; border-radius: 12px;
+  overflow: hidden; border: 1px solid var(--border); background: #000; }
+.meet-frame iframe { width: 100%; height: 100%; border: 0; display: block; }
+.meet-frame:fullscreen { height: 100vh; border-radius: 0; border: 0; }
+.knock-card { border-inline-start: 3px solid var(--gold); margin-bottom: 12px; }
+.knock-box { gap: 6px; }
+.knock-row { padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg); gap: 10px; }
+@media (max-width: 560px) { .meet-frame { height: 60vh; } }
+
 .guide ul { margin: 0; padding-inline-start: 18px; }
 .guide li { margin-bottom: 3px; }
