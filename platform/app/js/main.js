@@ -44,6 +44,7 @@ const routes = [
   ['/app/evaluation', () => import('./views/evaluation.js'), true, 'reports'],
   ['/app/glossary', () => import('./views/glossary.js'), true],
   ['/app/rooms', () => import('./views/rooms.js'), true],
+  ['/app/meet/:kind/:id', () => import('./views/meet.js'), true],
   ['/app/revise/:material', () => import('./views/revise.js'), true, true]
 ];
 
