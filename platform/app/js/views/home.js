@@ -211,6 +211,7 @@ export async function render(ctx) {
           })));
       })(),
 
+      dueBox,
       workHead,
       doneBox,
       // كل عمل في سطرٍ واحد: نوعه واسمه وصاحبه ولغته، ثم مرحلته وإنجازه ووقته،
@@ -247,6 +248,46 @@ export async function render(ctx) {
 
   // المنجز: سطرٌ مختصر لكل عمل، أخضر إن سُلّم في وقته وأحمر إن تأخّر
   // — بتنسيق أرشيف الترجمة (ملاحظة ١٩١)
+  // ---------- مواعيدُ النصوص بعدد الصفحات ونوع المهمة (ملاحظة ١٩٧) ----------
+  // العقد يجعل مدّة تسليم النصوص بعدد الصفحات ونوع المهمة، فتُعرف من المادة
+  // نفسها: ما قارب موعدَه وما تجاوزه — قبل أن يُسأل عنه.
+  const dueBox = h('div.stack');
+  const ar = n => Number(n || 0).toLocaleString('en-US');
+  const URG = { normal: 'اعتيادية', urgent: 'عاجلة', emergency: 'طارئة' };
+  (async () => {
+    let rows = [];
+    try { rows = await db.rpc('texts_due'); } catch { return; }
+    rows = Array.isArray(rows) ? rows : [];
+    // ما مضى موعدُه، وما بقي له أقلُّ من ربع مهلته
+    const hot = rows.filter(r => r.overdue
+      || Number(r.minutes_left) <= Number(r.hours) * 60 / 4);
+    if (!hot.length) return;
+    const late = hot.filter(r => r.overdue).length;
+    dueBox.replaceChildren(h('div.card.stack', { style: { margin: '16px 0' } },
+      h('div.row.between',
+        h('h3', 'مواعيدُ النصوص'),
+        h('span.badge', { class: late ? 'bad' : 'warn' },
+          late ? `${ar(late)} تجاوز موعدَه` : `${ar(hot.length)} قارب موعدَه`)),
+      h('p.small.muted', { style: { margin: 0 } },
+        'مدّةُ التسليم في العقد بعدد الصفحات ونوع المهمة، وتُحسب من وقت الاستلام.'),
+      h('div.stack', hot.slice(0, 8).map(r => h('div.row.between.meet-row.due-row',
+        { class: r.overdue ? 'overdue' : 'soon' },
+        h('div',
+          h('b', r.title),
+          h('span.sub', [r.material_type, URG[r.urgency] || r.urgency,
+            r.pages ? `${ar(r.pages)} صفحة` : null, r.label,
+            r.needs_review ? 'سطرٌ يحتاج استيضاحًا من الهيئة' : null]
+            .filter(Boolean).join(' · '))),
+        h('div.row',
+          h('span.small', { class: r.overdue ? 'bad' : 'warn' },
+            r.overdue
+              ? `تجاوز بـ${ar(Math.round(-Number(r.minutes_left) / 60))} ساعة`
+              : `بقي ${ar(Math.max(0, Math.round(Number(r.minutes_left) / 60)))} ساعة`),
+          h('span.badge', `${ar(r.open_tracks)} لغة مفتوحة`))))),
+      hot.length > 8
+        ? h('p.small.muted', `وغيرُها ${ar(hot.length - 8)}.`) : null));
+  })();
+
   const doneBox = h('div.stack.done-box');
   function drawDone(done) {
     if (!done.length) { doneBox.replaceChildren(); return; }
@@ -335,7 +376,8 @@ export async function render(ctx) {
       return el;
     };
     prodBox.replaceChildren(
-      tile('✍', 'الكلمات المترجَمة', n(row.words), 'مجموع ما سُلّم من ترجمة'),
+      tile('✍', 'الكلمات المحتسَبة', n(row.counted_words),
+        'كلمات الأصل العربي للنصوص — والخطبُ بالمقطوعية'),
       tile('🎙', 'دقائق التسجيل', n(Math.round(Number(row.audio_seconds || 0) / 60)), 'الصوت المسلَّم مع الترجمات'));
   }).catch(() => {});
 

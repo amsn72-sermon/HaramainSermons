@@ -7,6 +7,7 @@ import { isManager } from '../store.js';
 import { buildXlsx, downloadBlob } from '../xlsx.js';
 import { scopeSection } from './scope.js';
 import { opsSection } from '../opsreport.js';
+import { penaltySection } from '../penalties.js';
 
 const ar = n => Number(n || 0).toLocaleString('en-US');
 const money = n => Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -220,7 +221,8 @@ export async function render(ctx) {
     ['scope', 'نطاق العقد'],
     ['qty', 'البنود والكميات'],
     ['claim', 'مسودّة المستخلص'],
-    ['ops', 'التقرير الشهري']
+    ['ops', 'التقرير الشهري'],
+    ['penalties', 'الجزاءات']
   ];
   const want = TABS.some(t => t[0] === ctx.query?.get('tab')) ? ctx.query.get('tab') : 'scope';
   const panel = h('div.staff-panel');
@@ -243,6 +245,7 @@ export async function render(ctx) {
         key === 'qty' ? quantitiesPane()
         : key === 'claim' ? claimPane()
         : key === 'ops' ? await opsSection()
+        : key === 'penalties' ? await penaltySection()
         : scopeSection());
     } catch (err) { panel.replaceChildren(h('p.small.bad', err.message)); }
   }
@@ -251,10 +254,11 @@ export async function render(ctx) {
     h('div.page-head',
       h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'بنود العقد والمستخلص'),
         h('p.muted', 'نطاقُ العقد كما نصّ عليه، وكمياتُ الإنجاز أمام الكميات التعاقدية، '
-          + 'ومسودّةُ مستخلصٍ شهري، والتقريرُ الشهري للتكاليف التشغيلية.'))),
+          + 'ومسودّةُ مستخلصٍ شهري، والتقريرُ الشهري للتكاليف التشغيلية، '
+          + 'وجزاءاتُ العقد بسقفها.'))),
     h('div.tabs', { role: 'tablist' }, btns),
     panel,
-    admin ? null : h('p.small.muted', 'اطّلاعٌ فقط.'));
+    admin ? null : h('p.small.muted', 'والتعديلُ في هذه الشاشة لمدير المشروع.'));
   await show(want);
   return view;
 }

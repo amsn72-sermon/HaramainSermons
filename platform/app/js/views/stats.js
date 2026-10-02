@@ -15,8 +15,8 @@ const minutes = sec => Math.round((sec || 0) / 60);
 
 // المجاميع: الصفحات تُجمع صفحةً صفحة لتطابق عمود الجدول
 const sums = list => ({
-  words: list.reduce((s, r) => s + (r.words || 0), 0),
-  pages: list.reduce((s, r) => s + pagesOf(r.words), 0),
+  words: list.reduce((s, r) => s + (r.source_words || 0), 0),
+  pages: list.reduce((s, r) => s + pagesOf(r.source_words), 0),
   sec: list.reduce((s, r) => s + (r.audio_seconds || 0), 0)
 });
 
@@ -58,7 +58,7 @@ export async function render(ctx) {
     const d = r.sermon_date || (r.added_at || '').slice(0, 10);
     if (f.from.value && d && d < f.from.value) return false;
     if (f.to.value && d && d > f.to.value) return false;
-    return r.words > 0 || r.audio_seconds > 0;
+    return r.source_words > 0 || r.words > 0 || r.audio_seconds > 0;
   };
 
   // ---------------- عدّادات الأقسام (ملاحظة ١٦٩) ----------------
@@ -80,11 +80,11 @@ export async function render(ctx) {
     const words = countsWords(type);                 // الخطب بالخطبة لا بالكلمة (ملاحظة ١٥٦)
     const g = sums(list);
     const head = ['العنوان', ...(sermon ? ['النوع'] : []), 'التاريخ', 'اللغة',
-      ...(words ? ['الكلمات', 'الصفحات'] : []), ...(sermon ? ['الدقائق'] : [])];
+      ...(words ? ['كلمات الأصل', 'الصفحات'] : []), ...(sermon ? ['الدقائق'] : [])];
     const body = list.map(r => {
       const cells = [r.title, ...(sermon ? [rowTitle(r)] : []),
         r.sermon_date ? fmtSermonDate(r.sermon_date) : fmtDate(r.added_at), langName(r.language_code),
-        ...(words ? [ar(r.words), ar(pagesOf(r.words))] : []),
+        ...(words ? [ar(r.source_words), ar(pagesOf(r.source_words))] : []),
         ...(sermon ? [ar(minutes(r.audio_seconds))] : [])];
       return h('tr', cells.map((v, i) => h('td', { 'data-label': head[i] }, v)));
     });
@@ -93,7 +93,7 @@ export async function render(ctx) {
 
     return h('section.card.stack',
       h('div.row.between', h('h3', type),
-        h('span.badge', words ? `${ar(g.words)} كلمة · ${ar(g.pages)} صفحة`
+        h('span.badge', words ? `${ar(g.words)} كلمة من الأصل · ${ar(g.pages)} صفحة`
           : `${ar(list.length)} عملًا · بالخطبة لكل لغة`)),
       h('div.table-wrap', h('table.responsive.prod-table',
         h('thead', h('tr', head.map(t => h('th', t)))),
@@ -227,17 +227,17 @@ export async function render(ctx) {
     const wordKinds = [...new Set([...MATERIAL_TYPES.filter(t => UNIT_OF(t) === 'word'),
       ...words.map(r => r.material_type)])].filter(Boolean);
     const wordTiles = tiles(
-      tile(ar(wsumAll.words), 'كلمة في الترجمة المسلَّمة', `${ar(wsumAll.pages)} صفحة تقديرًا`),
+      tile(ar(wsumAll.words), 'كلمة في الأصل العربي', 'ما يحتسب به العقد'),
       ...wordKinds.map(t => {
         const l = words.filter(r => (r.material_type || 'مادة') === t);
-        return tile(ar(sums(l).words), `كلمات ${t}`, `${ar(l.length)} عملًا`);
+        return tile(ar(sums(l).words), `كلمات أصل ${t}`, `${ar(l.length)} عملًا`);
       }));
     const wordTable = h('section.card.stack',
       h('div.row.between', h('h3', 'النصوص والكتب والمطويات والمنشورات والتوجيهات'),
         h('span.badge.gold', UNIT_LABEL.word)),
       wordTiles,
       h('div.table-wrap', h('table.responsive',
-        h('thead', h('tr', ['نوع المادة', 'الأعمال', 'الكلمات', 'الصفحات'].map(t => h('th', t)))),
+        h('thead', h('tr', ['نوع المادة', 'الأعمال', 'كلمات الأصل', 'الصفحات'].map(t => h('th', t)))),
         h('tbody', (() => {
           const kinds = [...new Set(words.map(r => r.material_type || 'مادة'))];
           return kinds.length ? kinds.map(k => {
@@ -462,9 +462,9 @@ export async function counterChip() {
     const t = await db.rpc('production_totals');
     const row = Array.isArray(t) ? t[0] : t;
     if (!row) return null;
-    const words = Number(row.words || 0);
+    const words = Number(row.counted_words || 0);
     return h('a.prod-chip', { href: '/app/stats', title: 'دليل الإنتاج' },
-      h('b', ar(words)), h('span', 'كلمة مترجَمة'),
+      h('b', ar(words)), h('span', 'كلمة محتسَبة'),
       h('span.sep', '·'), h('b', ar(minutes(row.audio_seconds))), h('span', 'دقيقة'));
   } catch { return null; }
 }

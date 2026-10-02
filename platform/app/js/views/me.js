@@ -1,7 +1,7 @@
 // «بياناتي»: بيانات العضو كاملة، وصورته الشخصية، وحسابه البنكي أسفلها (ملاحظة ٨٥)
 import { h, toast, busy, dialog, fmtDate, fmtDateTime } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, ROLE_LABEL, STATUS_LABEL, TRACK_LABEL, CITY, NO_FATWA, langName } from '../store.js';
+import { state, ROLE_LABEL, STATUS_LABEL, TRACK_LABEL, CITY, NO_FATWA, langName, roleLabel} from '../store.js';
 import { PHOTO_RULES, preparePhoto, readStashed, clearStashed, dataUrlToBlob, urlToDataUrl } from '../photo.js';
 import { bankSection } from './bank.js';
 import { normalizeLayout, staticCard, HARAMAIN_LOGO, CARD } from '../carddesign.js';
@@ -91,7 +91,7 @@ export async function render(ctx) {
         h('dd', { dir: 'ltr' }, priv.national_id || '—')),
       h('div', h('dt', 'رقم العضوية'), h('dd', { dir: 'ltr' }, me.member_no ?? '—')),
       h('div', h('dt', 'البريد الإلكتروني'), h('dd', { dir: 'ltr' }, me.email)),
-      h('div', h('dt', 'الصفة'), h('dd', ROLE_LABEL[me.role] || me.role)),
+      h('div', h('dt', 'الصفة'), h('dd', roleLabel(me))),
       h('div', h('dt', 'الفريق'), h('dd', TRACK_LABEL[me.track] || TRACK_LABEL.translation,
         // لا فتوى لأحدٍ البتّة: ينقل السؤال ثم ينقل الجواب (ملاحظة ١٨٦)
         me.track === 'answers' ? h('div.small.bad', NO_FATWA) : null)),
@@ -349,7 +349,7 @@ async function cardSection(me, priv, langs, issued, settings) {
     valid_until_text: validUntil ? fmtDate(validUntil) : ''
   };
   const langsText = langs.map(c => langName(c)).join(' · ');
-  const roleLabel = ROLE_LABEL[me.role] || me.role;
+  const myRoleLabel = roleLabel(me);
 
   const logoSrc = settings.logo_kind === 'none' ? null
     : settings.logo_kind === 'custom' && settings.logo_path
@@ -365,7 +365,7 @@ async function cardSection(me, priv, langs, issued, settings) {
     try { customUrls[c.id] = await storage.signedUrl('brand', c.path, 600); } catch { /* تُتجاوز */ }
   }));
 
-  const build = scale => staticCard(h, { layout, member: me, cfg, roleLabel, langsText, logoSrc, photoUrl, customUrls, scale });
+  const build = scale => staticCard(h, { layout, member: me, cfg, roleLabel: myRoleLabel, langsText, logoSrc, photoUrl, customUrls, scale });
 
   const expired = validUntil && new Date(validUntil) < new Date(new Date().toDateString());
   const showBtn = h('button.btn.primary', { type: 'button' }, 'إبراز البطاقة');
@@ -373,7 +373,7 @@ async function cardSection(me, priv, langs, issued, settings) {
     // تكبير يملأ الشاشة دون أن يتجاوزها — تُبرز على الجوال كما على الحاسب
     title: cfg.title,
     body: h('div.card-show', build(Math.max(3.2, Math.min(10, (Math.min(window.innerWidth, 760) - 76) / CARD.w))),
-      h('p.small.muted', `${me.full_name} — ${roleLabel}${cfg.valid_until_text ? ` · سارية حتى ${cfg.valid_until_text}` : ''}`)),
+      h('p.small.muted', `${me.full_name} — ${myRoleLabel}${cfg.valid_until_text ? ` · سارية حتى ${cfg.valid_until_text}` : ''}`)),
     buttons: [{ label: 'إغلاق', value: null }]
   });
 

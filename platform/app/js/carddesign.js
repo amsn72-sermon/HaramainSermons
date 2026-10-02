@@ -40,12 +40,38 @@ export const COLORS = [
 
 // ثلاثة قوالب جاهزة: يختار المدير أقربها إلى ما يريد ثم يعدّل عليه
 export const PRESETS = [
-  ['classic', 'رسمي داكن — شريط علوي'],
-  ['sidebar', 'شريط جانبي — الصورة والشعار معًا'],
-  ['light',   'فاتح بإطار ذهبي']
+  ['classic',  'رسمي داكن — شريط علوي'],
+  ['haramain', 'الحرمين — رأسٌ داكن وحقلٌ مؤطَّر'],
+  ['sidebar',  'شريط جانبي — الصورة والشعار معًا'],
+  ['light',    'فاتح بإطار ذهبي']
 ];
 
 export const PRESET_LAYOUT = {
+  // ٠) «الحرمين»: رأسٌ داكن تحته خطٌّ ذهبي، والاسمُ في حقلٍ مؤطَّر،
+  //    والصورةُ إلى يسار البيانات، وسطرٌ أسفل للصلاحية والتوقيع
+  haramain: () => ({
+    v: 1, custom: [],
+    card: { bg: '#ffffff', border: '#bc9661' },
+    band: { show: true, side: 'top', h: 14.5, bg: '#1a232d', line: '#bc9661', lineH: 1 },
+    rules: {
+      top:    { show: false, x: 4, y: 15.8, w: 77.6, h: 0.3, color: '#bc9661' },
+      bottom: { show: true,  x: 5, y: 41.2, w: 75.6, h: 0.3, color: '#d8cfbd' }
+    },
+    items: {
+      logo:      { x: 68.5, y: 2.2,  w: 14,   show: true },
+      title:     { x: 4,    y: 3.4,  w: 62,   size: 9.2, bold: true,  align: 'right', color: '#ffffff', show: true },
+      subtitle:  { x: 4,    y: 8.8,  w: 62,   size: 6,   bold: false, align: 'right', color: '#d5bd87', show: true },
+      photo:     { x: 66.5, y: 18,   w: 15,   show: true },
+      name:      { x: 5,    y: 18.6, w: 58,   size: 9.6, bold: true,  align: 'right', color: '#1c1a17',
+                   box: true, boxColor: '#bc9661', boxW: 0.4, show: true },
+      role:      { x: 6,    y: 26.4, w: 56,   size: 7,   bold: true,  align: 'right', color: '#8a6f3c', show: true },
+      langs:     { x: 6,    y: 30.8, w: 56,   size: 6.6, bold: false, align: 'right', color: '#55503f', show: true },
+      member_no: { x: 6,    y: 35,   w: 56,   size: 6.8, bold: false, align: 'right', color: '#6b6257', show: true },
+      official:  { x: 44,   y: 42.6, w: 37,   size: 6.4, bold: true,  align: 'right', color: '#55503f', show: true },
+      valid:     { x: 5,    y: 42.6, w: 36,   size: 6.2, bold: false, align: 'left',  color: '#55503f', show: true }
+    }
+  }),
+
   // ١) شريط داكن أعلى البطاقة، والصورة إلى اليمين
   classic: () => ({
     v: 1, custom: [],
@@ -233,6 +259,13 @@ export function itemStyle(it, key) {
     s.color = it.color || '#1c1a17';
     s.whiteSpace = 'pre-line';
     if (it.font && FONT_KEYS.includes(it.font)) s.fontFamily = fontStack(it.font);
+  }
+  // إطارٌ حول العنصر إن طُلب: حقلٌ مؤطَّر كما في قالب «الحرمين»
+  if (it.box) {
+    s.border = `${it.boxW || 0.4}mm solid ${it.boxColor || '#bc9661'}`;
+    s.borderRadius = '1.2mm';
+    s.padding = '0.8mm 1.6mm';
+    s.boxSizing = 'border-box';
   }
   return s;
 }

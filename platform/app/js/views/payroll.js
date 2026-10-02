@@ -3,7 +3,7 @@
 // (ملاحظتا ١١٦ و١١٨)
 import { h, toast, busy, confirm, dialog, req, fmtDate, fmtDateTime } from '../ui.js';
 import { db } from '../sb.js';
-import { isManager, ROLE_LABEL, langName } from '../store.js';
+import { isManager, ROLE_LABEL, langName, roleLabel} from '../store.js';
 import { PAY_TYPE, PAYROLL_STATUS, WORK_KIND, WORK_KINDS, RATE_BASIS, kindName, basisName, money, monthLabel, monthStart, thisMonth, today } from '../pay.js';
 import { exportExcel, exportPdf, exportWord } from '../teamexport.js';
 
@@ -162,7 +162,7 @@ function ratesSection(members, payOf, priceOf, overOf, langsOf) {
     const langs = (langsOf?.get(m.id) || []).map(langName);
     return h('tr',
       h('td', { 'data-label': 'العضو' }, h('b', m.full_name), h('div.small.muted', m.member_no || '—')),
-      h('td', { 'data-label': 'الفريق' }, groupOf(m), h('div.small.muted', ROLE_LABEL[m.role])),
+      h('td', { 'data-label': 'الفريق' }, groupOf(m), h('div.small.muted', roleLabel(m))),
       h('td', { 'data-label': 'اللغة' }, langs.length ? langs.join('، ') : '—'),
       h('td', { 'data-label': 'نوع الأجر' }, type),
       h('td', { 'data-label': 'الشهري' }, monthly),

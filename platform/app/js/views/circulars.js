@@ -469,6 +469,34 @@ export async function render(ctx) {
         onclick: e => busy(e.currentTarget, () => archive(c, !archived)) }, archived ? 'إعادة النشر' : 'أرشفة'),
       isManager() && h('button.btn.sm.danger', { type: 'button', onclick: e => busy(e.currentTarget, () => remove(c)) }, 'حذف')) : null;
 
+    // ما وقّعتَه أو ما لا يُطلب فيه توقيعٌ لا يحتاج بطاقةً كاملة: يُعرض سطرًا
+    // واحدًا ليجتمع في الصفحة عددٌ منه، ويُفتح تفصيلُه بضغطة (ملاحظة ١٩٩)
+    const settled = !pending && !(c.blocking && !archived)
+      && (!mine || !c.require_ack || !!mine.acked_at);
+    if (settled) {
+      const more = admin ? h('div.row.wrap.circ-admin', { hidden: true }, ...admin.childNodes) : null;
+      const toggle = admin
+        ? h('button.btn.xs', { type: 'button', 'aria-label': 'خيارات المراسلة',
+            title: 'خيارات المراسلة', onclick: () => { more.hidden = !more.hidden; } }, '⋯')
+        : null;
+      return h('article.card.circular-row.compact',
+        { class: archived ? 'archived' : '' },
+        h('div.row.wrap.circ-line',
+          h('span.badge', { class: KIND_CLASS[c.kind] || '' }, KIND_LABEL[c.kind] || 'تعميم'),
+          h('b.grow', { style: { minWidth: '160px' } }, c.title),
+          archived && h('span.badge', 'مؤرشفة'),
+          mine && mine.acked_at ? h('span.badge.ok', 'وقّعتَ') : null,
+          c.pdf_path ? h('span.small.muted', { title: 'مرفق PDF' }, '📎') : null,
+          isAdmin() && c.require_ack
+            ? h('span.small.muted', { title: 'من وقّع من المرسَل إليهم' },
+                `${st.acked ?? 0}/${st.recipients ?? 0}`)
+            : null,
+          h('span.small.muted.circ-when', fmtDateTime(c.sent_at)),
+          h('button.btn.xs.primary', { type: 'button', onclick: () => open(c) }, 'عرض'),
+          toggle),
+        more);
+    }
+
     return h('article.card.circular-row', { class: [pending ? 'pending' : '', archived ? 'archived' : ''].join(' ').trim() },
       h('div.row.wrap',
         h('span.badge', { class: KIND_CLASS[c.kind] || '' }, KIND_LABEL[c.kind] || 'تعميم'),

@@ -2,7 +2,7 @@
 // (ملاحظة ١٢٥؛ وهو ما كان يُسمّى «سياسة السرية»، والتوقيعات السابقة باقية بتواريخها)
 import { h, toast, busy, fmtDate, fmtDateTime } from '../ui.js';
 import { db } from '../sb.js';
-import { state, isAdmin, ROLE_LABEL } from '../store.js';
+import { state, isAdmin, ROLE_LABEL, roleLabel} from '../store.js';
 import { POLICY_KEY, POLICY_VERSION, POLICY_TITLE } from '../policy.js';
 import { policyText } from './policy.js';
 import { exportExcel, exportPdf, exportWord } from '../teamexport.js';
@@ -33,7 +33,7 @@ export async function render(ctx) {
     return h('tr',
       h('td', { 'data-label': 'العضو' }, h('b', m.full_name),
         h('div.small.muted', { dir: 'ltr' }, m.email || '')),
-      h('td', { 'data-label': 'الفريق' }, GROUP_NAME[groupOf(m)], h('div.small.muted', ROLE_LABEL[m.role])),
+      h('td', { 'data-label': 'الفريق' }, GROUP_NAME[groupOf(m)], h('div.small.muted', roleLabel(m))),
       h('td', { 'data-label': 'الرقم' }, m.member_no || '—'),
       h('td', { 'data-label': 'الحال' }, sg
         ? h('span', h('span.badge.ok', 'وقّع'), h('div.small.muted', `باسم «${sg.signed_name}»`))

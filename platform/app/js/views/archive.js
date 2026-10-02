@@ -208,59 +208,160 @@ export async function render(ctx) {
   // تصدير مجمَّع على هيئة كتاب: غلافٌ وفهرسٌ والخطب مرقَّمة (ملاحظة ١٥٢)
   // ----------------------------------------------------------------
   async function bookDialog(list) {
-    const codes = [...new Set(list.map(t => t.language_code))].sort();
-    if (!codes.length) return toast('لا أعمال ضمن هذا التحديد.', 'bad');
-    const boxes = codes.map(c => h('label.row', { style: { gap: '6px', alignItems: 'center' } },
-      h('input', { type: 'checkbox', value: c, checked: true, 'aria-label': langName(c) }), h('span', langName(c))));
-    const inputs = boxes.map(b => b.querySelector('input'));
-    const shape = h('select', { 'aria-label': 'شكل المخرج' },
-      h('option', { value: 'per' }, 'ملف لكل لغة (الغالب)'),
-      h('option', { value: 'one' }, 'ملف واحد يجمع اللغات مرتَّبة'));
+    // تُنقّى القائمة داخل النافذة: النوعُ ثم الجهة ثم اللغات، ثم يُختار
+    // ترتيبُ المخرَج — ملفٌّ لكل لغة، أو ملفٌّ واحد، أو عملًا عملًا بالأصل
+    // وتراجمه تحته (ملاحظة ١٩٩).
+    const types = [...new Set(list.map(t => t.material?.material_type).filter(Boolean))].sort();
+    const typeSel = h('select', { 'aria-label': 'نوع العمل' },
+      h('option', { value: '' }, 'كل الأنواع'),
+      types.map(t => h('option', { value: t }, t)));
+    const mosqueSel = h('select', { 'aria-label': 'الجهة' },
+      h('option', { value: '' }, 'الجهتان'),
+      h('option', { value: 'makkah' }, 'المسجد الحرام'),
+      h('option', { value: 'madinah' }, 'المسجد النبوي'));
+    const mosqueWrap = h('label.field', 'الجهة', mosqueSel,
+      h('small', 'للخطب: خطبُ مكة أو خطبُ المدينة'));
+
+    const shape = h('select', { 'aria-label': 'ترتيب المخرج' },
+      h('option', { value: 'per' }, 'ملف لكل لغة'),
+      h('option', { value: 'bywork' }, 'ملف واحد: كل عملٍ ثم تراجمه تحته'),
+      h('option', { value: 'one' }, 'ملف واحد: اللغات مرتَّبة لغةً بعد لغة'));
+    const withArabic = h('input', { type: 'checkbox', id: 'bk-ar' });
     const titleIn = h('input', { value: 'خطب الحرمين الشريفين', 'aria-label': 'عنوان الكتاب' });
-    const all = h('button.btn.xs', { type: 'button',
-      onclick: () => inputs.forEach(i => { i.checked = true; }) }, 'كل اللغات');
-    const none = h('button.btn.xs', { type: 'button',
-      onclick: () => inputs.forEach(i => { i.checked = false; }) }, 'إلغاء التحديد');
+
+    const langBox = h('div.row.wrap');
     const count = h('p.small.muted');
+    let inputs = [];
+
+    const narrowed = () => list.filter(t =>
+      (!typeSel.value || t.material?.material_type === typeSel.value)
+      && (!mosqueSel.value || t.material?.mosque === mosqueSel.value));
+
+    const paintLangs = () => {
+      const rows = narrowed();
+      const prev = new Set(inputs.filter(i => i.checked).map(i => i.value));
+      const codes = [...new Set(rows.map(t => t.language_code))].sort();
+      const boxes = codes.map(c => h('label.row', { style: { gap: '6px', alignItems: 'center' } },
+        h('input', { type: 'checkbox', value: c, 'aria-label': langName(c),
+          checked: inputs.length ? prev.has(c) : true }),
+        h('span', langName(c))));
+      inputs = boxes.map(b => b.querySelector('input'));
+      inputs.forEach(i => i.addEventListener('change', paint));
+      langBox.replaceChildren(...boxes);
+      paint();
+    };
     const paint = () => {
       const picked = inputs.filter(i => i.checked).map(i => i.value);
-      const n = list.filter(t => picked.includes(t.language_code)).length;
-      count.textContent = `${n} عملًا في ${picked.length} لغة — ${periodLabel()}`;
+      const rows = narrowed().filter(t => picked.includes(t.language_code));
+      const works = new Set(rows.map(t => t.material?.id)).size;
+      count.textContent = `${rows.length} ترجمة في ${picked.length} لغة · ${works} عملًا — ${periodLabel()}`;
+      mosqueWrap.hidden = !narrowed().some(t => t.material?.material_type === 'خطب')
+        && typeSel.value !== '' && typeSel.value !== 'خطب';
     };
-    inputs.forEach(i => i.addEventListener('change', paint));
-    paint();
+    typeSel.onchange = () => { paintLangs(); };
+    mosqueSel.onchange = () => { paintLangs(); };
+    paintLangs();
+
+    const all = h('button.btn.xs', { type: 'button',
+      onclick: () => { inputs.forEach(i => { i.checked = true; }); paint(); } }, 'كل اللغات');
+    const none = h('button.btn.xs', { type: 'button',
+      onclick: () => { inputs.forEach(i => { i.checked = false; }); paint(); } }, 'إلغاء التحديد');
 
     const picked = await dialog({
       title: 'تصدير مجمَّع على هيئة كتاب',
       body: h('div.stack',
         h('p.small.muted', 'يُبنى كتابٌ على كليشة الهيئة: غلافٌ ببياناته، ثم فهرسٌ بالأعمال '
-          + 'وتواريخها وأرقام توثيقها وصفحاتها، ثم كل عمل ببطاقته ونصه وختمه، بترقيم صفحات متسلسل.'),
+          + 'وتواريخها وأرقام توثيقها وصفحاتها، ثم كل عمل ببطاقته ونصه وختمه، '
+          + 'بترقيم صفحات متسلسل.'),
         h('label.field', 'عنوان الكتاب', titleIn),
+        h('div.grid-2',
+          h('label.field', 'نوع العمل', typeSel,
+            h('small', 'خطبٌ أو كتبٌ أو دروسٌ أو غيرها')),
+          mosqueWrap),
         h('div.card.stack',
           h('div.row.between', h('b', 'اللغات'), h('div.row', all, none)),
-          h('div.row.wrap', boxes), count),
-        h('label.field', 'شكل المخرج', shape),
-        h('p.small.muted', 'المدة والنوع كما حُدِّدا في الأرشيف: ' + scopeLabel() + ' — ' + periodLabel())),
+          langBox, count),
+        h('label.field', 'ترتيب المخرج', shape),
+        h('label.field.row', { style: { alignItems: 'center', gap: '8px' } },
+          withArabic, h('span', 'اضمم الأصل العربي قبل تراجم كل عمل')),
+        h('p.small.muted', 'والمدة كما حُدِّدت في الأرشيف: ' + periodLabel())),
       buttons: [{ label: 'إلغاء', value: null },
         { label: 'بناء الكتاب', kind: 'primary',
-          validate: () => (inputs.some(i => i.checked) ? true : 'اختر لغةً واحدة على الأقل'),
+          validate: () => {
+            if (!inputs.some(i => i.checked)) return 'اختر لغةً واحدة على الأقل';
+            if (!narrowed().length) return 'لا أعمال ضمن هذا التحديد';
+            return true;
+          },
           value: () => ({ codes: inputs.filter(i => i.checked).map(i => i.value),
-            shape: shape.value, title: titleIn.value.trim() || 'خطب الحرمين الشريفين' }) }]
+            shape: shape.value, arabic: withArabic.checked,
+            title: titleIn.value.trim() || 'خطب الحرمين الشريفين' }) }]
     });
     if (!picked) return;
 
     const { printBook, sortBook } = await import('../bookexport.js');
-    const pack = rows => sortBook(rows.map(t => ({
-      material: t.material, track: t, khateeb: t.material.khateeb?.name })));
+    const one = t => ({ material: t.material, track: t, khateeb: t.material.khateeb?.name });
+    // الأصلُ العربي يدخل الكتابَ عملًا مستقلًّا قبل تراجمه
+    const srcOf = m => ({ material: m, khateeb: m.khateeb?.name,
+      track: { id: `src-${m.id}`, language_code: 'ar', is_source: true,
+               translation_html: m.source_html || '', doc_no: null,
+               completed_at: m.created_at } });
+
+    const sel = narrowed().filter(t => picked.codes.includes(t.language_code));
+    if (!sel.length) return toast('لا أعمال ضمن هذا التحديد.', 'bad');
+
+    // ترتيبُ العمل الواحد: الأصلُ ثم تراجمه بترتيب اللغات
+    const byWork = rows => {
+      const map = new Map();
+      for (const t of rows) {
+        const k = t.material?.id;
+        if (!map.has(k)) map.set(k, []);
+        map.get(k).push(t);
+      }
+      const works = [...map.values()].sort((a, b) => {
+        const am = a[0].material, bm = b[0].material;
+        return String(am.sermon_date || am.created_at || '')
+          .localeCompare(String(bm.sermon_date || bm.created_at || ''))
+          || String(am.title || '').localeCompare(String(bm.title || ''), 'ar');
+      });
+      const out = [];
+      for (const g of works) {
+        const m = g[0].material;
+        if (picked.arabic && m.source_html) out.push(srcOf(m));
+        out.push(...g.sort((a, b) => langName(a.language_code)
+          .localeCompare(langName(b.language_code), 'ar')).map(one));
+      }
+      return out;
+    };
+
+    const packLang = rows => {
+      const items = sortBook(rows.map(one));
+      if (!picked.arabic) return items;
+      const out = [];
+      const seen = new Set();
+      for (const it of items) {
+        const m = it.material;
+        if (!seen.has(m.id) && m.source_html) { out.push(srcOf(m)); seen.add(m.id); }
+        out.push(it);
+      }
+      return out;
+    };
+
     const edition = `إصدار ${fmtDate(new Date())}`;
-    const groups = picked.shape === 'per'
-      ? picked.codes.map(c => ({ code: c, rows: list.filter(t => t.language_code === c) }))
-      : [{ code: null, rows: picked.codes.flatMap(c => list.filter(t => t.language_code === c)) }];
+    let groups;
+    if (picked.shape === 'per') {
+      groups = picked.codes.map(c => ({ code: c,
+        rows: packLang(sel.filter(t => t.language_code === c)) }));
+    } else if (picked.shape === 'bywork') {
+      groups = [{ code: null, rows: byWork(sel) }];
+    } else {
+      groups = [{ code: null,
+        rows: picked.codes.flatMap(c => packLang(sel.filter(t => t.language_code === c))) }];
+    }
 
     let opened = 0;
     for (const g of groups) {
       if (!g.rows.length) continue;
-      const ok = printBook(pack(g.rows),
+      const ok = printBook(g.rows,
         { title: picked.title, period: periodLabel(), language: g.code, edition },
         { autoPrint: false });
       if (ok) opened++;

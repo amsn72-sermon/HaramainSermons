@@ -2,7 +2,7 @@
 import { h, fill, toast, busy, dialog, emptyState, fmtDate, fmtDateTime, confirm } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { state, isManager, PERM_LABEL, PERM_KEYS, ROLE_LABEL, STATUS_LABEL,
-  TRACK_LABEL, trackOf, CITY, NO_FATWA, langName, stageName } from '../store.js';
+  TRACK_LABEL, trackOf, CITY, NO_FATWA, langName, stageName, roleLabel, ADMIN_TITLE} from '../store.js';
 import { POLICY_KEY, POLICY_VERSION } from '../policy.js';
 import { TEAM_FIELDS, teamRows, exportExcel, exportWord, exportPdf } from '../teamexport.js';
 import { nationalitySelect } from '../nationalities.js';
@@ -120,6 +120,22 @@ export async function render(ctx, opts = {}) {
   async function edit(m) {
     const role = h('select', { disabled: !isManager() || m.id === state.profile.id },
       Object.entries(ROLE_LABEL).map(([k, v]) => h('option', { value: k, selected: m.role === k }, v)));
+
+    // صفةُ العمليات: تُكتب على حساب المنسق، وصلاحيتُه لا تتغير بها.
+    // ولا تظهر في التسجيل: التحويلُ إليها بيد مدير المشروع (ملاحظة ٢٠٠)
+    const titleSel = h('select', { 'aria-label': 'صفة العمليات' },
+      h('option', { value: '' }, 'منسق (بلا صفة)'),
+      Object.entries(ADMIN_TITLE).map(([k, v]) =>
+        h('option', { value: k, selected: m.admin_title === k }, v)));
+    const titleCard = isManager() ? h('fieldset.stack',
+      { style: { display: role.value === 'coordinator' ? '' : 'none' } },
+      h('legend', 'صفة العمليات'),
+      h('p.small.muted', 'تُكتب على حساب المنسق فتظهر في الشاشات وبطاقة العمل، '
+        + 'وصلاحيتُه تبقى صلاحيةَ المنسق نفسَها لا تزيد ولا تنقص.'),
+      h('label.field', 'الصفة', titleSel)) : null;
+    role.addEventListener('change', () => {
+      if (titleCard) titleCard.style.display = role.value === 'coordinator' ? '' : 'none';
+    });
     // نقل العضو بين الفريقين: ترقية المتميّز من الإرشاد إلى الترجمة (ملاحظة ٩٩)
     const trackSel = h('select', { 'aria-label': 'الفريق' },
       Object.entries(TRACK_LABEL).map(([k, v]) => h('option', { value: k, selected: trackOf(m) === k }, v)));
@@ -240,7 +256,7 @@ export async function render(ctx, opts = {}) {
     drawIqama();
 
     const result = await dialog({
-      title: `${m.full_name} — ${ROLE_LABEL[m.role]}`,
+      title: `${m.full_name} — ${roleLabel(m)}`,
       body: h('div.stack',
         h('div.grid-2',
           h('div', h('div.small.muted', 'البريد'), h('div', { dir: 'ltr' }, m.email)),
@@ -256,6 +272,7 @@ export async function render(ctx, opts = {}) {
         iqama,
         h('div.grid-2',
           h('label.field', 'الدور', role, !isManager() && h('small', 'تغيير الأدوار الإدارية بيد مدير المشروع')),
+          titleCard,
           h('label.field', 'الفريق', trackSel,
             h('small', 'ومن هنا يُنقل العضو إلى إجابة السائلين: نقلُ السؤال ونقلُ الجواب، بلا فتوى'))),
         h('fieldset', h('legend', 'اللغات المؤهل فيها'), h('div.stack', { style: { gap: '10px' } }, langSelect, langChips)),
@@ -284,6 +301,13 @@ export async function render(ctx, opts = {}) {
     if (!result) return;
     try {
       await db.rpc('admin_update_member', { p_member: m.id, p_status: null, p_role: result.role === m.role ? null : result.role, p_languages: result.languages });
+      // والصفةُ بعد الدور، فلا تُكتب على غير منسق
+      if (isManager()) {
+        const want = result.role === 'coordinator' ? (titleSel.value || null) : null;
+        if (want !== (m.admin_title || null)) {
+          await db.rpc('set_admin_title', { p_member: m.id, p_title: want }).catch(e => toast(e.message, 'bad'));
+        }
+      }
       await db.rpc('admin_update_contact', { p_member: m.id, p_full_name: result.contact.full_name || null,
         p_whatsapp: result.contact.whatsapp || null, p_nationality: result.contact.nationality || null,
         p_national_id: result.contact.national_id || null, p_residence: result.contact.residence || null,
@@ -541,7 +565,8 @@ export async function render(ctx, opts = {}) {
       h('thead', h('tr', ['الاسم', 'الدور', 'اللغات', showPerf ? 'التقييم' : 'رقم العضوية', 'السرية', 'الحالة', ''].map(t => h('th', t)))),
       h('tbody', list.map(m => h('tr',
         h('td', { 'data-label': 'الاسم' }, h('b', m.full_name), h('span.sub', { dir: 'ltr' }, m.email)),
-        h('td', { 'data-label': 'الدور' }, ROLE_LABEL[m.role]),
+        h('td', { 'data-label': 'الدور' }, roleLabel(m),
+          m.admin_title ? h('div.small.muted', 'بصلاحية منسق') : null),
         h('td', { 'data-label': 'اللغات' }, langsOf(m).map(langName).join('، ') || '—'),
         showPerf
           ? h('td', { 'data-label': 'التقييم' },

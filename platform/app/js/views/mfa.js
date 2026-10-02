@@ -177,8 +177,37 @@ async function enrollBox(ctx) {
       h('div.row', go,
         h('button.btn', { type: 'button', onclick: async () => { await auth.signOut(); ctx.navigate('/login', { replace: true }); } }, 'خروج')));
   } catch (e) {
-    box.replaceChildren(h('p.small.bad', e.message || 'تعذّر تجهيز رمز التسجيل'),
-      h('div.row', h('a.btn', { href: '/app' }, 'العودة')));
+    box.replaceChildren(enrollFailure(e));
   }
   return box;
+}
+
+// سببُ الإخفاق يُبيَّن ليُعالَج: فخادمُ الحسابات قد يكون التحققُ بخطوتين
+// معطَّلًا فيه، وهي حالٌ لا يصلحها العضو ولا يفهمها من رسالةٍ مبهمة.
+function enrollFailure(e) {
+  const raw = String(e?.message || '');
+  const off = /not\s*enabled|disabled|unsupported|not\s*found|404|501/i.test(raw);
+  const many = /maximum|limit|too many/i.test(raw);
+  const auth401 = /401|unauthor|jwt|token/i.test(raw);
+
+  const why = off
+    ? ['خادمُ الحسابات لا يُتيح التحقق بخطوتين الآن.',
+       'وهذا إعدادٌ في الخادم لا في حسابك: يُفعَّل التحقق بخطوتين في خدمة الحسابات '
+       + '(GoTrue) ثم تُعاد المحاولة. أبلغ مدير المشروع بهذه الرسالة.']
+    : many
+      ? ['بلغ حسابُك أقصى عدد من أجهزة التحقق المسجَّلة.',
+         'احذف جهازًا قديمًا من حسابك ثم أعد المحاولة.']
+      : auth401
+        ? ['انتهت جلستُك قبل تجهيز الرمز.',
+           'اخرج ثم ادخل من جديد، وأعد المحاولة فورًا.']
+        : ['تعذّر تجهيز رمز التسجيل.',
+           'أعد تحميل الصفحة، فإن تكرّر فأبلغ مدير المشروع بالرسالة أدناه.'];
+
+  return h('div.stack',
+    h('div.form-errors', { role: 'alert' },
+      h('b', why[0]), h('p.small', why[1]),
+      raw ? h('p.small.muted', { dir: 'ltr' }, raw) : null),
+    h('div.row',
+      h('button.btn', { type: 'button', onclick: () => location.reload() }, 'إعادة المحاولة'),
+      h('a.btn', { href: '/app' }, 'العودة')));
 }

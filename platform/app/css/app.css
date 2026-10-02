@@ -1194,7 +1194,7 @@ button.room-tile:hover { border-color: var(--gold); transform: translateY(-2px);
   margin-top: 4px; font-size: 1.02rem; }
 
 /* نافذة تسليم الخطبة وكلمات أصلها (ملاحظتا ١٨٨ و١٨٩) */
-.words-card, .window-card { gap: 6px; }
+.words-card, .window-card, .due-card { gap: 6px; }
 .words-card input[type="number"] { max-width: 10rem; }
 
 /* المنجز في المتابعة: سطرٌ مختصر بعلامته (ملاحظة ١٩١) */
@@ -1226,3 +1226,73 @@ button.room-tile:hover { border-color: var(--gold); transform: translateY(-2px);
 .scope-list { margin: 0; padding-inline-start: 18px; }
 .scope-list li { margin-bottom: 4px; font-size: .9rem; line-height: 1.75; }
 .scope-table th, .scope-table td { font-size: .84rem; vertical-align: top; }
+
+/* جزاءاتُ العقد وسقفُها، ومواعيدُ النصوص (ملاحظة ١٩٧) */
+.cap-card .stat { display: flex; flex-direction: column; gap: 2px;
+  border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px;
+  background: var(--bg); }
+.cap-card .stat b { font-variant-numeric: tabular-nums; font-size: 1.04rem; }
+.cap-card .stat b.bad { color: var(--bad); }
+.meter { height: 8px; border-radius: 99px; background: var(--border);
+  overflow: hidden; }
+.meter > span { display: block; height: 100%; background: var(--gold);
+  border-radius: 99px; transition: width .25s ease; }
+.meter > span.warn { background: var(--warn); }
+.meter > span.bad  { background: var(--bad); }
+
+/* سجلُّ الورديات: الفتراتُ الثلاث والبديلُ المعتمد (ملاحظة ١٩٦) */
+.cover-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px;
+  align-items: center; padding: 5px 0; border-bottom: 1px dashed var(--border); }
+.cover-row:last-child { border-bottom: 0; }
+.cover-row b { font-variant-numeric: tabular-nums; }
+.sub-badge { font-size: .72rem; color: var(--muted); display: block; }
+.due-row.overdue { border-inline-start: 3px solid var(--bad); }
+.due-row.soon { border-inline-start: 3px solid var(--warn); }
+
+/* المراسلة المنتهية سطرٌ واحد، فيجتمع في الصفحة عددٌ منها (ملاحظة ١٩٩) */
+.circular-row.compact { padding: 7px 12px; gap: 6px; }
+.circular-row.compact .circ-line { gap: 8px; align-items: center; flex-wrap: nowrap; }
+.circular-row.compact .circ-line > b { overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-weight: 600; }
+.circular-row.compact .circ-when { white-space: nowrap; font-size: .74rem; }
+.circular-row.compact .circ-admin { margin-top: 6px; padding-top: 6px;
+  border-top: 1px dashed var(--border); }
+@media (max-width: 640px) {
+  .circular-row.compact .circ-line { flex-wrap: wrap; }
+  .circular-row.compact .circ-when { width: 100%; }
+}
+
+/* كشفُ بيانات الفريق: خانةٌ لكل بيان بعلامتها (ملاحظة ١٩٩) */
+.mx-table th.mx-head { writing-mode: initial; font-size: .74rem; white-space: nowrap;
+  text-align: center; padding-inline: 4px; }
+.mx-table td.mx-cell { text-align: center; padding-inline: 4px; }
+.mx-mark { display: inline-grid; place-items: center; width: 1.45rem; height: 1.45rem;
+  border-radius: 50%; font-size: .82rem; font-weight: 700; line-height: 1; }
+.mx-mark.ok    { background: var(--ok-bg);   color: var(--ok); }
+.mx-mark.warn  { background: var(--warn-bg); color: var(--warn); }
+.mx-mark.bad   { background: var(--bad-bg);  color: var(--bad); }
+.mx-mark.muted { background: transparent;    color: var(--muted); }
+.mx-table .sub { display: block; font-size: .72rem; color: var(--muted); }
+.mx-table .sub.bad { color: var(--bad); }
+.mx-table tr.mx-short td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
+.mx-table tr.mx-done  td:first-child { box-shadow: inset 3px 0 0 var(--ok); }
+@media (max-width: 760px) {
+  .mx-table td.mx-cell { text-align: start; }
+}
+
+/* مصمّم البطاقة: شريطُ أيقونات، كلُّ أيقونةٍ تفتح خياراتها (ملاحظة ١٩٩) */
+.cd-tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 8px; margin-bottom: 10px; }
+.cd-tool { display: grid; gap: 2px; justify-items: center; text-align: center;
+  padding: 10px 6px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--bg); color: inherit; cursor: pointer; font: inherit; }
+.cd-tool:hover { border-color: var(--gold); }
+.cd-tool.on { border-color: var(--gold); background: rgba(188, 150, 97, .10); }
+.cd-tool-icon { font-size: 1.25rem; line-height: 1.1; color: var(--gold); }
+.cd-tool b { font-size: .82rem; }
+.cd-tool .small { font-size: .68rem; line-height: 1.35; }
+.cd-tabbody h3 { margin: 0 0 4px; }
+@media (max-width: 520px) {
+  .cd-tools { grid-template-columns: repeat(3, 1fr); }
+  .cd-tool .small { display: none; }
+}

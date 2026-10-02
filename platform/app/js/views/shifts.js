@@ -82,7 +82,8 @@ async function weekSection(members) {
     const to = addDays(from, 6);
     label.textContent = `${fmtDate(from)} — ${fmtDate(to)}`;
     const rows = await db.select('shifts', {
-      select: '*', and: `(shift_date.gte.${from},shift_date.lte.${to})`, order: 'start_at.asc'
+      select: '*,sub:sub_member_id(full_name)',
+      and: `(shift_date.gte.${from},shift_date.lte.${to})`, order: 'start_at.asc'
     }).catch(() => []);
     const days = Array.from({ length: 7 }, (_, i) => addDays(from, i));
     const at = (member, day) => rows.filter(r => r.member_id === member && r.shift_date === day);
@@ -141,18 +142,29 @@ async function view(s, reload) {
       + (s.check_in_at ? ` · حضر ${fmtDateTime(s.check_in_at)}` : '')
       + (s.check_out_at ? ` · انصرف ${fmtDateTime(s.check_out_at)}` : '')
       + (s.late_minutes ? ` · تأخّر ${lateText(s.late_minutes)}` : '')),
+    // البديلُ المعتمد: نصُّ العقد يحسم يومَ الغائب أو عند عدم توفير بديلٍ معتمد،
+    // فتسجيلُه هنا هو ما يُفرّق المغطَّى من غيره (ملاحظة ١٩٦)
+    s.sub_member_id
+      ? h('p.small', h('b', 'البديل: '), (s.sub?.full_name || '—'),
+          s.sub_approved
+            ? h('span.badge.ok', { title: 'بديلٌ معتمد: الخدمةُ أُدّيت فلا يُحسم يومُها' }, 'معتمد')
+            : h('span.badge.warn', { title: 'لم يُعتمد بعد، فيُحسب الغيابُ على المتعاقد' }, 'غير معتمد'),
+          s.sub_note ? h('div.small.muted', s.sub_note) : null)
+      : null,
     s.note ? h('p.small', s.note) : null);
   const choice = await dialog({
     title: 'الوردية',
     body,
     buttons: isAdmin()
       ? [{ label: 'تعديل', kind: 'primary', value: 'edit' }, { label: 'تعليم غياب', value: 'absent' },
-         { label: 'تعليم إجازة', value: 'leave' }, { label: 'حذف', kind: 'danger', value: 'delete' },
+         { label: 'تعليم إجازة', value: 'leave' }, { label: 'البديل', value: 'sub' },
+         { label: 'حذف', kind: 'danger', value: 'delete' },
          { label: 'إغلاق', value: null }]
       : [{ label: 'إغلاق', value: null }]
   });
   if (!choice) return;
   if (choice === 'edit') return edit(s, null, reload);
+  if (choice === 'sub') return substitute(s, reload);
   if (choice === 'delete') {
     const crewWide = !!s.crew_id;
     if (!await confirm('حذف الوردية',
@@ -165,6 +177,56 @@ async function view(s, reload) {
   }
   await db.rpc('set_shift_status', { p_id: s.id, p_status: choice, p_note: null });
   toast(choice === 'absent' ? 'عُلّمت غيابًا' : 'عُلّمت إجازة', 'ok');
+  return reload();
+}
+
+// البديلُ المعتمد عن صاحب الوردية: يُختار ويُعتمد، فلا يُحسم يومُ الغياب
+// الذي غُطّي. والاعتمادُ لمدير المشروع والمنسق، لا للعضو (ملاحظة ١٩٦)
+async function substitute(s, reload) {
+  let list = [];
+  try {
+    const rows = await db.rpc('shift_candidates');
+    list = (Array.isArray(rows) ? rows : []).map(r => ({ ...r, id: r.member_id }));
+  } catch {
+    list = (await db.select('profiles', {
+      select: 'id,full_name,track,status', status: 'eq.active', order: 'full_name.asc'
+    }).catch(() => [])) || [];
+  }
+  list = list.filter(m => m.id !== s.member_id);
+
+  const who = h('select', { 'aria-label': 'البديل' },
+    h('option', { value: '' }, '— لا بديل —'),
+    list.map(m => h('option', { value: m.id, selected: s.sub_member_id === m.id },
+      m.full_name)));
+  const ok = h('input', { type: 'checkbox', checked: s.sub_approved ? true : null,
+    id: 'sub-ok' });
+  const note = h('input', { value: s.sub_note || '', 'aria-label': 'بيان البديل' });
+
+  const res = await dialog({
+    title: 'البديل المعتمد',
+    body: h('div.stack',
+      h('p.small.muted', 'نصُّ العقد: يُحسم تكلفةُ اليوم الواحد للعامل الغائب، '
+        + 'أو عند عدم توفير بديلٍ معتمد. فإذا وُفِّر البديلُ واعتُمد فالخدمةُ أُدّيت '
+        + 'ولا يُحسم يومُها، ويظهر ذلك في التقرير الشهري.'),
+      h('label.field', 'البديل', who),
+      h('label.field.row', { style: { alignItems: 'center', gap: '8px' } },
+        ok, h('span', 'بديلٌ معتمد')),
+      h('label.field', 'بيان', h('small', 'ما يُثبت تأهيلَه أو سببَ البدل'), note)),
+    buttons: [
+      { label: 'حفظ', kind: 'primary',
+        validate: () => (ok.checked && !who.value) ? 'اختر البديل قبل اعتماده' : true,
+        value: () => ({ sub: who.value || null, ok: ok.checked,
+          note: note.value.trim() || null }) },
+      { label: 'إلغاء', value: null }
+    ]
+  });
+  if (!res) return;
+  try {
+    await db.rpc('set_shift_substitute', { p_id: s.id, p_sub: res.sub,
+      p_approved: res.ok, p_note: res.note });
+    toast(res.sub ? (res.ok ? 'اعتُمد البديل.' : 'سُجِّل البديل بلا اعتماد.')
+                  : 'أُزيل البديل.', 'ok');
+  } catch (e) { return toast(e.message, 'bad'); }
   return reload();
 }
 
@@ -255,7 +317,8 @@ async function todaySection() {
   const box = h('div.stack');
   async function load() {
     const rows = await db.select('shifts', {
-      select: '*,member:profiles(id,full_name,member_no)', shift_date: `eq.${today()}`, order: 'start_at.asc'
+      select: '*,member:member_id(id,full_name,member_no),sub:sub_member_id(full_name)',
+      shift_date: `eq.${today()}`, order: 'start_at.asc'
     }).catch(() => []);
     if (!rows.length) {
       box.replaceChildren(h('div.empty', h('b', 'لا ورديات اليوم'), h('span', 'اجدول الورديات من تبويب «الجدول الأسبوعي».')));
@@ -265,7 +328,37 @@ async function todaySection() {
       await db.rpc('set_shift_status', { p_id: s.id, p_status: status, p_note: null });
       await load();
     });
+    // تغطيةُ الفترات الثلاث: العقد يجعلها ثلاثًا زمنُ كلٍّ ثمانِ ساعات،
+    // فيُعرف المطلوبُ تواجدُه والحاضرُ في كل فترةٍ (ملاحظة ١٩٦)
+    const PERIOD = { morning: 'الفترة الصباحية', evening: 'الفترة المسائية',
+      night: 'الفترة الليلية' };
+    const coverBox = h('div.stack');
+    db.rpc('shift_coverage', { p_date: today(), p_city: null, p_track: null })
+      .then(cov => {
+        cov = Array.isArray(cov) ? cov : [];
+        if (!cov.length) return;
+        const bad = cov.reduce((a, c) => a + Number(c.hours_bad || 0), 0);
+        coverBox.replaceChildren(h('div.card.stack',
+          h('div.row.between', h('h3', 'تغطيةُ الفترات'),
+            h('span.badge.gold', `${cov.length} من ثلاث`)),
+          h('p.small.muted', { style: { margin: 0 } },
+            'العقد: ثلاثُ فتراتٍ يوميًّا، زمنُ كل فترةٍ ثمانِ ساعاتٍ تشغيلية.'),
+          h('div.stack', cov.map(c => h('div.cover-row',
+            h('span', PERIOD[c.period] || c.period),
+            h('b', { dir: 'ltr', title: 'المطلوب تواجدُهم' }, String(c.required)),
+            h('span', { class: Number(c.present) >= Number(c.required) ? 'ok' : 'warn' },
+              `حضر ${c.present}`),
+            Number(c.absent)
+              ? h('span.badge.bad', `غاب ${c.absent}`)
+              : h('span.badge.ok', 'مكتملة')))),
+          bad
+            ? h('p.small.warn', `و${bad} ورديةً زمنُها خلافُ ثمانِ ساعات: تُراجع.`)
+            : null));
+      })
+      .catch(() => {});
+
     box.replaceChildren(
+      coverBox,
       h('div.card.stack',
         h('h3', `ورديات ${fmtDate(today())}`),
         h('div.table-wrap', h('table.responsive',
@@ -277,7 +370,12 @@ async function todaySection() {
             absent.onclick = () => mark(absent, s, 'absent');
             leave.onclick = () => mark(leave, s, 'leave');
             return h('tr',
-              h('td', { 'data-label': 'المرشد' }, h('b', s.member?.full_name || '—'), h('div.small.muted', s.member?.member_no || '')),
+              h('td', { 'data-label': 'المرشد' }, h('b', s.member?.full_name || '—'),
+                h('div.small.muted', s.member?.member_no || ''),
+                s.sub_member_id
+                  ? h('span.sub-badge', `بديله: ${s.sub?.full_name || '—'}`
+                      + (s.sub_approved ? ' (معتمد)' : ' (غير معتمد)'))
+                  : null),
               h('td', { 'data-label': 'الوردية' }, `${hhmm(s.start_at)}–${hhmm(s.end_at)}`),
               h('td', { 'data-label': 'الموقع' }, s.location || '—'),
               h('td', { 'data-label': 'الحضور' }, s.check_in_at ? fmtDateTime(s.check_in_at) : '—'),

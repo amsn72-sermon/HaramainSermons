@@ -27,38 +27,36 @@ const STEPS = [
   ]]
 ];
 
+// لا يُذكر هنا إلا ما يسجّل بالصيغة المعتمدة مباشرة وبالمعدل المطلوب.
+// وما لا يفي بالمواصفة لا موضع له في دليلٍ يُعمل به (ملاحظة ١٩٩).
 const IOS = [
-  ['Voice Record Pro', 'WAV · MP3 · M4A', 'مجاني بلا قيود، وفيه ضبط معدل العينة والعمق ومونو/ستيريو — أنسبها لعملنا.'],
-  ['Awesome Voice Recorder (AVR)', 'MP3 · WAV · M4A', 'مجاني، ومعدلات حتى ٤٨ kHz، ويختار المونو أو الستيريو.'],
-  ['RØDE Reporter', 'WAV ٢٤ بت / ٤٨ kHz', 'مجاني، وفيه مؤشر مستوى الصوت وموجة حيّة تعين على ضبط المسافة.'],
-  ['Ferrite Recording Studio', 'WAV', 'مجاني بمدة محدودة للمشروع الواحد، ويصلح للتسجيل والتحرير معًا.'],
-  ['التسجيلات الصوتية (المدمج)', 'M4A', 'لا يفي بالصيغة المطلوبة، فيحتاج تحويلًا إلى WAV أو MP3 قبل الرفع.']
+  ['Voice Record Pro', 'WAV · MP3', 'يضبط معدل العينة والعمق والقنوات'],
+  ['Awesome Voice Recorder (AVR)', 'WAV · MP3', 'حتى ٤٨ kHz، مونو أو ستيريو'],
+  ['RØDE Reporter', 'WAV ٢٤ بت', '٤٨ kHz، ومؤشر مستوًى وموجة حيّة تعين على ضبط المسافة'],
+  ['Ferrite Recording Studio', 'WAV', 'تسجيلٌ وتحريرٌ في برنامجٍ واحد']
 ];
 
 const ANDROID = [
-  ['Audio Recorder (Dimowner)', 'WAV · M4A', 'مجاني ومفتوح المصدر بلا إعلانات، وفيه ضبط معدل العينة والقنوات.'],
-  ['RecForge II', 'WAV · MP3 وغيرهما', 'مجاني بإعلانات، ومعدلات ٨–٤٨ kHz وتدفق حتى ٣٢٠ kbps.'],
-  ['Easy Voice Recorder', 'WAV (PCM) في المجاني', 'وصيغة MP3 في النسخة المدفوعة.'],
-  ['Hi-Q MP3 Voice Recorder', 'MP3 حتى ٣٢٠ kbps · WAV', 'النسخة المجانية محدودة بعشر دقائق للمقطع الواحد.'],
-  ['RØDE Reporter', 'WAV ٢٤ بت / ٤٨ kHz', 'مجاني، وهو نفسه المتوفر على الآيفون.'],
-  ['مسجّل Google / Samsung (المدمج)', 'M4A', 'لا يفي بالصيغة المطلوبة، فيحتاج تحويلًا قبل الرفع.']
+  ['Audio Recorder (Dimowner)', 'WAV', 'يضبط معدل العينة والقنوات، بلا إعلانات'],
+  ['RecForge II', 'WAV · MP3', '٨–٤٨ kHz، وتدفقٌ حتى ٣٢٠ kbps'],
+  ['RØDE Reporter', 'WAV ٢٤ بت', '٤٨ kHz، وهو نفسه المتوفر على الآيفون']
 ];
 
 const appTable = (rows, caption) => h('div.stack',
   h('h3', caption),
   h('div.table-wrap', h('table.responsive',
-    h('thead', h('tr', ['البرنامج', 'الصيغ', 'ملاحظة'].map(t => h('th', t)))),
-    h('tbody', rows.map(([name, fmt, note]) => h('tr',
+    h('thead', h('tr', ['البرنامج', 'الصيغ', 'الضبط المتاح'].map(t => h('th', t)))),
+    h('tbody', rows.map(([name, fmt, tune]) => h('tr',
       h('td', { 'data-label': 'البرنامج' }, h('b', name)),
       h('td', { 'data-label': 'الصيغ' }, h('span.small', { dir: 'ltr' }, fmt)),
-      h('td', { 'data-label': 'ملاحظة' }, h('span.small.muted', note))))))));
+      h('td', { 'data-label': 'الضبط المتاح' }, h('span.small.muted', tune))))))));
 
 export async function render() {
   return h('div',
     h('div.page-head', h('div.grow',
       h('div.eyebrow', 'التسجيل الصوتي'),
       h('h1', 'دليل التسجيل الصوتي'),
-      h('p.muted', 'مواصفات التسليم كما في العقد، وطريقة تسجيلٍ نظيف من الجوال، وبرامج مجانية تسجّل بالصيغ المعتمدة.')),
+      h('p.muted', 'مواصفات التسليم كما في العقد، وطريقة تسجيلٍ نظيف من الجوال، وبرامج تسجّل بالصيغ المعتمدة.')),
       h('button.btn.sm.no-print', { type: 'button', onclick: () => window.print() }, '🖶 طباعة الدليل')),
 
     h('div.card.stack',
@@ -76,10 +74,12 @@ export async function render() {
 
     h('div.card.stack',
       h('h3', 'برامج مقترحة للتسجيل من الجوال'),
-      P('المسجّل المدمج في الآيفون والأندرويد يحفظ الملف بصيغة M4A، وهي غير معتمدة عندنا، فيلزم برنامج يسجّل WAV أو MP3 مباشرة، أو تحويل الملف قبل رفعه. وهذه برامج مجانية مجرَّبة:'),
+      P('المسجّل المدمج في الآيفون والأندرويد يحفظ الملف بصيغة M4A وهي غير معتمدة عندنا، '
+        + 'فلا تُستعمل. وهذه برامجُ مجرَّبة تسجّل WAV أو MP3 مباشرة بالمعدل المطلوب:'),
       appTable(IOS, 'آيفون'),
       appTable(ANDROID, 'أندرويد'),
-      h('p.small.muted', 'إن كان الاختيار لك: ثبّت Voice Record Pro على الآيفون، أو Audio Recorder من Dimowner على الأندرويد — كلاهما مجاني تمامًا ويسجّل WAV مباشرة بالمعدل المطلوب.')),
+      h('p.small.muted', 'وإن كان الاختيار لك: Voice Record Pro على الآيفون، '
+        + 'أو Audio Recorder من Dimowner على الأندرويد.')),
 
     h('div.card.stack',
       h('h3', 'التسجيل الاحترافي في الأستوديو'),

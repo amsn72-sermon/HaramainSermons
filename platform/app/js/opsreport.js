@@ -1,6 +1,6 @@
 // التقرير الشهري للتكاليف التشغيلية — يُعرض داخل «بنود العقد والمستخلص»
-// (ملاحظتا ١٩٠ و١٩٥)
-import { h, toast, confirm, dialog, req } from './ui.js';
+// (ملاحظات ١٩٠ و١٩٥ و١٩٦)
+import { h, toast, confirm, dialog, req, fmtDate } from './ui.js';
 import { db } from './sb.js';
 import { monthStart, thisMonth } from './pay.js';
 import { buildXlsx, downloadBlob } from './xlsx.js';
@@ -10,13 +10,16 @@ const VAT = 0.15;          // ضريبة القيمة المضافة كما في
 // ---------------------------------------------------------------------
 // التقرير الشهري للتكاليف التشغيلية — بنودُه من كراسة المنافسة نفسها:
 // فريق الإرشاد المكاني والديني بموقعيه ومواسمه، لكل بندٍ عددُه وتكلفتُه
-// الشهرية للفرد. والحسم بأمرين كما نصّت الكراسة: غيابٌ يُثبت من سجلّ
-// الدوام، ونسبةُ المستخلص من متوسط التقييم الشهري. ولمدير المشروع أن
-// يضيف بندًا بسطره وبياناته (ملاحظة ١٩٣).
+// الشهرية للفرد. والحسم بثلاثةٍ كما نصّ العقد: غيابُ الفرد الذي لم يُغطَّ
+// ببديلٍ معتمد، والغيابُ الجماعي إذا تجاوز ٤٥٪ من المطلوب تواجدُهم،
+// ونسبةُ المستخلص من متوسط التقييم الشهري. والتكلفةُ اليومية قيمةُ الشهر
+// على عدد الأيام التشغيلية وعدد أفراد الفريق (ملاحظتا ١٩٣ و١٩٦).
 // ---------------------------------------------------------------------
 const OPS_SEASON = { year: 'السنة كلها', ramadan: 'رمضان', hajj: 'موسم الحج' };
 const OPS_MOSQUE = { makkah: 'المسجد الحرام', madinah: 'المسجد النبوي' };
 const OPS_ROLE = { field: 'الإرشاد المكاني', answers: 'إجابة السائلين' };
+const OPS_PERIOD = { day: 'اليوم كلُّه', morning: 'الفترة الصباحية',
+  evening: 'الفترة المسائية', night: 'الفترة الليلية' };
 
 export async function opsSection() {
   let month = thisMonth();
@@ -27,6 +30,7 @@ export async function opsSection() {
 
   const n2 = v => Number(v || 0).toLocaleString('en-US',
     { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const n0 = v => String(Number(v || 0));
 
   // ---------- بندٌ يُضاف أو يُعدَّل ----------
   const itemDialog = async (row = null) => {
@@ -99,35 +103,138 @@ export async function opsSection() {
     catch (e) { toast(e.message, 'bad'); }
   };
 
+  // ---------- وقائعُ الغياب الجماعي: يومًا يومًا كما احتُسبت ----------
+  const collectiveDialog = async r => {
+    let rows = [];
+    try { rows = await db.rpc('ops_collective', { p_month: monthStart(month), p_code: r.code }); }
+    catch (e) { return toast(e.message, 'bad'); }
+    rows = Array.isArray(rows) ? rows : [];
+    await dialog({
+      title: `الغياب الجماعي — ${r.name}`,
+      body: h('div.stack',
+        h('p.small.muted', 'نصُّ العقد: إذا تجاوز الغيابُ الجماعي في يومٍ واحد أو فترةٍ '
+          + 'تشغيلية نسبةَ ٤٥٪ من إجمالي العناصر المطلوب تواجدها، حُسم كاملُ القيمة '
+          + 'اليومية لتكلفة التشغيل لذلك اليوم، وزيدت غرامةٌ يومية ٦٠٪ من القيمة اليومية '
+          + 'للفرد الواحد على عدد المتغيبين ضمن النسبة المتجاوزة.'),
+        h('p.small.muted', 'والمطلوبُ تواجدُهم من الورديات المجدولة نفسها، '
+          + 'ومن غُطّي ببديلٍ معتمد لا يُعدّ متغيبًا. وإذا تجاوز اليومُ كلُّه '
+          + 'أُخذ مرةً واحدة فلا تُحتسب فتراتُه معه.'),
+        rows.length
+          ? h('div.table-wrap', h('table.responsive',
+              h('thead', h('tr', ['التاريخ', 'الفترة', 'المطلوب', 'المتغيّب', 'النسبة',
+                'المسموح', 'الزائد', 'القيمة اليومية', 'غرامة ٦٠٪', 'المجموع']
+                .map(t => h('th', t)))),
+              h('tbody', rows.map(c => h('tr',
+                h('td', { 'data-label': 'التاريخ' }, fmtDate(c.on_date)),
+                h('td', { 'data-label': 'الفترة' }, OPS_PERIOD[c.period] || c.period),
+                h('td', { 'data-label': 'المطلوب', dir: 'ltr' }, n0(c.required)),
+                h('td', { 'data-label': 'المتغيّب', dir: 'ltr' },
+                  h('span.bad', n0(c.absent))),
+                h('td', { 'data-label': 'النسبة', dir: 'ltr' }, `${c.pct}٪`),
+                h('td', { 'data-label': 'المسموح', dir: 'ltr' }, n0(c.allowed)),
+                h('td', { 'data-label': 'الزائد', dir: 'ltr' }, h('b', n0(c.excess))),
+                h('td', { 'data-label': 'القيمة اليومية', dir: 'ltr' }, n2(c.day_cost)),
+                h('td', { 'data-label': 'غرامة ٦٠٪', dir: 'ltr' }, n2(c.surcharge)),
+                h('td', { 'data-label': 'المجموع', dir: 'ltr' },
+                  h('b.bad', n2(c.total)))))),
+              h('tfoot', h('tr.total-row',
+                h('td', { colspan: '9' }, 'مجموع حسم الغياب الجماعي'),
+                h('td', { dir: 'ltr' },
+                  n2(rows.reduce((a, c) => a + Number(c.total || 0), 0)))))))
+          : h('p.ok', 'لا واقعةَ غيابٍ جماعي في هذا الشهر — ولله الحمد.')),
+      buttons: [{ label: 'إغلاق', value: true }]
+    });
+  };
+
+  // ---------- درجاتُ الأفراد: مجموعُ أسابيعه بحدِّ مئة ----------
+  const membersDialog = async r => {
+    let rows = [];
+    try { rows = await db.rpc('ops_eval_members', { p_month: monthStart(month), p_code: r.code }); }
+    catch (e) { return toast(e.message, 'bad'); }
+    rows = Array.isArray(rows) ? rows : [];
+    await dialog({
+      title: `درجات الأفراد — ${r.name}`,
+      body: h('div.stack',
+        h('p.small.muted', 'يُجمع تقييم المشرف الأسبوعي لكل فردٍ خلال أربعة أسابيع '
+          + 'بحدٍّ أقصى مئة نقطة، ثم يُؤخذ متوسطُ الأفراد فتُعرف نسبةُ المستخلص. '
+          + 'وهذا ما يصل من مشرفي الهيئة، والمنصة تسجّله وتحتسب المتوسط ولا تُقيّم.'),
+        h('p.small.warn', 'وقاعدةُ الفرد غيرُ قاعدة الفريق: من نزلت درجتُه عن السبعين '
+          + 'وُجّه إليه إنذارٌ خطي وحُسم ١٠٪ من إجمالي مستحقاته الشهرية، '
+          + 'ولا يُحمَّل ذلك على بند الفريق.'),
+        rows.length
+          ? h('div.table-wrap', h('table.responsive',
+              h('thead', h('tr', ['العضو', 'الأسابيع المسجَّلة', 'الدرجة من ١٠٠', 'ما يلزم']
+                .map(t => h('th', t)))),
+              h('tbody', rows.map(m => h('tr',
+                h('td', { 'data-label': 'العضو' }, m.name || '—'),
+                h('td', { 'data-label': 'الأسابيع المسجَّلة', dir: 'ltr' },
+                  Number(m.weeks) < 4
+                    ? h('span.warn', { title: 'أقلُّ من أربعة أسابيع: تُراجع '
+                        + 'قبل الاحتساب فالمجموع ينقص بنقصانها' }, n0(m.weeks))
+                    : n0(m.weeks)),
+                h('td', { 'data-label': 'الدرجة من ١٠٠', dir: 'ltr' },
+                  h('b', { class: Number(m.score) < 70 ? 'bad' : 'ok' }, n0(m.score))),
+                h('td', { 'data-label': 'ما يلزم' },
+                  m.warn
+                    ? h('span.badge.bad', `إنذارٌ خطي وحسمُ ${m.cut_pct}٪ من مستحقاته`)
+                    : h('span.muted', '—')))))))
+          : h('p.muted', 'لا تقييماتَ مسجَّلة لهذا الفريق في هذا الشهر.')),
+      buttons: [{ label: 'إغلاق', value: true }]
+    });
+  };
+
   // ---------- تصحيح شهرٍ بعينه ----------
   const editMonth = async r => {
     const f = {
       staff: h('input', { type: 'number', min: 0, max: 9999, value: r.staff_count,
         'aria-label': 'عدد الأفراد في الشهر' }),
-      days: h('input', { type: 'number', min: 0, max: 31, step: 0.5,
-        value: Number(r.short_days) || 0, 'aria-label': 'التقصير بالأيام' }),
+      opdays: h('input', { type: 'number', min: 1, max: 31,
+        value: r.is_manual ? Number(r.op_days) : '',
+        placeholder: String(r.op_days), 'aria-label': 'الأيام التشغيلية' }),
+      days: h('input', { type: 'number', min: 0, max: 999, step: 0.5,
+        value: r.is_manual && Number(r.short_days) ? Number(r.short_days) : '',
+        placeholder: 'يُحتسب من سجلّ الدوام', 'aria-label': 'التقصير بالأيام' }),
       ded: h('input', { type: 'number', min: 0, step: 0.01,
         value: r.is_manual && r.deduction != null ? Number(r.deduction) : '',
         placeholder: 'يُحتسب من الأيام', 'aria-label': 'الحسميات للغياب' }),
+      coll: h('input', { type: 'number', min: 0, step: 0.01,
+        value: '', placeholder: n2(r.coll_deduction),
+        'aria-label': 'حسم الغياب الجماعي' }),
       note: h('input', { value: r.note || '', 'aria-label': 'سبب الحسم' })
     };
     const res = await dialog({
       title: `${r.name} — ${month}`,
       body: h('div.stack',
         h('p.small.muted', 'العدد والتكلفة من الكراسة، والتقصير يُحتسب من سجلّ الدوام. '
-          + 'وما تكتبه هنا يعلو على المحتسَب، ويُمحى فيعود إليه.'),
+          + 'وما تكتبه هنا يعلو على المحتسَب، وما تتركه فارغًا يبقى محتسَبًا آليًّا — '
+          + 'ويُمحى الإثباتُ كلُّه فيعود البندُ إلى المحتسَب.'),
         h('div.grid-2',
           h('label.field', 'عدد الأفراد في هذا الشهر', f.staff),
+          h('label.field', 'الأيام التشغيلية',
+            h('small', `المحتسَب ${r.op_days} يومًا — `
+              + (r.season === 'year' ? 'أيامُ الشهر الميلادي'
+                 : 'أيامُ الموسم في شهره الهجري')),
+            f.opdays),
           h('label.field', 'التقصير بالأيام', f.days),
           h('label.field', 'الحسميات للغياب',
-            h('small', `اتركه فارغًا ليُحتسب من الأيام على ${r.season === 'year' ? 'ثلاثين' : String(r.days || 30)}`),
+            h('small', `اتركه فارغًا ليُحتسب: قيمةُ الفرد اليومية ${n2(r.person_day)} `
+              + 'في عدد أيام التقصير'),
             f.ded),
+          h('label.field', 'حسم الغياب الجماعي',
+            h('small', `المحتسَب ${n2(r.coll_deduction)} من ${r.coll_days} واقعة`),
+            f.coll),
           h('label.field', 'سبب الحسم', f.note)),
         h('p.small.muted', `التكلفة الشهرية للفرد ${n2(r.unit_cost)}`
+          + ` · القيمة اليومية للتشغيل ${n2(r.day_cost)}`
+          + ` · قيمة الفرد اليومية ${n2(r.person_day)}`
           + (r.eval_avg != null ? ` · متوسط التقييم ${r.eval_avg} فنسبة المستخلص ${r.eval_pct}٪` : '')),
+        Number(r.covered_days)
+          ? h('p.small.muted', `ومن الغياب ${n0(r.covered_days)} يومًا غُطّي ببديلٍ معتمد `
+              + `فلم يُحسم، و${n0(r.short_days)} لم يُغطَّ.`)
+          : null,
         r.eval_warn
-          ? h('p.small.bad', 'متوسط التقييم أقلُّ من ٧٠: توجيهُ إنذارٍ خطي وحسمُ ١٠٪ '
-              + 'كما نصّت الكراسة.') : null),
+          ? h('p.small.bad', 'متوسط التقييم أقلُّ من ٧٠: نسبةُ المستخلص ٧٠٪ '
+              + 'مع توجيه إنذارٍ خطي، كما نصّ العقد.') : null),
       buttons: [
         { label: 'حفظ', kind: 'primary', value: () => ({ save: true }) },
         { label: 'إعادته إلى المحتسَب', kind: 'danger', value: () => ({ clear: true }) },
@@ -143,8 +250,10 @@ export async function opsSection() {
         await db.rpc('set_ops_month', { p: {
           month: monthStart(month), code: r.code,
           staff_count: f.staff.value === '' ? null : Number(f.staff.value),
-          short_days: Number(f.days.value) || 0,
+          operating_days: f.opdays.value === '' ? null : Number(f.opdays.value),
+          short_days: f.days.value === '' ? null : Number(f.days.value),
           deduction: f.ded.value === '' ? null : Number(f.ded.value),
+          collective_deduction: f.coll.value === '' ? null : Number(f.coll.value),
           note: f.note.value.trim() || null
         } });
         toast('حُفظ البند.', 'ok');
@@ -174,14 +283,17 @@ export async function opsSection() {
     const sum = k => rows.reduce((a, r) => a + Number(r[k] || 0), 0);
     const total = sum('total_cost');
     const absent = sum('deduction');
+    const coll = sum('coll_deduction');
     const evalCut = sum('eval_cut');
-    const afterDed = total - absent - evalCut;
+    const afterDed = total - absent - coll - evalCut;
     const vat = afterDed * VAT;
+    const shortWeeks = sum('eval_weeks_short');
 
     const table = h('div.table-wrap', h('table.responsive.ops-table',
-      h('thead', h('tr', ['م', 'البند', 'عدد الأفراد', 'التكلفة الشهرية الفردية',
-        'التكلفة الإجمالية', 'التقصير بالأيام', 'الحسميات للغياب',
-        'نسبة المستخلص', 'حسم التقييم', 'الصافي', '']
+      h('thead', h('tr', ['م', 'البند', 'عدد الأفراد', 'الأيام التشغيلية',
+        'التكلفة الشهرية الفردية', 'التكلفة الإجمالية', 'التقصير بالأيام',
+        'الحسميات للغياب', 'الغياب الجماعي', 'نسبة المستخلص', 'حسم التقييم',
+        'الصافي', '']
         .map(t => h('th', t)))),
       h('tbody', rows.map(r => h('tr',
         h('td', { 'data-label': 'م', dir: 'ltr' }, String(r.code)),
@@ -193,18 +305,43 @@ export async function opsSection() {
           r.is_custom ? h('span.badge', { title: 'بندٌ أضفتَه بيدك' }, 'مضاف') : null,
           r.is_manual ? h('span.badge.gold', { title: 'قيمةٌ مكتوبة تعلو على المحتسَب' }, 'مُصحَّح') : null),
         h('td', { 'data-label': 'عدد الأفراد', dir: 'ltr' }, String(r.staff_count)),
+        h('td', { 'data-label': 'الأيام التشغيلية', dir: 'ltr',
+          title: `القيمة اليومية ${n2(r.day_cost)} · قيمة الفرد اليومية ${n2(r.person_day)}` },
+          n0(r.op_days)),
         h('td', { 'data-label': 'التكلفة الشهرية الفردية', dir: 'ltr' }, n2(r.unit_cost)),
         h('td', { 'data-label': 'التكلفة الإجمالية', dir: 'ltr' }, n2(r.total_cost)),
-        h('td', { 'data-label': 'التقصير بالأيام', dir: 'ltr' },
-          Number(r.short_days) ? h('span.bad', String(Number(r.short_days))) : '0'),
+        h('td', { 'data-label': 'التقصير بالأيام', dir: 'ltr',
+          title: Number(r.covered_days)
+            ? `${n0(r.absent_days)} غيابًا، غُطّي منها ${n0(r.covered_days)} ببديلٍ معتمد`
+            : null },
+          Number(r.short_days) ? h('span.bad', n0(r.short_days)) : '0',
+          Number(r.covered_days)
+            ? h('span.sub', `غُطّي ${n0(r.covered_days)} ببديل`) : null),
         h('td', { 'data-label': 'الحسميات للغياب', dir: 'ltr' },
           Number(r.deduction) ? h('span.bad', n2(r.deduction)) : n2(0)),
+        h('td', { 'data-label': 'الغياب الجماعي', dir: 'ltr' },
+          h('button.btn.xs', { type: 'button',
+            class: Number(r.coll_deduction) ? 'danger' : '',
+            'aria-label': 'وقائع الغياب الجماعي',
+            title: Number(r.coll_days)
+              ? `${r.coll_days} واقعة · ${r.coll_absent} متغيبًا في الزائد`
+              : 'لا واقعةَ غيابٍ جماعي — اضغط للتفصيل',
+            onclick: () => collectiveDialog(r) }, n2(r.coll_deduction))),
         h('td', { 'data-label': 'نسبة المستخلص', dir: 'ltr' },
           r.eval_avg == null
             ? h('span.muted', '—')
-            : h('span', { class: r.eval_pct < 100 ? 'bad' : 'ok',
-                title: `متوسط التقييم ${r.eval_avg} من ١٠٠` }, `${r.eval_pct}٪`),
-          r.eval_warn ? h('span.badge.bad', { title: 'إنذارٌ خطي كما نصّت الكراسة' }, 'إنذار') : null),
+            : h('button.btn.xs', { type: 'button',
+                class: r.eval_pct < 100 ? 'bad' : '',
+                'aria-label': 'درجات الأفراد',
+                title: `متوسط التقييم ${r.eval_avg} من ١٠٠ · ${r.eval_n} أفراد`
+                  + ' — اضغط لدرجات الأفراد',
+                onclick: () => membersDialog(r) }, `${r.eval_pct}٪`),
+          r.eval_warn ? h('span.badge.bad', { title: 'إنذارٌ خطي كما نصّ العقد' }, 'إنذار') : null,
+          Number(r.eval_below)
+            ? h('span.sub', `${n0(r.eval_below)} دون السبعين`) : null,
+          Number(r.eval_weeks_short)
+            ? h('span.badge.warn', { title: 'أفرادٌ أقلُّ من أربعة أسابيع مسجَّلة: '
+                + 'تُراجع قبل الاحتساب' }, `${n0(r.eval_weeks_short)} ناقص الأسابيع`) : null),
         h('td', { 'data-label': 'حسم التقييم', dir: 'ltr' },
           Number(r.eval_cut) ? h('span.bad', n2(r.eval_cut)) : n2(0)),
         h('td', { 'data-label': 'الصافي', dir: 'ltr' }, h('b', n2(r.net))),
@@ -223,47 +360,60 @@ export async function opsSection() {
       h('div.row.between',
         h('p.small.muted', { style: { margin: 0 } },
           'بنود هذا التقرير من كراسة المنافسة: فريق الإرشاد المكاني والديني بموقعيه ومواسمه. '
-          + 'والحسم بأمرين كما نصّت: غيابٌ يُثبت من سجلّ الدوام، '
-          + 'ونسبةُ المستخلص من متوسط التقييم الشهري.'),
+          + 'والحسم بثلاثةٍ كما نصّ العقد: غيابُ الفرد الذي لم يُغطَّ ببديلٍ معتمد، '
+          + 'والغيابُ الجماعي إذا تجاوز ٤٥٪، ونسبةُ المستخلص من متوسط التقييم.'),
         addBtn),
       table,
+      shortWeeks
+        ? h('p.small.warn', `وفي التقييم ${n0(shortWeeks)} فردًا دون أربعة أسابيعَ مسجَّلة: `
+            + 'والدرجةُ مجموعُ الأسابيع، فتنقص بنقصانها. تُراجع مع مشرفي الهيئة '
+            + 'قبل اعتماد المستخلص.')
+        : null,
       h('section.card.stack.ops-sum',
         line('الإجمالي', total),
         line('الحسميات للغياب', absent, 'bad'),
+        line('حسم الغياب الجماعي', coll, 'bad'),
         line('حسم التقييم', evalCut, 'bad'),
         line('الإجمالي بعد الحسميات', afterDed),
         line('ضريبة القيمة المضافة ١٥٪', vat),
         line('الإجمالي شامل الضريبة', afterDed + vat, 'grand'),
-        h('p.small.muted', 'ونسبة المستخلص من جدول الكراسة: من ٩٠ إلى ١٠٠ ← ١٠٠٪، '
-          + 'ومن ٨٠ إلى ٨٩ ← ٩٠٪، ومن ٧٠ إلى ٧٩ ← ٨٠٪، وأقلُّ من ٧٠ ← إنذارٌ خطي وحسمُ ١٠٪.')),
+        h('p.small.muted', 'ونسبة المستخلص من جدول العقد: من ٩٠ إلى ١٠٠ ← ١٠٠٪، '
+          + 'ومن ٨٠ إلى ٨٩ ← ٩٠٪، ومن ٧٠ إلى ٧٩ ← ٨٠٪، وأقلُّ من ٧٠ ← ٧٠٪ مع توجيه إنذار. '
+          + 'والتكلفة اليومية قيمةُ الشهر على عدد الأيام التشغيلية وعدد أفراد الفريق.')),
       h('div.row',
         h('button.btn.sm', { type: 'button',
-          onclick: () => exportOps(rows, total, absent, evalCut, vat) }, '⤓ تصدير إلى Excel')));
+          onclick: () => exportOps(rows, total, absent, coll, evalCut, vat) },
+          '⤓ تصدير إلى Excel')));
   }
 
-  const exportOps = (rows, total, absent, evalCut, vat) => {
-    const out = [['م', 'البند', 'الموقع', 'الموسم', 'عدد الأفراد',
-      'التكلفة الشهرية الفردية', 'التكلفة الإجمالية', 'التقصير بالأيام',
-      'الحسميات للغياب', 'متوسط التقييم', 'نسبة المستخلص', 'حسم التقييم',
-      'الصافي', 'ملاحظة']];
+  const exportOps = (rows, total, absent, coll, evalCut, vat) => {
+    const head = ['م', 'البند', 'الموقع', 'الموسم', 'عدد الأفراد', 'الأيام التشغيلية',
+      'التكلفة الشهرية الفردية', 'القيمة اليومية للتشغيل', 'قيمة الفرد اليومية',
+      'التكلفة الإجمالية', 'الغياب المسجَّل', 'المغطَّى ببديل', 'التقصير المحسوم',
+      'الحسميات للغياب', 'وقائع الغياب الجماعي', 'حسم الغياب الجماعي',
+      'متوسط التقييم', 'نسبة المستخلص', 'حسم التقييم', 'الصافي', 'ملاحظة'];
+    const out = [head];
     const f2 = v => Number(v || 0).toFixed(2);
     for (const r of rows) {
       out.push([String(r.code), r.name, r.mosque ? OPS_MOSQUE[r.mosque] : '',
-        OPS_SEASON[r.season] || '', String(r.staff_count), f2(r.unit_cost),
-        f2(r.total_cost), String(Number(r.short_days) || 0), f2(r.deduction),
+        OPS_SEASON[r.season] || '', String(r.staff_count), n0(r.op_days),
+        f2(r.unit_cost), f2(r.day_cost), f2(r.person_day), f2(r.total_cost),
+        n0(r.absent_days), n0(r.covered_days), n0(r.short_days), f2(r.deduction),
+        n0(r.coll_days), f2(r.coll_deduction),
         r.eval_avg == null ? '' : String(r.eval_avg), `${r.eval_pct}%`,
         f2(r.eval_cut), f2(r.net), r.note || '']);
     }
-    const afterDed = total - absent - evalCut;
+    const afterDed = total - absent - coll - evalCut;
     const pad = (label, ...tail) => {
-      const row = new Array(14).fill('');
+      const row = new Array(head.length).fill('');
       row[1] = label;
       tail.forEach(([i, v]) => { row[i] = v; });
       return row;
     };
-    out.push(pad('الإجمالي', [6, f2(total)], [8, f2(absent)], [11, f2(evalCut)], [12, f2(afterDed)]));
-    out.push(pad('ضريبة القيمة المضافة ١٥٪', [12, f2(vat)]));
-    out.push(pad('الإجمالي شامل الضريبة', [12, f2(afterDed + vat)]));
+    out.push(pad('الإجمالي', [9, f2(total)], [13, f2(absent)], [15, f2(coll)],
+      [18, f2(evalCut)], [19, f2(afterDed)]));
+    out.push(pad('ضريبة القيمة المضافة ١٥٪', [19, f2(vat)]));
+    out.push(pad('الإجمالي شامل الضريبة', [19, f2(afterDed + vat)]));
     try {
       downloadBlob(buildXlsx(out, { sheetName: 'التكاليف التشغيلية', allText: true }),
         `التكاليف-التشغيلية-${month}.xlsx`);
@@ -274,9 +424,8 @@ export async function opsSection() {
   return h('div.stack',
     h('div.row.between',
       h('div', h('h3', 'التقرير الشهري للتكاليف التشغيلية'),
-        h('p.small.muted', 'على كراسة المنافسة: بندًا بندًا بعدده وتكلفته، '
-          + 'وما حُسم للغياب والتقييم، ثم الضريبة والصافي.')),
+        h('p.small.muted', 'على كراسة المنافسة: بندًا بندًا بعدده وتكلفته وأيامه التشغيلية، '
+          + 'وما حُسم للغياب وللغياب الجماعي وللتقييم، ثم الضريبة والصافي.')),
       h('label.field', 'الشهر', monthInput)),
     box);
 }
-

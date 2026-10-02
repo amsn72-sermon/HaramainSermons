@@ -1,7 +1,7 @@
 // بطاقات عمل فريق الترجمة: تصميمها بالسحب والإفلات وطباعتها (ملاحظتا ٨٥ و٨٦)
 import { h, toast, busy, escapeHtml, fmtDate } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { ROLE_LABEL, langName } from '../store.js';
+import { ROLE_LABEL, langName, roleLabel} from '../store.js';
 import { urlToDataUrl } from '../photo.js';
 import {
   CARD, HARAMAIN_LOGO, ITEM_LABEL, ITEM_ORDER, COLORS, PRESETS, PRESET_LAYOUT,
@@ -91,7 +91,7 @@ export async function render(ctx) {
     } else {
       const text = itemText(key, {
         member: member || { full_name: 'اسم المترجم' }, cfg: cfg(),
-        roleLabel: ROLE_LABEL[member?.role] || 'مترجم',
+        roleLabel: roleLabel(member) || 'مترجم',
         langsText: (langsOf[member?.id] || []).map(c => langName(c)).join(' · ')
       });
       inner = document.createTextNode(text || `(${ITEM_LABEL[key]})`);
@@ -433,7 +433,7 @@ export async function render(ctx) {
       const cb = h('input', { type: 'checkbox', checked: picked.has(m.id) ? true : null });
       cb.onchange = () => { cb.checked ? picked.add(m.id) : picked.delete(m.id); count(); drawStage(); };
       return h('label.check', cb, h('span', m.full_name,
-        h('span.small.muted', ` — ${ROLE_LABEL[m.role]}`),
+        h('span.small.muted', ` — ${roleLabel(m)}`),
         m.track === 'field' && h('span.badge', 'إرشاد مكاني'),
         m.track === 'answers' && h('span.badge', 'إجابة السائلين'),
         !photoOf[m.id] && h('span.badge.warn', 'بلا صورة'),
@@ -525,6 +525,45 @@ export async function render(ctx) {
   for (const el of Object.values(f)) el.addEventListener('input', drawStage);
   drawList(); count(); drawBand(); drawLogo(); drawStage();
 
+  // شريطُ أيقونات: كلُّ أيقونةٍ تفتح خياراتها وحدها، فلا تزدحم الشاشة
+  // بكل الخيارات معًا (ملاحظة ١٩٩)
+  function sideTools() {
+    const TABS = [
+      ['data',  '▤', 'بيانات البطاقة', 'العنوان والمسؤول والصلاحية',
+        () => h('div.stack',
+          h('label.field', 'عنوان البطاقة', f.title),
+          h('label.field', 'السطر تحته', f.subtitle),
+          h('label.field', 'اسم المسؤول', f.official_name),
+          h('label.field', 'منصب المسؤول', f.official_title),
+          h('label.field', 'صلاحية البطاقة حتى', f.valid_until))],
+      ['preset', '▦', 'القوالب', 'تصاميم جاهزة',
+        () => h('div.stack',
+          h('p.small.muted', 'اختر أقربها إلى ما تريد ثم عدّل عليه.'),
+          h('label.field', 'قالب جاهز', h('div.row.tight', presetSel, applyPreset)))],
+      ['font',  '🎨', 'الألوان والخط', 'خط البطاقة وألوانها', () => fontBox],
+      ['logo',  '🖼', 'الصور والشعار', 'الشعار وخياراته', () => logoBox],
+      ['band',  '▭', 'الشريط والخلفية', 'الشريط والفواصل وخلفية البطاقة', () => bandBox],
+      ['save',  '💾', 'حفظ التصميم', 'يُحفظ للفريق كلِّه',
+        () => h('div.stack',
+          h('p.small.muted', 'يُحفظ التصميم فيصير قالبَ بطاقات الفريق كلِّه.'),
+          h('div.row', saveBtn))]
+    ];
+    const body = h('div.card.stack.cd-tabbody');
+    const btns = TABS.map(([key, icon, label, hint, make]) => {
+      const b = h('button.cd-tool', { type: 'button', 'aria-label': label, title: hint },
+        h('i.cd-tool-icon', { 'aria-hidden': 'true' }, icon),
+        h('b', label), h('span.small.muted', hint));
+      b.onclick = () => {
+        btns.forEach(x => x.classList.remove('on'));
+        b.classList.add('on');
+        body.replaceChildren(h('h3', label), make());
+      };
+      return b;
+    });
+    setTimeout(() => btns[0].click(), 0);
+    return h('div.stack.cd-side', h('div.cd-tools', btns), body);
+  }
+
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'بطاقات العمل'),
       h('p.muted', 'بطاقة بمقاس الهوية الوطنية ٨٥٫٦×٥٤ مم. اسحب أي عنصر إلى مكانه، وغيّر حجم خطه ولونه، ثم اطبع.'))),
@@ -536,20 +575,7 @@ export async function render(ctx) {
         h('div.card-stage-wrap', stage),
         h('p.small.muted', 'اسحب العنصر بالفأرة، أو اخترَه ثم حرّكه بالأسهم (مع Shift خطوة أكبر).'),
         h('div.row', resetBtn)),
-      h('div.stack.cd-side',
-        h('div.card.stack',
-          h('h3', 'بيانات البطاقة'),
-          h('label.field', 'عنوان البطاقة', f.title),
-          h('label.field', 'السطر تحته', f.subtitle),
-          h('label.field', 'اسم المسؤول', f.official_name),
-          h('label.field', 'منصب المسؤول', f.official_title),
-          h('label.field', 'صلاحية البطاقة حتى', f.valid_until),
-          h('label.field', 'قالب جاهز', h('div.row.tight', presetSel, applyPreset)),
-          h('div.row', saveBtn)),
-        h('div.card.stack', h('h3', 'الشكل والشعار'),
-          fontBox,
-          h('details.cd-more', h('summary', 'الشعار وخياراته'), logoBox),
-          h('details.cd-more', h('summary', 'الشريط والفواصل وخلفية البطاقة'), bandBox)))),
+      sideTools()),
     h('div.card.stack',
       h('div.row.between', h('h3', 'من تُطبع بطاقته'), h('div.row', onlyTranslators, counter)),
       h('label.check', allBox, h('b', 'تحديد الكل')),
@@ -590,7 +616,7 @@ function printCards(rows, cfg, layout, logoData, customData = {}) {
     }
     const text = itemText(key, {
       member: row.member, cfg,
-      roleLabel: ROLE_LABEL[row.member.role] || row.member.role,
+      roleLabel: roleLabel(row.member),
       langsText: row.langsText
     });
     return text ? `<div class="cd-item" style="${style}">${esc(text)}</div>` : '';

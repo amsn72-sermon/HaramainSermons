@@ -21,6 +21,16 @@ export const state = {
 
 export const ROLE_LABEL = { manager: 'مدير المشروع', coordinator: 'منسق', translator: 'مترجم',
   supervisor: 'مدير المشروع من الهيئة' };
+
+// صفتان تُكتبان على حساب المنسق، وصلاحيتُهما صلاحيتُه نفسُها (ملاحظة ٢٠٠)
+export const ADMIN_TITLE = {
+  ops_manager: 'مدير العمليات التشغيلية',
+  ops_deputy:  'مساعد مدير العمليات'
+};
+// الصفةُ المكتوبة إن وُجدت، وإلا فاسمُ الدور
+export const roleLabel = m =>
+  (m && m.admin_title && ADMIN_TITLE[m.admin_title])
+  || ROLE_LABEL[m?.role] || m?.role || '';
 export const STATUS_LABEL = { pending: 'بانتظار التفعيل', active: 'مفعّل', disabled: 'معطّل' };
 export const TRACK_STATUS = {
   awaiting_receipt: ['بانتظار الاستلام', 'warn'],

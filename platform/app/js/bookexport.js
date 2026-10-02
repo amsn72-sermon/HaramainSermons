@@ -2,11 +2,15 @@
 //   يُبنى في نافذة مستقلة كما تُبنى ورقة الطباعة، ثم يُطبع أو يُحفظ PDF.
 import { PAGE, LETTERHEAD, cardColumns, heading, docVerifyUrl } from './page.js';
 import { sanitize } from './sanitize.js';
-import { langDir, langName } from './store.js';
-import { fmtHijri, fmtSermonDate } from './ui.js';
+import { langDir, langName, MOSQUE_ANY } from './store.js';
+import { fmtHijri } from './ui.js';
 import { qrPngDataUrl } from './qr.js';
 
-const INDEX_ROWS = 22;      // سطور الفهرس في الصفحة الواحدة
+// الفهرس سطرٌ لكل عمل، فتُختصر الألقاب الطويلة ويبقى الاسم (ملاحظة ١٥٩)
+const shortName = v => (v ? String(v).replace(/^\s*(فضيلة\s+)?(الشيخ|الدكتور|د\.|أ\.د\.?)\s*/g, '')
+  .replace(/^\s*(الشيخ|الدكتور|د\.)\s*/g, '').trim() || String(v) : '—');
+
+const INDEX_ROWS = 26;      // سطور الفهرس في الصفحة الواحدة — الخطّ أصغر فتزيد (ملاحظة ١٥٩)
 
 // ترتيب الخطب في الكتاب: بالتاريخ ثم بالعنوان
 export const sortBook = items => [...items].sort((a, b) => {
@@ -61,10 +65,15 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 .cover .meta { font-size: 11pt; color: #3b3630; line-height: 2; }
 .cover .edition { font-size: 9pt; color: #6b6257; direction: ltr; }
 .idx h2 { font-size: 15pt; margin: 0 0 4mm; color: #1d1a16; }
-.idx table { width: 100%; border-collapse: collapse; font-size: 10.5pt; }
-.idx th, .idx td { border-bottom: 1px solid #e7e1d8; padding: 1.6mm 2mm; text-align: start; }
-.idx th { color: #6b6257; font-weight: 600; font-size: 9.5pt; }
-.idx td.no, .idx td.pg { direction: ltr; text-align: center; white-space: nowrap; }
+.idx table { width: 100%; border-collapse: collapse; font-size: 8.5pt; table-layout: fixed; }
+.idx th, .idx td { border-bottom: 1px solid #e7e1d8; padding: 1.1mm 1.4mm; text-align: start;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.idx th { color: #6b6257; font-weight: 600; font-size: 8pt; }
+.idx td.no, .idx td.pg { direction: ltr; text-align: center; }
+.idx col.c-no { width: 7mm; } .idx col.c-title { width: 40mm; } .idx col.c-kh { width: 40mm; }
+.idx col.c-mosque { width: 20mm; } .idx col.c-date { width: 28mm; } .idx col.c-doc { width: 25mm; }
+.idx col.c-lang { width: 22mm; }
+.idx col.c-pg { width: 9mm; }
 .sec-title { font-size: 14pt; font-weight: 700; margin: 0 0 3mm; color: #1d1a16; }
 @media screen { body { background: #d9d9d9 !important; } .sheet { margin: 16px auto; box-shadow: 0 2px 12px #0003; } }
 @media print { .sheet { margin: 0; box-shadow: none; height: ${P.h - 0.5}mm; } }
@@ -147,10 +156,13 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 
     // ١) تدفّق لكل عمل، وحساب صفحاته
     const works = items.map(it => {
+      const src = !!it.track.is_source;
       const flow = el('div', 'print-body flow');
-      flow.dir = langDir(it.track.language_code);
-      flow.lang = it.track.language_code;
-      const title = el('h2', 'sec-title', `${heading(it.material)} — ${it.material.title}`);
+      flow.dir = src ? 'rtl' : langDir(it.track.language_code);
+      flow.lang = src ? 'ar' : it.track.language_code;
+      const title = el('h2', 'sec-title',
+        `${heading(it.material)} — ${it.material.title}`
+        + (src ? ' — الأصل العربي' : ''));
       title.dir = 'rtl'; title.lang = 'ar';
       flow.append(title, cardFor(it));
       const body = el('div'); body.innerHTML = sanitize(it.track.translation_html);
@@ -184,19 +196,29 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
     out.push(cover);
 
     // ٤) الفهرس
+    const mixed = !meta.language;
     const entries = works.map((wk, i) => [String(i + 1), wk.it.material.title,
-      wk.it.material.sermon_date ? fmtSermonDate(wk.it.material.sermon_date) : '—',
+      shortName(wk.it.khateeb || wk.it.material.khateeb?.name || wk.it.material.author),
+      MOSQUE_ANY[wk.it.material.mosque] || '—',
+      wk.it.material.sermon_date ? fmtHijri(wk.it.material.sermon_date) : '—',
+      ...(mixed ? [wk.it.track.is_source ? 'العربية (الأصل)'
+                                          : langName(wk.it.track.language_code)] : []),
       wk.it.track.doc_no || '—', String(wk.page)]);
+    const COLS = ['c-no', 'c-title', 'c-kh', 'c-mosque', 'c-date',
+      ...(mixed ? ['c-lang'] : []), 'c-doc', 'c-pg'];
+    const HEAD = ['م', 'عنوان العمل', 'الخطيب', 'المسجد', 'التاريخ',
+      ...(mixed ? ['اللغة'] : []), 'رقم التوثيق', 'الصفحة'];
     for (let p = 0; p < idxPages; p++) {
       const sh = sheet();
       const win = el('div', 'win');
       const box = el('div', 'print-body idx');
       box.append(el('h2', null, p === 0 ? 'الفهرس' : 'الفهرس (تتمة)'));
       const tbl = d.createElement('table');
+      const cg = d.createElement('colgroup');
+      for (const c of COLS) { const col = d.createElement('col'); col.className = c; cg.append(col); }
+      tbl.append(cg);
       const th = d.createElement('thead'), htr = d.createElement('tr');
-      for (const t of ['م', 'العنوان', 'التاريخ', 'رقم التوثيق', 'الصفحة']) {
-        const c2 = d.createElement('th'); c2.textContent = t; htr.append(c2);
-      }
+      for (const t of HEAD) { const c2 = d.createElement('th'); c2.textContent = t; htr.append(c2); }
       th.append(htr); tbl.append(th);
       const tb = d.createElement('tbody');
       for (const row of entries.slice(p * INDEX_ROWS, (p + 1) * INDEX_ROWS)) {
@@ -204,8 +226,8 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
         row.forEach((v, i) => {
           const td = d.createElement('td');
           if (i === 0) td.className = 'no';
-          if (i === 3 || i === 4) { td.className = 'pg'; td.dir = 'ltr'; }
-          td.textContent = v; tr.append(td);
+          if (i === 5 || i === 6) { td.className = 'pg'; td.dir = 'ltr'; }
+          td.title = v; td.textContent = v; tr.append(td);
         });
         tb.append(tr);
       }

@@ -217,6 +217,7 @@ async function docsSection(ctx, team, scr, group = 'translators') {
     h('option', { value: 'group' }, GROUP_NAME[group] || 'هذه القائمة'),
     h('option', { value: 'all' }, 'كل الفريق'));
   const status = h('select', { 'aria-label': 'حالة المستند' },
+    h('option', { value: 'matrix' }, 'كشف البيانات كاملًا'),
     h('option', { value: 'pending' }, 'ما ينتظر التدقيق'),
     h('option', { value: 'all' }, 'كل المستندات'),
     h('option', { value: 'approved' }, 'المعتمدة'),
@@ -288,8 +289,100 @@ async function docsSection(ctx, team, scr, group = 'translators') {
           st !== 'rejected' && h('button.btn.sm.danger', { type: 'button', onclick: () => decide(m, kind, 'rejected') }, 'إعادة للعضو'))));
   }
 
+  // ---------- كشفُ البيانات: صفٌّ لكل حساب، وحالُ كل بيانٍ خانة ----------
+  // اكتمل ✓ · تحت التدقيق ◷ · لم يُرفع ✗ · أُعيد ⟲ · لا يلزمه —
+  const MARK = {
+    ok:     ['✓', 'ok',   'اكتمل واعتُمد'],
+    review: ['◷', 'warn', 'تحت التدقيق'],
+    none:   ['✗', 'bad',  'لم يُرفع'],
+    bad:    ['⟲', 'bad',  'أُعيد للعضو ليُصحّحه'],
+    na:     ['—', 'muted', 'لا يلزم هذا الحساب']
+  };
+  const COLS = [
+    ['photo', 'الصورة'], ['iqama', 'الهوية'], ['national_id', 'رقم الهوية'],
+    ['whatsapp', 'الجوال'], ['nationality', 'الجنسية'], ['residence', 'الإقامة'],
+    ['languages', 'اللغات'], ['city_state', 'المدينة'], ['bank', 'الحساب البنكي']
+  ];
+  let matrix = null;
+
+  const cell = (v, label) => {
+    const [sign, tone, title] = MARK[v] || MARK.na;
+    return h('td', { 'data-label': label, class: `mx-cell ${tone}`, title },
+      h('span.mx-mark', { class: tone, 'aria-label': `${label}: ${title}` }, sign));
+  };
+
+  const remind = async (ids, btn) => busy(btn, async () => {
+    try {
+      const n = await db.rpc('remind_profile_data', { p_members: ids });
+      toast(Number(n) > 0 ? `أُرسل التذكير إلى ${Number(n)}.` : 'لا أحد ينقصه بيان.', 'ok');
+      matrix = null;
+      draw();
+    } catch (err) { toast(err.message, 'bad'); }
+  });
+
+  async function drawMatrix(inScope) {
+    if (!matrix) {
+      try { matrix = await db.rpc('member_data_matrix'); }
+      catch (err) { box.replaceChildren(h('p.small.bad', err.message)); return; }
+      matrix = Array.isArray(matrix) ? matrix : [];
+    }
+    const ids = new Set(inScope.map(m => m.member_id || m.id));
+    const rows = matrix.filter(r => ids.has(r.member_id));
+    const short = rows.filter(r => Number(r.missing) > 0);
+    const wait = rows.filter(r => Number(r.waiting) > 0);
+    const done = rows.filter(r => r.complete);
+
+    summary.textContent = `في هذه القائمة: ${rows.length} حسابًا · اكتملت بياناتهم: `
+      + `${done.length} · تحت التدقيق: ${wait.length} · ينقصهم بيان: ${short.length}`;
+
+    const remindAll = h('button.btn.sm.primary', { type: 'button' },
+      `تذكير من ينقصه بيان (${short.length})`);
+    remindAll.onclick = () => remind(short.map(r => r.member_id), remindAll);
+    if (!short.length) remindAll.disabled = true;
+
+    box.replaceChildren(
+      h('div.row.wrap.between',
+        h('p.small.muted', { style: { margin: 0 } },
+          'الخانة الخضراء ما اكتمل واعتُمد، والحمراء ما لم يُرفع أو أُعيد، '
+          + 'والصفراء ما هو تحت التدقيق. ويبقى التذكير حتى تكتمل البيانات.'),
+        remindAll),
+      h('div.table-wrap', h('table.responsive.mx-table',
+        h('thead', h('tr',
+          h('th', 'الحساب'), h('th', 'الفريق'),
+          COLS.map(([, label]) => h('th', { class: 'mx-head' }, label)),
+          h('th', 'الناقص'), h('th', 'آخر تذكير'), h('th', ''))),
+        h('tbody', rows.map(r => {
+          const btn = h('button.btn.xs', { type: 'button', title: 'تذكير هذا العضو' }, 'تذكير');
+          btn.onclick = () => remind([r.member_id], btn);
+          if (!Number(r.missing)) btn.disabled = true;
+          return h('tr', { class: r.complete ? 'mx-done' : (Number(r.missing) ? 'mx-short' : '') },
+            h('td', { 'data-label': 'الحساب' }, h('b', r.full_name),
+              h('span.sub', { dir: 'ltr' }, r.email || ''),
+              r.data_note ? h('span.sub.bad', r.data_note) : null),
+            h('td', { 'data-label': 'الفريق' },
+              h('span.small', GROUP_NAME[GROUP_OF({ role: r.role, track: r.track })] || '—')),
+            COLS.map(([k, label]) => cell(r[k], label)),
+            h('td', { 'data-label': 'الناقص', dir: 'ltr' },
+              r.complete
+                ? h('span.badge.ok', 'مكتمل')
+                : h('span.badge', { class: Number(r.missing) ? 'bad' : 'warn' },
+                    Number(r.missing) ? String(r.missing) : 'تدقيق')),
+            h('td', { 'data-label': 'آخر تذكير' },
+              r.reminded_at
+                ? h('span.small.muted', fmtDateTime(r.reminded_at),
+                    Number(r.remind_count) > 1
+                      ? h('span.sub', `${r.remind_count} مرات`) : null)
+                : h('span.small.muted', '—')),
+            h('td', btn));
+        })))),
+      short.length
+        ? h('p.small.warn', 'ولا تُصدَر بطاقةُ عملٍ لمن لم تكتمل بياناتُه.')
+        : h('p.small.ok', 'اكتملت بيانات هذه القائمة.'));
+  }
+
   function draw() {
     const inScope = people.filter(m => scope.value === 'all' || GROUP_OF(m) === group);
+    if (status.value === 'matrix') { drawMatrix(inScope); return; }
     const want = status.value;
     const items = [];
     if (want !== 'missing') {

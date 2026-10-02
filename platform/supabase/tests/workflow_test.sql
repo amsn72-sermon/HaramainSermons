@@ -2563,13 +2563,38 @@ begin
   if jsonb_array_length(v -> 'sections') <> 20 then
     raise exception 'FAIL: أقسام المبادرة (%)', jsonb_array_length(v -> 'sections');
   end if;
-  foreach v_txt in array array['سجلّ الترجمة الفورية', 'الدليل المصطلحي الشرعي الموحَّد',
-                               'هيئة كتاب', 'مدير المشروع من الهيئة', 'التقييم الأسبوعي',
+  foreach v_txt in array array['الترجمة الفورية', 'الدليل المصطلحي الشرعي الموحَّد',
+                               'هيئة كتاب', 'التقييم الأسبوعي',
                                'WAV', 'صدر الصفحة الأولى', 'البيانات الرئيسة',
-                               'قاعات الاجتماعات والتدريب', 'الدخول للقاعة', 'عدّاداته'] loop
+                               'قاعات الاجتماعات والتدريب', 'الدخول للقاعة', 'عدّاداته',
+                               'لا فتوى لأحدٍ من الفريق'] loop
     if position(v_txt in v::text) = 0 then raise exception 'FAIL: صفحة المبادرة لا تذكر %', v_txt; end if;
   end loop;
-  raise notice 'PASS: صفحة المبادرة تعرض ما استجدّ، بلا ذكرٍ مالي، وتنسب المبادرة لجامعة أم القرى مرة واحدة';
+
+  -- والصفحةُ تعريفٌ بالمبادرة لا دليلُ تشغيلٍ داخلي: فلا تُعدَّد فيها
+  -- صلاحياتُ الحسابات ولا من يملك ماذا من الإدارة (ملاحظة ١٩٨)
+  -- الأدوارُ تُعرَّف في بطاقات الفريق، وإنما يُمنع شرحُ من يملك ماذا في النثر
+  if exists (select 1 from jsonb_array_elements(v -> 'sections') s2,
+                           jsonb_array_elements(s2 -> 2) b2
+              where b2 ->> 0 in ('p', 'callout')
+                and (b2 ->> 1 like '%المنسق%' or b2 ->> 1 like '%مدير المشروع%')) then
+    raise exception 'FAIL: صفحة المبادرة تعدّد صلاحيات الإدارة';
+  end if;
+  if exists (select 1 from jsonb_array_elements(v -> 'sections') s2,
+                           jsonb_array_elements(s2 -> 2) b2
+              where b2 ->> 0 = 'h3'
+                and b2 ->> 1 in ('قائمة صلاحيات الحساب الإداري',
+                                 'التحقق بخطوتين: عامًّا أو لحسابٍ بعينه',
+                                 'باب التسجيل',
+                                 'حساب مدير المشروع من الهيئة — اطّلاعٌ لا تعديل')) then
+    raise exception 'FAIL: صفحة المبادرة فيها تفصيلٌ إداري داخلي';
+  end if;
+  if jsonb_array_length((select s2 -> 2 from jsonb_array_elements(v -> 'sections') s2
+                          where s2 ->> 0 = 'team')) > 16 then
+    raise exception 'FAIL: قسمُ الفريق لم يُختصر';
+  end if;
+
+  raise notice 'PASS: صفحة المبادرة تعرض ما استجدّ، بلا ذكرٍ مالي ولا تعداد صلاحيات، وتنسب المبادرة لجامعة أم القرى مرة واحدة';
 end $$;
 
 -- =====================================================================
@@ -3868,4 +3893,823 @@ begin
   end if;
 
   raise notice 'PASS: لغاتُ المبادرة تُحسب في المنصة وتُستثنى من كميات المستخلص';
+end $$;
+
+-- =====================================================================
+-- ٥١) حسوماتُ العقد على نصّه: الأيامُ التشغيلية، ومراتبُ التقييم،
+--     والبديلُ المعتمد، والغيابُ الجماعي، والفتراتُ الثلاث (ملاحظة ١٩٦)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        v_m1 uuid := '00000000-0000-0000-0000-0000000f0001';
+        v_m2 uuid := '00000000-0000-0000-0000-0000000f0002';
+        v_m3 uuid := '00000000-0000-0000-0000-0000000f0003';
+        v_m4 uuid := '00000000-0000-0000-0000-0000000f0004';
+        v_mo date := date_trunc('month', current_date)::date;
+        v_w date; v_rec record; v_ev jsonb; v_ab jsonb;
+        v_n int; v_sid uuid; v_person numeric; v_day numeric; v_op int;
+begin
+  -- ---------- فريقٌ ميداني بمكة: أربعةُ أفراد ----------
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  insert into auth.users (id, email, raw_user_meta_data) values
+    (v_m1, 'f1@test.local', jsonb_build_object('full_name', 'مرشد أول',
+       'national_id', '1000000001', 'whatsapp', '0500000001',
+       'applied_as', 'field', 'city', 'makkah')),
+    (v_m2, 'f2@test.local', jsonb_build_object('full_name', 'مرشد ثانٍ',
+       'national_id', '1000000002', 'whatsapp', '0500000002',
+       'applied_as', 'field', 'city', 'makkah')),
+    (v_m3, 'f3@test.local', jsonb_build_object('full_name', 'مرشد ثالث',
+       'national_id', '1000000003', 'whatsapp', '0500000003',
+       'applied_as', 'field', 'city', 'makkah')),
+    (v_m4, 'f4@test.local', jsonb_build_object('full_name', 'مرشد رابع',
+       'national_id', '1000000004', 'whatsapp', '0500000004',
+       'applied_as', 'field', 'city', 'makkah'))
+  on conflict (id) do nothing;
+  update public.profiles set track = 'field', city = 'makkah', status = 'active'
+   where id in (v_m1, v_m2, v_m3, v_m4);
+
+  -- والشهرُ يُثبت له عددُ الفريق أربعةً، فيُقاس المحتسَب على ما جُدول
+  perform public.set_ops_month(jsonb_build_object('month', v_mo::text, 'code', 1,
+    'staff_count', 4));
+
+  -- ---------- الأيام التشغيلية: أيامُ الشهر لا ثلاثون دائمًا ----------
+  if public.ops_operating_days('2026-01-10'::date, 'year') <> 31 then
+    raise exception 'FAIL: أيام يناير التشغيلية ليست إحدى وثلاثين';
+  end if;
+  if public.ops_operating_days('2026-04-10'::date, 'year') <> 30 then
+    raise exception 'FAIL: أيام أبريل التشغيلية ليست ثلاثين';
+  end if;
+  if public.ops_operating_days('2026-02-10'::date, 'year') <> 28 then
+    raise exception 'FAIL: أيام فبراير التشغيلية ليست ثمانيًا وعشرين';
+  end if;
+  -- والموسمُ يُعدّ من شهره الهجري، فيُجمع شهراه إلى ثلاثين يومًا
+  if public.ops_operating_days('2026-02-01'::date, 'ramadan')
+     + public.ops_operating_days('2026-03-01'::date, 'ramadan') <> 30 then
+    raise exception 'FAIL: أيام رمضان في شهريه ليست ثلاثين';
+  end if;
+
+  select * into v_rec from public.ops_report(v_mo) where code = 1;
+  v_op := v_rec.op_days; v_person := v_rec.person_day; v_day := v_rec.day_cost;
+  if v_op <> extract(day from (v_mo + interval '1 month - 1 day'))::int then
+    raise exception 'FAIL: أيامُ التقرير التشغيلية خلاف أيام الشهر (%)', v_op;
+  end if;
+  if v_person <> round(v_rec.unit_cost / v_op, 2) then
+    raise exception 'FAIL: قيمةُ الفرد اليومية ليست التكلفة على الأيام التشغيلية';
+  end if;
+  if v_day <> round(v_rec.total_cost / v_op, 2) then
+    raise exception 'FAIL: القيمةُ اليومية ليست قيمةَ الشهر على الأيام التشغيلية';
+  end if;
+  -- ولا تكون القسمةُ على ثلاثين إلا في شهرٍ ثلاثيني
+  if v_op = 30 and v_person = round(v_rec.unit_cost / 31, 2) then
+    raise exception 'FAIL: القسمة على غير الأيام التشغيلية';
+  end if;
+
+  -- ---------- التقييم: مجموعُ أربعة أسابيع بحدِّ مئة ----------
+  delete from public.field_evaluations where member_id in (v_m1, v_m2, v_m3, v_m4);
+  v_w := v_mo + 3;      -- أسبوعٌ يقع وسطُه في الشهر
+  -- مثالُ العقد نفسه: ٩٤ و٨٦ و٧٥ و٦٧، ومتوسطُها ٨٠٫٥٠
+  insert into public.field_evaluations
+    (member_id, week_start, appearance, attendance, interaction, language_skill,
+     compliance, supervisor_name)
+  values
+    (v_m1, v_w,      5, 5, 5, 5, 4, 'مشرف الهيئة'),   -- ٢٤
+    (v_m1, v_w + 7,  5, 5, 5, 4, 4, 'مشرف الهيئة'),   -- ٢٣
+    (v_m1, v_w + 14, 5, 5, 4, 4, 4, 'مشرف الهيئة'),   -- ٢٢
+    (v_m1, v_w + 21, 5, 5, 5, 5, 5, 'مشرف الهيئة'),   -- ٢٥  = ٩٤
+    (v_m2, v_w,      5, 5, 5, 5, 5, 'مشرف الهيئة'),   -- ٢٥
+    (v_m2, v_w + 7,  5, 5, 4, 4, 4, 'مشرف الهيئة'),   -- ٢٢
+    (v_m2, v_w + 14, 4, 4, 4, 4, 4, 'مشرف الهيئة'),   -- ٢٠
+    (v_m2, v_w + 21, 4, 4, 4, 4, 3, 'مشرف الهيئة'),   -- ١٩  = ٨٦
+    (v_m3, v_w,      5, 5, 4, 4, 4, 'مشرف الهيئة'),   -- ٢٢
+    (v_m3, v_w + 7,  3, 3, 3, 3, 2, 'مشرف الهيئة'),   -- ١٤
+    (v_m3, v_w + 14, 4, 4, 3, 3, 3, 'مشرف الهيئة'),   -- ١٧
+    (v_m3, v_w + 21, 5, 5, 4, 4, 4, 'مشرف الهيئة'),   -- ٢٢  = ٧٥
+    (v_m4, v_w,      4, 4, 4, 4, 4, 'مشرف الهيئة'),   -- ٢٠
+    (v_m4, v_w + 7,  4, 3, 3, 3, 3, 'مشرف الهيئة'),   -- ١٦
+    (v_m4, v_w + 14, 3, 3, 3, 2, 2, 'مشرف الهيئة'),   -- ١٣
+    (v_m4, v_w + 21, 4, 4, 4, 3, 3, 'مشرف الهيئة');   -- ١٨  = ٦٧
+
+  v_ev := public.ops_eval(v_mo, 1);
+  if (v_ev ->> 'avg')::numeric <> 80.5 then
+    raise exception 'FAIL: متوسطُ الفريق % لا ٨٠٫٥ — المجموعُ لا متوسطُ النسب',
+      v_ev ->> 'avg';
+  end if;
+  if (v_ev ->> 'pct')::int <> 90 then
+    raise exception 'FAIL: نسبةُ المستخلص % لا تسعون', v_ev ->> 'pct';
+  end if;
+  if (v_ev ->> 'below')::int <> 1 then
+    raise exception 'FAIL: من نزل عن السبعين % لا واحد', v_ev ->> 'below';
+  end if;
+  if (v_ev ->> 'weeks_short')::int <> 0 then
+    raise exception 'FAIL: عُدَّ ناقصُ الأسابيع وكلُّهم أربعة';
+  end if;
+
+  -- ودرجةُ الفرد مجموعُ أسابيعه، ومن نزل عن السبعين فإنذارٌ وحسمُ عُشرِه
+  select * into v_rec from public.ops_eval_members(v_mo, 1) where member_id = v_m1;
+  if v_rec.score <> 94 then raise exception 'FAIL: درجةُ الأول % لا ٩٤', v_rec.score; end if;
+  if v_rec.warn or v_rec.cut_pct <> 0 then
+    raise exception 'FAIL: أُنذر من درجتُه أربعٌ وتسعون';
+  end if;
+  select * into v_rec from public.ops_eval_members(v_mo, 1) where member_id = v_m4;
+  if v_rec.score <> 67 then raise exception 'FAIL: درجةُ الرابع % لا ٦٧', v_rec.score; end if;
+  if not v_rec.warn or v_rec.cut_pct <> 10 then
+    raise exception 'FAIL: من نزل عن السبعين بلا إنذارٍ ولا حسمِ عُشر';
+  end if;
+  -- وقاعدةُ الفرد لا تُحمَّل على بند الفريق: نسبةُ الفريق تسعون لا سبعون
+  if (v_ev ->> 'pct')::int = 70 then
+    raise exception 'FAIL: حُمِّلت قاعدةُ الفرد على بند الفريق';
+  end if;
+
+  -- ---------- وما دون السبعين: سبعون مع إنذار، لا تسعون ----------
+  delete from public.field_evaluations where member_id in (v_m1, v_m2, v_m3);
+  v_ev := public.ops_eval(v_mo, 1);
+  if (v_ev ->> 'avg')::numeric <> 67 then
+    raise exception 'FAIL: متوسطُ الفريق % لا ٦٧', v_ev ->> 'avg';
+  end if;
+  if (v_ev ->> 'pct')::int <> 70 then
+    raise exception 'FAIL: نسبةُ ما دون السبعين % لا سبعون', v_ev ->> 'pct';
+  end if;
+  if not (v_ev ->> 'warn')::boolean then
+    raise exception 'FAIL: ما دون السبعين بلا إنذار';
+  end if;
+
+  -- ---------- ناقصُ الأسابيع يُعلَم فلا يُظلَم بصمتٍ ----------
+  delete from public.field_evaluations where member_id = v_m4 and week_start > v_w + 7;
+  v_ev := public.ops_eval(v_mo, 1);
+  if (v_ev ->> 'weeks_short')::int <> 1 then
+    raise exception 'FAIL: لم يُعلَم ناقصُ الأسابيع';
+  end if;
+  if (v_ev ->> 'avg')::numeric <> 36 then
+    raise exception 'FAIL: درجةُ أسبوعين % لا مجموعَهما', v_ev ->> 'avg';
+  end if;
+
+  -- ثم يُعاد التقييم كاملًا لما بعده
+  insert into public.field_evaluations
+    (member_id, week_start, appearance, attendance, interaction, language_skill,
+     compliance, supervisor_name)
+  values
+    (v_m4, v_w + 14, 5, 5, 5, 5, 5, 'مشرف الهيئة'),
+    (v_m4, v_w + 21, 5, 5, 5, 5, 5, 'مشرف الهيئة'),
+    (v_m1, v_w,      5, 5, 5, 5, 5, 'مشرف الهيئة'),
+    (v_m1, v_w + 7,  5, 5, 5, 5, 5, 'مشرف الهيئة'),
+    (v_m1, v_w + 14, 5, 5, 5, 5, 5, 'مشرف الهيئة'),
+    (v_m1, v_w + 21, 5, 5, 5, 5, 5, 'مشرف الهيئة')
+  on conflict (member_id, week_start) do nothing;
+
+  -- ---------- الفتراتُ ثلاثٌ زمنُ كلٍّ ثمانِ ساعات ----------
+  if public.shift_period(time '06:00') <> 'morning'
+     or public.shift_period(time '13:59') <> 'morning'
+     or public.shift_period(time '14:00') <> 'evening'
+     or public.shift_period(time '21:59') <> 'evening'
+     or public.shift_period(time '22:00') <> 'night'
+     or public.shift_period(time '02:00') <> 'night' then
+    raise exception 'FAIL: الفتراتُ التشغيلية لم تُقسَم على ثمانِ ساعات';
+  end if;
+
+  delete from public.shifts where member_id in (v_m1, v_m2, v_m3, v_m4);
+  insert into public.shifts (member_id, shift_date, start_at, end_at, location, status,
+                             check_in_at)
+  values
+    (v_m1, v_mo + 1, time '06:00', time '14:00', 'المطاف', 'present', now()),
+    (v_m2, v_mo + 1, time '14:00', time '22:00', 'المطاف', 'present', now()),
+    (v_m3, v_mo + 1, time '22:00', time '06:00', 'المطاف', 'present', now()),
+    (v_m4, v_mo + 1, time '06:00', time '13:00', 'المطاف', 'present', now());
+  select count(*) into v_n from public.shift_coverage(v_mo + 1, 'makkah', 'field');
+  if v_n <> 3 then raise exception 'FAIL: فتراتُ اليوم % لا ثلاث', v_n; end if;
+  select * into v_rec from public.shift_coverage(v_mo + 1, 'makkah', 'field')
+   where period = 'morning';
+  if v_rec.required <> 2 or v_rec.present <> 2 then
+    raise exception 'FAIL: تغطيةُ الفترة الصباحية خاطئة';
+  end if;
+  -- والوردية التي خالفت ثمانِ ساعات تُعلَم
+  if v_rec.hours_bad <> 1 then
+    raise exception 'FAIL: لم تُعلَم ورديةٌ خالفت ثمانِ ساعات';
+  end if;
+
+  -- ---------- الغيابُ والبديلُ المعتمد ----------
+  delete from public.shifts where member_id in (v_m1, v_m2, v_m3, v_m4);
+  insert into public.shifts (member_id, shift_date, start_at, end_at, location, status)
+  values (v_m1, v_mo + 2, time '06:00', time '14:00', 'المطاف', 'scheduled')
+  returning id into v_sid;
+  v_ab := public.ops_absence(v_mo, 1);
+  if (v_ab ->> 'absent')::int <> 1 or (v_ab ->> 'uncovered')::int <> 1 then
+    raise exception 'FAIL: الغيابُ لم يُحتسب';
+  end if;
+
+  -- والبديلُ لا يكون صاحبَ الوردية، ولا يُعتمد قبل اختياره
+  begin
+    perform public.set_shift_substitute(v_sid, v_m1, true, null);
+    raise exception 'FAIL: اعتُمد صاحبُ الوردية بديلًا عن نفسه';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+  begin
+    perform public.set_shift_substitute(v_sid, null, true, null);
+    raise exception 'FAIL: اعتُمد بديلٌ لم يُختر';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+
+  perform public.set_shift_substitute(v_sid, v_m2, true, 'بديلٌ مؤهل');
+  v_ab := public.ops_absence(v_mo, 1);
+  if (v_ab ->> 'covered')::int <> 1 or (v_ab ->> 'uncovered')::int <> 0 then
+    raise exception 'FAIL: البديلُ المعتمد لم يرفع الحسم';
+  end if;
+  if public.ops_short_days(v_mo, 1) <> 0 then
+    raise exception 'FAIL: حُسم يومٌ غُطّي ببديلٍ معتمد';
+  end if;
+
+  -- ولمدير المشروع أن يُغلق ذلك فيُحسم كلُّ غياب
+  update public.platform_settings set substitute_relieves = false;
+  if (public.ops_absence(v_mo, 1) ->> 'uncovered')::int <> 1 then
+    raise exception 'FAIL: بقي البديلُ رافعًا للحسم بعد إغلاقه';
+  end if;
+  update public.platform_settings set substitute_relieves = true;
+
+  -- والبديلُ للإدارة لا لعامة الأعضاء
+  perform set_config('request.jwt.claim.sub', v_m2::text, true);
+  begin
+    perform public.set_shift_substitute(v_sid, v_m3, true, 'من غير إدارة');
+    raise exception 'FAIL: اعتمد عضوٌ بديلًا';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+
+  -- ---------- الغيابُ الجماعي: ما تجاوز ٤٥٪ حُسم يومُه كاملًا ----------
+  delete from public.shifts where member_id in (v_m1, v_m2, v_m3, v_m4);
+  insert into public.shifts (member_id, shift_date, start_at, end_at, location, status,
+                             check_in_at)
+  values
+    (v_m1, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'present', now()),
+    (v_m2, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'scheduled', null),
+    (v_m3, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'scheduled', null),
+    (v_m4, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'scheduled', null);
+
+  select count(*) into v_n from public.ops_collective(v_mo, 1);
+  if v_n <> 1 then
+    raise exception 'FAIL: وقائعُ الغياب الجماعي % لا واحدة — أُحتسب اليومُ وفترتُه', v_n;
+  end if;
+  select * into v_rec from public.ops_collective(v_mo, 1);
+  if v_rec.period <> 'day' then
+    raise exception 'FAIL: اليومُ كلُّه تجاوز فلم يُؤخذ مرةً واحدة';
+  end if;
+  if v_rec.required <> 4 or v_rec.absent <> 3 then
+    raise exception 'FAIL: المطلوبُ والمتغيّب في الواقعة خطأ';
+  end if;
+  if v_rec.pct <> 75.0 then
+    raise exception 'FAIL: نسبةُ الغياب % لا خمسةٌ وسبعون', v_rec.pct;
+  end if;
+  if v_rec.allowed <> 1 or v_rec.excess <> 2 then
+    raise exception 'FAIL: المسموحُ والزائد خطأ (% و%)', v_rec.allowed, v_rec.excess;
+  end if;
+  if v_rec.day_cost <> v_day then
+    raise exception 'FAIL: حُسم غيرُ القيمة اليومية لذلك اليوم';
+  end if;
+  if v_rec.surcharge <> round(v_person * 0.60 * 2, 2) then
+    raise exception 'FAIL: غرامةُ الستين في المئة على الزائد خطأ (%)', v_rec.surcharge;
+  end if;
+  if v_rec.total <> v_rec.day_cost + v_rec.surcharge then
+    raise exception 'FAIL: مجموعُ الواقعة ليس اليومَ والغرامة';
+  end if;
+
+  -- وما لم يتجاوز لا يُحسم
+  delete from public.shifts where shift_date = v_mo + 3;
+  insert into public.shifts (member_id, shift_date, start_at, end_at, location, status,
+                             check_in_at)
+  values
+    (v_m1, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'present', now()),
+    (v_m2, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'present', now()),
+    (v_m3, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'present', now()),
+    (v_m4, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'scheduled', null);
+  if exists (select 1 from public.ops_collective(v_mo, 1)) then
+    raise exception 'FAIL: حُسم يومٌ غيابُه ربعٌ لا يتجاوز ٤٥٪';
+  end if;
+
+  -- والبديلُ المعتمد يرفع صاحبَه من المتغيبين
+  delete from public.shifts where shift_date = v_mo + 3;
+  insert into public.shifts (member_id, shift_date, start_at, end_at, location, status)
+  values (v_m1, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'scheduled'),
+         (v_m2, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'scheduled'),
+         (v_m3, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'scheduled'),
+         (v_m4, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'scheduled');
+  if not exists (select 1 from public.ops_collective(v_mo, 1)) then
+    raise exception 'FAIL: غيابُ الجميع لم يُحتسب جماعيًّا';
+  end if;
+  update public.shifts s set sub_member_id = v_mgr, sub_approved = true
+   where s.shift_date = v_mo + 3 and s.member_id in (v_m1, v_m2, v_m3);
+  if exists (select 1 from public.ops_collective(v_mo, 1)) then
+    raise exception 'FAIL: عُدّ المغطَّى ببديلٍ معتمد متغيبًا في الجماعي';
+  end if;
+
+  -- ---------- والتقرير يجمع ذلك كلَّه، والصافي ما بقي ----------
+  delete from public.shifts where shift_date = v_mo + 3;
+  insert into public.shifts (member_id, shift_date, start_at, end_at, location, status)
+  values (v_m1, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'scheduled'),
+         (v_m2, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'scheduled'),
+         (v_m3, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'scheduled'),
+         (v_m4, v_mo + 3, time '06:00', time '14:00', 'المطاف', 'present');
+  update public.shifts set check_in_at = now()
+   where shift_date = v_mo + 3 and member_id = v_m4;
+
+  select * into v_rec from public.ops_report(v_mo) where code = 1;
+  if v_rec.coll_days <> 1 then
+    raise exception 'FAIL: أيامُ الغياب الجماعي في التقرير % لا واحد', v_rec.coll_days;
+  end if;
+  if v_rec.coll_absent <> 2 then
+    raise exception 'FAIL: المتغيبون في الزائد % لا اثنان', v_rec.coll_absent;
+  end if;
+  if v_rec.coll_deduction <= 0 then
+    raise exception 'FAIL: الغيابُ الجماعي بلا حسم';
+  end if;
+  if v_rec.short_days <> 3 then
+    raise exception 'FAIL: أيامُ التقصير % لا ثلاثة', v_rec.short_days;
+  end if;
+  if v_rec.deduction <> round(v_rec.person_day * 3, 2) then
+    raise exception 'FAIL: حسمُ الغياب ليس قيمةَ الفرد اليومية في أيامه';
+  end if;
+  if v_rec.net <> v_rec.total_cost - v_rec.deduction - v_rec.coll_deduction
+                  - v_rec.eval_cut then
+    raise exception 'FAIL: الصافي ليس الإجمالي ناقصَ حسمياته الثلاثة';
+  end if;
+  -- وحسمُ التقييم يُحتسب على ما بقي بعد الحسمين
+  if v_rec.eval_cut <> round((v_rec.total_cost - v_rec.deduction - v_rec.coll_deduction)
+                             * (100 - v_rec.eval_pct) / 100.0, 2) then
+    raise exception 'FAIL: حسمُ التقييم لم يُحتسب على ما بقي';
+  end if;
+
+  -- ---------- ولمدير المشروع أن يُثبت غيرَ المحتسَب ثم يعيده ----------
+  perform public.set_ops_month(jsonb_build_object('month', v_mo::text, 'code', 1,
+    'staff_count', 4, 'operating_days', 20, 'collective_deduction', 1000,
+    'note', 'أُثبت للتجربة'));
+  select * into v_rec from public.ops_report(v_mo) where code = 1;
+  if v_rec.op_days <> 20 then raise exception 'FAIL: لم يُؤخذ العددُ المثبت للأيام'; end if;
+  if v_rec.coll_deduction <> 1000 then
+    raise exception 'FAIL: لم يُؤخذ حسمُ الغياب الجماعي المثبت';
+  end if;
+  if not v_rec.is_manual then raise exception 'FAIL: المثبتُ لم يُعلَم'; end if;
+  begin
+    perform public.set_ops_month(jsonb_build_object('month', v_mo::text, 'code', 1,
+      'operating_days', 40));
+    raise exception 'FAIL: قُبل عددُ أيامٍ فوق الشهر';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+  perform public.clear_ops_month(v_mo, 1);
+  select * into v_rec from public.ops_report(v_mo) where code = 1;
+  if v_rec.op_days = 20 then raise exception 'FAIL: بقي المثبتُ بعد محوه'; end if;
+
+  -- ---------- وهذا كلُّه لمدير المشروع وحده ----------
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  if exists (select 1 from public.ops_collective(v_mo, 1)) then
+    raise exception 'FAIL: رأى المنسق وقائع الغياب الجماعي';
+  end if;
+  if exists (select 1 from public.ops_eval_members(v_mo, 1)) then
+    raise exception 'FAIL: رأى المنسق درجات الأفراد';
+  end if;
+
+  -- ثم تُنظَّف فتبقى الأجزاءُ بعدها على حالها
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  delete from public.shifts where member_id in (v_m1, v_m2, v_m3, v_m4);
+  delete from public.field_evaluations where member_id in (v_m1, v_m2, v_m3, v_m4);
+  update public.profiles set track = 'translation', status = 'disabled'
+   where id in (v_m1, v_m2, v_m3, v_m4);
+
+  raise notice 'PASS: حسوماتُ العقد على نصّه — الأيامُ والمراتبُ والبديلُ والغيابُ الجماعي';
+end $$;
+
+-- =====================================================================
+-- ٥٢) جزاءاتُ العقد بسقفها، ومواعيدُ النصوص بعدد الصفحات (ملاحظة ١٩٧)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        v_n int; v_id uuid; v_other uuid; v_cap jsonb; v_w jsonb; v_s jsonb;
+        v_rec record; v_mat uuid; v_serm uuid; v_lang text; v_amt numeric;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select code into v_lang from public.languages order by sort limit 1;
+
+  -- ---------- جدولُ الجزاءات كما نصّ العقد ----------
+  select count(*) into v_n from public.penalty_kinds where is_active;
+  if v_n <> 9 then raise exception 'FAIL: أنواعُ الجزاءات % لا تسعة', v_n; end if;
+  select * into v_rec from public.penalty_kinds where code = 1;
+  if v_rec.basis <> 'sermon_value' or v_rec.rate <> 50 or v_rec.per <> 'hour' then
+    raise exception 'FAIL: جزاءُ تأخير الخطبة خلاف العقد';
+  end if;
+  select * into v_rec from public.penalty_kinds where code = 6;
+  if v_rec.amount <> 200 or v_rec.per <> 'day' then
+    raise exception 'FAIL: جزاءُ عدم توفير مدير المشروع خلاف العقد';
+  end if;
+  select * into v_rec from public.penalty_kinds where code = 8;
+  if v_rec.amount <> 2000 or v_rec.per <> 'language' then
+    raise exception 'FAIL: جزاءُ إسقاط اللغة خلاف العقد';
+  end if;
+  -- والتحريرية ثلاثُ درجات: عشرون وثلاثون وخمسون
+  if (select rate from public.penalty_kinds where urgency = 'normal'    and basis = 'translation_value') <> 20
+     or (select rate from public.penalty_kinds where urgency = 'urgent'    and basis = 'translation_value') <> 30
+     or (select rate from public.penalty_kinds where urgency = 'emergency' and basis = 'translation_value') <> 50 then
+    raise exception 'FAIL: نسبُ جزاء التحريرية خلاف العقد';
+  end if;
+
+  -- ---------- احتسابُ المقدار ----------
+  if public.penalty_amount(1, 3, 2500) <> 3750.00 then
+    raise exception 'FAIL: جزاءُ ثلاث ساعاتٍ على خطبةٍ بألفين وخمسِ مئة خطأ';
+  end if;
+  if public.penalty_amount(6, 4, null) <> 800.00 then
+    raise exception 'FAIL: جزاءُ أربعة أيامٍ بلا مدير مشروع خطأ';
+  end if;
+  if public.penalty_amount(7, 2, null) <> 1000.00 then
+    raise exception 'FAIL: جزاءُ ساعتَي تأخيرٍ في المراجعة الشرعية خطأ';
+  end if;
+  -- وما لم تُثبت قيمتُه أُخذ سعرُ الخطبة من بنود العقد
+  if public.penalty_amount(1, 1, null)
+     <> round((select unit_price from public.contract_items where code = 1) * 0.5, 2) then
+    raise exception 'FAIL: لم يُؤخذ سعرُ الخطبة من بنود العقد';
+  end if;
+
+  -- ---------- والجزاءات لمدير المشروع وحده ----------
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  begin
+    perform public.save_penalty(jsonb_build_object('kind_code', 6,
+      'happened_on', current_date::text, 'units', 1));
+    raise exception 'FAIL: سجّل المنسق جزاءً';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+  if exists (select 1 from public.penalty_report()) then
+    raise exception 'FAIL: رأى المنسق كشف الجزاءات';
+  end if;
+  if public.penalty_cap() is not null then
+    raise exception 'FAIL: رأى المنسق سقف الغرامات';
+  end if;
+
+  -- ---------- تسجيلُ الواقعة: المقدارُ يُحتسب ----------
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  delete from public.penalties;
+  v_id := public.save_penalty(jsonb_build_object('kind_code', 6,
+    'happened_on', (current_date - 1)::text, 'units', 3,
+    'note', 'ثلاثةُ أيام بلا مدير مشروع'));
+  select * into v_rec from public.penalties where id = v_id;
+  if v_rec.amount <> 600.00 then
+    raise exception 'FAIL: مقدارُ الواقعة % لا ست مئة', v_rec.amount;
+  end if;
+  if v_rec.is_manual then raise exception 'FAIL: عُدَّ المحتسَبُ مثبتًا بيد'; end if;
+  if v_rec.state <> 'draft' then raise exception 'FAIL: الواقعةُ لا تبدأ مسودّة'; end if;
+
+  -- ولا تاريخٌ في المستقبل، ولا وحداتٌ صفر
+  begin
+    perform public.save_penalty(jsonb_build_object('kind_code', 6,
+      'happened_on', (current_date + 2)::text, 'units', 1));
+    raise exception 'FAIL: قُبلت واقعةٌ في المستقبل';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+  begin
+    perform public.save_penalty(jsonb_build_object('kind_code', 6,
+      'happened_on', current_date::text, 'units', 0));
+    raise exception 'FAIL: قُبلت واقعةٌ بلا وحدات';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+
+  -- ---------- وما أُثبت بغير المحتسَب يحتاج سببًا ----------
+  begin
+    perform public.save_penalty(jsonb_build_object('kind_code', 6,
+      'happened_on', current_date::text, 'units', 1, 'amount', 50));
+    raise exception 'FAIL: أُثبت مقدارٌ غير المحتسَب بلا سبب';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+  v_other := public.save_penalty(jsonb_build_object('kind_code', 6,
+    'happened_on', current_date::text, 'units', 1, 'amount', 50,
+    'note', 'سُوِّيت بالتفاوض'));
+  if not (select is_manual from public.penalties where id = v_other) then
+    raise exception 'FAIL: لم يُعلَم المقدارُ المثبتُ بيد';
+  end if;
+
+  -- ---------- الحالات: المسودّة تُحذف، وما بعدها يُسقَط بسبب ----------
+  perform public.set_penalty_state(v_other, 'notified');
+  begin
+    perform public.delete_penalty(v_other);
+    raise exception 'FAIL: حُذفت واقعةٌ خرجت من المسودّة';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+  begin
+    perform public.set_penalty_state(v_other, 'waived', null);
+    raise exception 'FAIL: أُسقطت واقعةٌ بلا سبب';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+  perform public.set_penalty_state(v_other, 'waived', 'أسقطتها الهيئة');
+
+  -- ---------- السقف: عشرون في المئة من قيمة العقد ----------
+  v_cap := public.penalty_cap();
+  if (v_cap ->> 'contract_total')::numeric
+     <> (select sum(total_value) from public.contract_items) then
+    raise exception 'FAIL: القيمةُ الإجمالية للعقد خلاف بنوده';
+  end if;
+  if (v_cap ->> 'cap_amount')::numeric
+     <> round((v_cap ->> 'contract_total')::numeric * 0.20, 2) then
+    raise exception 'FAIL: السقفُ ليس عشرين في المئة';
+  end if;
+  -- والمُسقَطُ لا يُحتسب في المجموع
+  if (v_cap ->> 'imposed')::numeric <> 600.00 then
+    raise exception 'FAIL: دخل المُسقَطُ في مجموع الغرامات (%)', v_cap ->> 'imposed';
+  end if;
+  if (v_cap ->> 'near')::boolean or (v_cap ->> 'over')::boolean then
+    raise exception 'FAIL: نُبِّه إلى السقف ولم يُقارَب';
+  end if;
+
+  -- ومتى تجاوز المجموعُ السقفَ نُبِّه
+  perform public.save_penalty(jsonb_build_object('kind_code', 6,
+    'happened_on', current_date::text, 'units', 1,
+    'amount', (v_cap ->> 'cap_amount')::numeric, 'note', 'للتجربة'));
+  v_cap := public.penalty_cap();
+  if not (v_cap ->> 'over')::boolean then
+    raise exception 'FAIL: لم يُنبَّه إلى تجاوز السقف';
+  end if;
+  if (v_cap ->> 'remaining')::numeric <> 0 then
+    raise exception 'FAIL: بقي من السقف شيءٌ بعد تجاوزه';
+  end if;
+  delete from public.penalties where note = 'للتجربة';
+
+  -- ---------- والكشفُ يحمل اسمَ النوع ووصفَه ----------
+  select * into v_rec from public.penalty_report() where id = v_id;
+  if v_rec.kind_name is null or v_rec.description is null then
+    raise exception 'FAIL: كشفُ الجزاءات بلا اسمٍ ولا وصف';
+  end if;
+  select count(*) into v_n from public.penalty_report(current_date, current_date);
+  if v_n <> 1 then raise exception 'FAIL: حدُّ المدة في الكشف % لا واحد', v_n; end if;
+  delete from public.penalties;
+
+  -- =====================================================================
+  -- مواعيدُ الترجمة التحريرية بعدد الصفحات
+  -- =====================================================================
+  select count(*) into v_n from public.text_deadlines;
+  if v_n <> 9 then raise exception 'FAIL: سطورُ جدول المدد % لا تسعة', v_n; end if;
+  if (select hours from public.text_deadlines where urgency = 'normal' and pages_from = 1) <> 48 then
+    raise exception 'FAIL: الاعتياديةُ لعشر صفحاتٍ ليست يومين';
+  end if;
+  if (select hours from public.text_deadlines where urgency = 'urgent' and pages_from = 1) <> 8 then
+    raise exception 'FAIL: العاجلةُ لعشر صفحاتٍ ليست ثمانِ ساعات';
+  end if;
+  if (select hours from public.text_deadlines where urgency = 'normal' and pages_from = 21) <> 168 then
+    raise exception 'FAIL: الاعتياديةُ لما زاد على عشرين ليست سبعةَ أيام';
+  end if;
+  -- وسطرا الطارئة اللذان يحتاجان استيضاحًا مُعلَمان، وأُخذ بأوسع المهلتين
+  select count(*) into v_n from public.text_deadlines where needs_review;
+  if v_n <> 2 then raise exception 'FAIL: سطورُ الاستيضاح % لا سطران', v_n; end if;
+  if (select hours from public.text_deadlines
+       where urgency = 'emergency' and pages_from = 11) <> 24 then
+    raise exception 'FAIL: لم يُؤخذ بأوسع المهلتين في الطارئة';
+  end if;
+
+  -- ---------- الصفحةُ تُقترح من الكلمات ----------
+  if public.count_pages(1200) <> 5 then raise exception 'FAIL: اقتراحُ الصفحات خطأ'; end if;
+  if public.count_pages(1) <> 1 then raise exception 'FAIL: أقلُّ من صفحةٍ ليس صفحة'; end if;
+  if public.count_pages(0) is not null then raise exception 'FAIL: صفحاتٌ لنصٍّ بلا كلمات'; end if;
+
+  -- ---------- مهلةُ المادة من استلامها ----------
+  insert into public.materials (material_type, title, mosque, sermon_date, author,
+                                source_html, created_by, received_at, urgency, pages)
+  values ('كتب', 'مطوية اختبار المواعيد', 'general', current_date, 'دار النشر',
+          '<p>نص للتجربة</p>', v_mgr, now(), 'normal', 6)
+  returning id into v_mat;
+  insert into public.tracks (material_id, language_code, receipt_due_at)
+  values (v_mat, v_lang, now() + interval '2 days');
+
+  v_w := public.text_window(v_mat);
+  if (v_w ->> 'is_sermon')::boolean then raise exception 'FAIL: عُدَّت المطوية خطبة'; end if;
+  if (v_w ->> 'hours')::numeric <> 48 then
+    raise exception 'FAIL: مهلةُ ستِّ صفحاتٍ اعتيادية % لا ثمانٍ وأربعون ساعة', v_w ->> 'hours';
+  end if;
+  if (v_w ->> 'overdue')::boolean then raise exception 'FAIL: تجاوزت المهلةُ من حينها'; end if;
+  if (v_w ->> 'due_at')::timestamptz
+     <> (v_w ->> 'received_at')::timestamptz + interval '48 hours' then
+    raise exception 'FAIL: الموعدُ ليس الاستلامَ وزيادةَ المهلة';
+  end if;
+
+  -- والعاجلةُ أضيقُ من الاعتيادية
+  perform public.set_material_text_plan(v_mat, 'urgent', 6, null);
+  if (public.text_window(v_mat) ->> 'hours')::numeric <> 8 then
+    raise exception 'FAIL: مهلةُ العاجلة لم تضِق';
+  end if;
+  -- وتتغير بعدد الصفحات
+  perform public.set_material_text_plan(v_mat, 'urgent', 15, null);
+  if (public.text_window(v_mat) ->> 'hours')::numeric <> 24 then
+    raise exception 'FAIL: لم تتغير المهلةُ بعدد الصفحات';
+  end if;
+  perform public.set_material_text_plan(v_mat, 'urgent', 40, null);
+  if (public.text_window(v_mat) ->> 'hours')::numeric <> 72 then
+    raise exception 'FAIL: مهلةُ ما زاد على عشرين صفحةً خطأ';
+  end if;
+
+  -- وما مضى موعدُه يُعلَم بتأخيره
+  perform public.set_material_text_plan(v_mat, 'normal', 6, now() - interval '5 days');
+  v_w := public.text_window(v_mat);
+  if not (v_w ->> 'overdue')::boolean then
+    raise exception 'FAIL: لم يُعلَم ما مضى موعدُه';
+  end if;
+  if (v_w ->> 'late_hours')::numeric <= 0 then
+    raise exception 'FAIL: التأخيرُ بلا ساعات';
+  end if;
+
+  -- ---------- وما لم تُضبط صفحاتُه تُقترح من كلماته ----------
+  update public.materials set pages = null where id = v_mat;
+  if (public.text_window(v_mat) ->> 'pages')::int is null then
+    raise exception 'FAIL: لم تُقترح الصفحاتُ من الكلمات';
+  end if;
+
+  -- ---------- والنوعُ لا يُقبل إلا من الثلاثة، والصفحاتُ محدودة ----------
+  begin
+    perform public.set_material_text_plan(v_mat, 'whenever', 6, null);
+    raise exception 'FAIL: قُبل نوعُ مهمةٍ غير معروف';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+  begin
+    perform public.set_material_text_plan(v_mat, 'normal', 99999, null);
+    raise exception 'FAIL: قُبل عددُ صفحاتٍ فوق الحد';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+  begin
+    perform public.set_material_text_plan(v_mat, 'normal', 6, now() + interval '5 days');
+    raise exception 'FAIL: قُبل وقتُ استلامٍ في المستقبل';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+
+  -- ---------- والخطبةُ لها نافذتُها لا جدولُ الصفحات ----------
+  select id into v_serm from public.materials
+   where material_type = 'خطب' and deleted_at is null and sermon_date is not null
+   order by created_at limit 1;
+  if v_serm is not null then
+    v_w := public.text_window(v_serm);
+    if not (v_w ->> 'is_sermon')::boolean then
+      raise exception 'FAIL: حُسبت الخطبةُ بجدول الصفحات';
+    end if;
+    if v_w -> 'window' is null then raise exception 'FAIL: الخطبةُ بلا نافذة'; end if;
+    -- ومهلةُ مراجعتها الشرعية ثمانِ ساعات
+    if (public.sharia_window(v_serm) ->> 'hours')::int <> 8 then
+      raise exception 'FAIL: مهلةُ المراجعة الشرعية للخطب ليست ثمانِ ساعات';
+    end if;
+  end if;
+  -- ولما سوى الخطب أربعٌ وعشرون
+  v_s := public.sharia_window(v_mat);
+  if (v_s ->> 'hours')::int <> 24 then
+    raise exception 'FAIL: مهلةُ المراجعة الشرعية لغير الخطب ليست أربعًا وعشرين';
+  end if;
+  if (v_s ->> 'due_at')::timestamptz
+     <> (v_s ->> 'received_at')::timestamptz + interval '24 hours' then
+    raise exception 'FAIL: موعدُ المراجعة الشرعية خطأ';
+  end if;
+
+  -- ---------- وما قارب موعدَه من النصوص المفتوحة يُعرض ----------
+  perform public.set_material_text_plan(v_mat, 'normal', 6, now() - interval '5 days');
+  if not exists (select 1 from public.texts_due() where material_id = v_mat and overdue) then
+    raise exception 'FAIL: لم يظهر المتأخرُ في كشف المواعيد';
+  end if;
+  -- والخطبُ ليست منه، فلها نافذتُها
+  if exists (select 1 from public.texts_due() where material_type = 'خطب') then
+    raise exception 'FAIL: دخلت الخطبُ كشفَ مواعيد النصوص';
+  end if;
+
+  -- ---------- ونوعُ المهمة للإدارة لا لعامة الأعضاء ----------
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', true);
+  begin
+    perform public.set_material_text_plan(v_mat, 'emergency', 6, null);
+    raise exception 'FAIL: ضبط مترجمٌ نوعَ المهمة';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+
+  -- ثم تُنظَّف
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  delete from public.tracks where material_id = v_mat;
+  delete from public.materials where id = v_mat;
+
+  raise notice 'PASS: جزاءاتُ العقد بسقفها، ومواعيدُ النصوص بعدد الصفحات';
+end $$;
+
+-- =====================================================================
+-- ٥٣) كشفُ بيانات الفريق وتذكيرُه، والكلماتُ المحتسَبة، وصفتا العمليات
+--     (ملاحظتا ١٩٩ و٢٠٠)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        v_yus uuid := '00000000-0000-0000-0000-00000000000c';
+        v_rec record; v_n int; v_before timestamptz;
+begin
+  -- ---------- الكلماتُ المحتسَبة: الأصلُ العربي دون الخطب ----------
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  if (select counted_words from public.production_totals())
+     <> coalesce((select sum(r.source_words) from public.production_rows r
+                   where r.counts_by_word and r.status = 'completed'), 0) then
+    raise exception 'FAIL: المحتسَب ليس كلماتِ الأصل للنصوص المنجَزة';
+  end if;
+  if exists (select 1 from public.production_rows
+              where material_type = 'خطب' and counts_by_word) then
+    raise exception 'FAIL: عُدَّت الخطبةُ بالكلمة وهي بالمقطوعية';
+  end if;
+  if not exists (select 1 from information_schema.columns
+                  where table_name = 'production_rows' and column_name = 'source_words') then
+    raise exception 'FAIL: دليل الإنتاج بلا كلمات الأصل';
+  end if;
+
+  -- ---------- مصفوفةُ البيانات: صفٌّ لكل حساب وحالُ كل بيان ----------
+  select count(*) into v_n from public.member_data_matrix();
+  if v_n = 0 then raise exception 'FAIL: مصفوفةُ البيانات فارغة'; end if;
+  select * into v_rec from public.member_data_matrix() where member_id = v_yus;
+  if v_rec.photo not in ('ok', 'review', 'bad', 'none') then
+    raise exception 'FAIL: حالُ الصورة غير معروف (%)', v_rec.photo;
+  end if;
+  if v_rec.missing is null or v_rec.complete is null then
+    raise exception 'FAIL: المصفوفةُ بلا عدِّ ناقصٍ ولا حكمِ اكتمال';
+  end if;
+  -- وما لا يلزم الحسابَ يُعلَم بأنه لا يلزمه: المدينةُ لغير المرشد
+  select * into v_rec from public.member_data_matrix() where member_id = v_mgr;
+  if v_rec.city_state <> 'na' then
+    raise exception 'FAIL: طُلبت المدينةُ من غير مرشدٍ مكاني (%)', v_rec.city_state;
+  end if;
+  if v_rec.languages not in ('ok', 'none', 'na') then
+    raise exception 'FAIL: حالُ اللغات غير معروف (%)', v_rec.languages;
+  end if;
+
+  -- ---------- والمصفوفةُ للإدارة وحدها ----------
+  perform set_config('request.jwt.claim.sub', v_yus::text, true);
+  if exists (select 1 from public.member_data_matrix()) then
+    raise exception 'FAIL: رأى المترجمُ كشفَ بيانات الفريق';
+  end if;
+  begin
+    perform public.remind_profile_data(null);
+    raise exception 'FAIL: ذكّر المترجمُ غيرَه';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+
+  -- ---------- التذكيرُ يصل، ويبقى أثرُه ----------
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select reminded_at into v_before from public.profile_private where id = v_yus;
+  v_n := public.remind_profile_data(array[v_yus]);
+  if (select missing from public.member_data_matrix() where member_id = v_yus) > 0 then
+    if v_n <> 1 then raise exception 'FAIL: لم يصل التذكير لمن نقص بيانُه (%)', v_n; end if;
+    if not exists (select 1 from public.notifications
+                    where member_id = v_yus and kind = 'data_reminder') then
+      raise exception 'FAIL: التذكيرُ بلا إشعار';
+    end if;
+    if (select reminded_at from public.profile_private where id = v_yus) is null then
+      raise exception 'FAIL: لم يُحفظ وقتُ التذكير';
+    end if;
+    if (select remind_count from public.profile_private where id = v_yus) < 1 then
+      raise exception 'FAIL: لم يُعدّ التذكير';
+    end if;
+  end if;
+  -- ومن اكتملت بياناتُه لا يُذكَّر
+  if exists (select 1 from public.member_data_matrix() where complete) then
+    if public.remind_profile_data(array[(select member_id from public.member_data_matrix()
+                                          where complete limit 1)]) <> 0 then
+      raise exception 'FAIL: ذُكِّر من اكتملت بياناتُه';
+    end if;
+  end if;
+
+  -- ---------- صفتا العمليات: على المنسق، ولمدير المشروع ----------
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  begin
+    perform public.set_admin_title(v_crd, 'ops_manager');
+    raise exception 'FAIL: حوّل المنسق نفسَه إلى صفة عمليات';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  -- ولا تكون إلا على منسق
+  begin
+    perform public.set_admin_title(v_yus, 'ops_manager');
+    raise exception 'FAIL: كُتبت صفةُ العمليات على مترجم';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+  begin
+    perform public.set_admin_title(v_crd, 'chief');
+    raise exception 'FAIL: قُبلت صفةٌ غير معروفة';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+
+  perform public.set_admin_title(v_crd, 'ops_manager');
+  if (select admin_title from public.profiles where id = v_crd) <> 'ops_manager' then
+    raise exception 'FAIL: لم تُكتب صفةُ مدير العمليات';
+  end if;
+  -- والصلاحيةُ صلاحيةُ المنسق نفسُها: لا تزيد ولا تنقص
+  if (select role::text from public.profiles where id = v_crd) <> 'coordinator' then
+    raise exception 'FAIL: غيّرت الصفةُ دورَ المنسق';
+  end if;
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  if not public.is_admin() then raise exception 'FAIL: سقطت صلاحيةُ المنسق بالصفة'; end if;
+  if public.is_manager() then raise exception 'FAIL: صار المنسقُ مديرًا بالصفة'; end if;
+
+  -- ومتى خرج من التنسيق سقطت عنه الصفة
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  update public.profiles set role = 'translator' where id = v_crd;
+  if (select admin_title from public.profiles where id = v_crd) is not null then
+    raise exception 'FAIL: بقيت صفةُ العمليات على غير منسق';
+  end if;
+  update public.profiles set role = 'coordinator' where id = v_crd;
+  perform public.set_admin_title(v_crd, 'ops_deputy');
+  if (select admin_title from public.profiles where id = v_crd) <> 'ops_deputy' then
+    raise exception 'FAIL: لم تُكتب صفةُ مساعد مدير العمليات';
+  end if;
+  perform public.set_admin_title(v_crd, null);
+  if (select admin_title from public.profiles where id = v_crd) is not null then
+    raise exception 'FAIL: لم تُرفع الصفة';
+  end if;
+
+  raise notice 'PASS: كشفُ البيانات وتذكيرُه، والكلماتُ المحتسَبة، وصفتا العمليات بصلاحية المنسق';
 end $$;

@@ -250,6 +250,61 @@ export async function render(ctx) {
   f.sermon_date.addEventListener('change', loadWindow);
   f.material_type.addEventListener('change', loadWindow);
 
+  // ---------- نوعُ المهمة وصفحاتُها: منهما مهلةُ التسليم (ملاحظة ١٩٧) ----------
+  // العقد يجعل مدّة التسليم بعدد الصفحات ونوع المهمة: اعتيادية وعاجلة وطارئة،
+  // لكلٍّ ثلاثُ درجاتٍ بالصفحات. والخطبةُ لها نافذتُها لا هذا الجدول.
+  const URGENCY = { normal: 'اعتيادية', urgent: 'عاجلة', emergency: 'طارئة' };
+  f.urgency = h('select', { 'aria-label': 'نوع المهمة' },
+    Object.entries(URGENCY).map(([k, v]) =>
+      h('option', { value: k, selected: (draft.urgency || 'normal') === k }, v)));
+  f.pages = h('input', { type: 'number', min: 1, max: 5000, value: draft.pages || '',
+    placeholder: 'تُقترح من الكلمات', 'aria-label': 'عدد الصفحات' });
+  const dueNote = h('div.small.muted');
+  const dueCard = h('div.card.stack.due-card', { hidden: true },
+    h('b', 'مهلةُ التسليم في جدول العقد'),
+    h('div.grid-2',
+      h('label.field', 'نوع المهمة', f.urgency),
+      h('label.field', 'عدد الصفحات',
+        h('small', 'الصفحةُ نحو ٢٥٠ كلمة، فإن تُركت اقتُرحت من الكلمات'), f.pages)),
+    dueNote);
+
+  let deadlines = [];
+  const pagesNow = () => {
+    const v = Number(f.pages.value);
+    if (v >= 1) return v;
+    const w = Number(wordsIn.value);
+    return w > 0 ? Math.max(1, Math.ceil(w / 250)) : null;
+  };
+  const showDue = () => {
+    if (f.material_type.value === 'خطب' || !f.material_type.value) {
+      dueCard.hidden = true; return;
+    }
+    dueCard.hidden = false;
+    const pg = pagesNow();
+    if (!deadlines.length) { dueNote.textContent = 'جارٍ قراءة جدول المدد…'; return; }
+    if (!pg) {
+      dueNote.className = 'small muted';
+      dueNote.textContent = 'اكتب عدد الصفحات أو احسب الكلمات لتُعرف المهلة.';
+      return;
+    }
+    const d = deadlines.filter(x => x.urgency === f.urgency.value
+      && pg >= x.pages_from && (x.pages_to == null || pg <= x.pages_to))[0];
+    if (!d) { dueNote.textContent = 'لا سطرَ لهذا العدد في جدول العقد.'; return; }
+    dueNote.className = 'small ' + (d.needs_review ? 'warn' : 'muted');
+    dueNote.textContent = (d.needs_review ? 'يحتاج استيضاحًا من الهيئة — ' : '')
+      + `${pg} صفحة · ${URGENCY[f.urgency.value]} ← ${d.label}`
+      + (d.description ? ` — ${d.description}` : '')
+      + ' (تُحسب من وقت استلام المادة)';
+  };
+  f.urgency.addEventListener('change', showDue);
+  f.pages.addEventListener('input', showDue);
+  f.material_type.addEventListener('change', showDue);
+  wordsIn.addEventListener('input', showDue);
+  db.select('text_deadlines', { select: '*', order: 'urgency,pages_from' })
+    .then(r => { deadlines = Array.isArray(r) ? r : []; showDue(); })
+    .catch(() => { dueNote.textContent = 'تعذّر قراءة جدول المدد.'; });
+  showDue();
+
   Object.values(stageInputs).forEach(i => i.addEventListener('input', updateSum));
   f.total.addEventListener('input', distribute); f.unit.addEventListener('change', distribute);
   f.priority.addEventListener('change', () => { f.total.value = PRIORITY_DAYS[f.priority.value] || 3; f.unit.value = '1440'; distribute(); });
@@ -376,6 +431,7 @@ export async function render(ctx) {
         h('div.grid', slaStages.map(s => h('label.field', s.name_ar, stageInputs[s.key], stageHints[s.key]))),
         h('div.row', sumLine, h('button.btn.sm', { type: 'button', onclick: distribute }, 'إعادة التوزيع التلقائي')),
         winCard,
+        dueCard,
         h('p.small.muted', 'تُحدَّد المدة الكلية تلقائيًا حسب الأهمية: طارئة يوم، عاجلة يومان، اعتيادية ثلاثة أيام، وتُوزَّع على المراحل بالنسبة (الترجمة أطول من المراجعة، والاستلام أقصر). المدة تبدأ من قبول المترجم، والموعد النهائي ثابت: إن تأخرت مرحلة قلّ وقت ما بعدها، وإن سبقت زاد. إن اختُصر مسار لغة، يُوزَّع وقت المراحل المتجاوزة على مراحلها. اعتماد المدير خارج المدة.')),
       h('label.check', f.escalate, 'عند تجاوز الوقت: تنبيه مدير المشروع إضافةً إلى المسؤول والمنسق')),
     h('div.stack',
@@ -510,6 +566,14 @@ export async function render(ctx) {
           db.rpc('set_material_words', {
             p_material: String(newId).replace(/"/g, ''), p_words: wn, p_auto: autoWords })
             .catch(() => {});
+        }
+        // نوعُ المهمة وصفحاتُها: منهما مهلةُ التسليم (ملاحظة ١٩٧)
+        if (newId && f.material_type.value !== 'خطب') {
+          db.rpc('set_material_text_plan', {
+            p_material: String(newId).replace(/"/g, ''),
+            p_urgency: f.urgency.value,
+            p_pages: f.pages.value === '' ? null : Number(f.pages.value),
+            p_received: null }).catch(() => {});
         }
         // مدة الأصل الصوتي تُقاس في المتصفح، فتُحفظ ليظهر طولها للمترجم
         if (audioPath && srcAudioSeconds && newId) {

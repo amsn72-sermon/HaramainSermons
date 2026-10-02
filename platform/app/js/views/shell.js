@@ -1,6 +1,6 @@
 import { h } from '../ui.js';
 import { auth, db } from '../sb.js';
-import { state, isAdmin, isManager, isSupervisor, can, ROLE_LABEL } from '../store.js';
+import { state, isAdmin, isManager, isSupervisor, can, ROLE_LABEL, roleLabel} from '../store.js';
 
 export function themeToggle() {
   // الداكن هو الأصل كما في النسخة الأولى
@@ -166,7 +166,7 @@ export function staffShell(view, path) {
       navBtn,
       brand(),
       h('div.spacer'),
-      h('div.who', p.full_name, h('small', ROLE_LABEL[p.role])),
+      h('div.who', p.full_name, h('small', roleLabel(p))),
       themeToggle(),
       policyChip(),
       h('button.btn.sm', { type: 'button', onclick: () => auth.signOut() }, 'خروج'))),
