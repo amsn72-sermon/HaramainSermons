@@ -60,7 +60,7 @@ comment on table public.meet_lobby is
 -- ---------------------------------------------------------------------
 create or replace function public.meet_base(p_kind text, p_id uuid)
 returns table (base text, token text)
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare v_base text; v_tok text;
 begin
   if p_kind = 'r' then
@@ -172,7 +172,7 @@ grant execute on function public.meet_decide(uuid, boolean) to authenticated;
 -- تبديلُ اسم الغرفة: تُغلق القديمةُ على من فيها، ويعود الجميع إلى الردهة
 -- ---------------------------------------------------------------------
 create or replace function public.meet_rotate(p_kind text, p_id uuid)
-returns text language plpgsql security definer set search_path = public as $$
+returns text language plpgsql security definer set search_path = public, extensions as $$
 declare v_tok text := encode(gen_random_bytes(5), 'hex'); v_base text;
 begin
   if not public.is_admin() then

@@ -38,7 +38,7 @@ returns text language sql immutable as $$
 $$;
 
 create or replace function public.mfa_code_hash(p_code text)
-returns text language sql stable set search_path = public as $$
+returns text language sql stable set search_path = public, extensions as $$
   select encode(digest(public.mfa_code_norm(p_code), 'sha256'), 'hex')
 $$;
 
@@ -46,7 +46,7 @@ $$;
 -- توليدُ ثمانيةِ رموز: تُعاد مرةً واحدةً ثم لا سبيل إلى معرفتها
 -- ---------------------------------------------------------------------
 create or replace function public.make_recovery_codes()
-returns setof text language plpgsql security definer set search_path = public as $$
+returns setof text language plpgsql security definer set search_path = public, extensions as $$
 declare v_uid uuid := auth.uid(); v_code text; i int;
 begin
   if v_uid is null then raise exception 'لا جلسة' using errcode = '42501'; end if;

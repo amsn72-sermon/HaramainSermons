@@ -63,3 +63,9 @@ create table auth.mfa_factors (
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+-- pgcrypto في خادمنا مثبَّتٌ في مخطَّط extensions لا في public، فيُحاكى ذلك
+-- هنا ليُكشف محليًّا كلُّ دالّةٍ نسيت مخطَّطها في مسار بحثها (ملاحظة ٢٠٨)
+create schema if not exists extensions;
+grant usage on schema extensions to anon, authenticated, service_role;
+create extension if not exists pgcrypto schema extensions;
