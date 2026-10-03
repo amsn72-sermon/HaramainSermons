@@ -2,7 +2,8 @@
 import { h, fill, toast, busy, dialog, emptyState, fmtDate, fmtDateTime, confirm } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { state, isManager, PERM_LABEL, PERM_KEYS, ROLE_LABEL, STATUS_LABEL,
-  TRACK_LABEL, trackOf, CITY, NO_FATWA, langName, stageName, roleLabel, ADMIN_TITLE} from '../store.js';
+  TRACK_LABEL, trackOf, CITY, NO_FATWA, langName, stageName, roleLabel, ADMIN_TITLE,
+  PERM_CLOSED, PERIOD_LABEL, leadScope, can } from '../store.js';
 import { POLICY_KEY, POLICY_VERSION } from '../policy.js';
 import { TEAM_FIELDS, teamRows, exportExcel, exportWord, exportPdf } from '../teamexport.js';
 import { nationalitySelect } from '../nationalities.js';
@@ -118,7 +119,7 @@ export async function render(ctx, opts = {}) {
   }
 
   async function edit(m) {
-    const role = h('select', { disabled: !isManager() || m.id === state.profile.id },
+    const role = h('select', { 'aria-label': 'الدور', disabled: !isManager() || m.id === state.profile.id },
       Object.entries(ROLE_LABEL).map(([k, v]) => h('option', { value: k, selected: m.role === k }, v)));
 
     // صفةُ العمليات: تُكتب على حساب المنسق، وصلاحيتُه لا تتغير بها.
@@ -137,6 +138,27 @@ export async function render(ctx, opts = {}) {
         + 'التحويلُ إليها بيد مدير المشروع وحده.'),
       h('label.field', 'الصفة', titleSel),
       titleWhy) : null;
+    // نطاقُ قائد الفريق الميداني: مدينةٌ ووردية، لا يرى غيرَهما (ملاحظة ٢٢١)
+    const leadCity = h('select', { 'aria-label': 'مدينة القيادة' },
+      h('option', { value: '' }, '— الحرمان معًا —'),
+      Object.entries(CITY).map(([k, v]) => h('option', { value: k, selected: m.lead_city === k }, v)));
+    const leadPeriod = h('select', { 'aria-label': 'وردية القيادة' },
+      h('option', { value: '' }, '— كل الورديات —'),
+      Object.entries(PERIOD_LABEL).map(([k, v]) =>
+        h('option', { value: k, selected: m.lead_period === k }, v)));
+    const leadCard = isManager() ? h('fieldset.stack',
+      h('legend', 'نطاق القيادة الميدانية'),
+      h('p.small.muted', 'قائدُ الفريق الميداني يقود المرشدين المكانيين وإجابةَ السائلين في نطاقه: '
+        + 'مدينةٌ ووردية. فلا يرى من سواهم، ولا يكتب فيهم.'),
+      h('div.grid-2',
+        h('label.field', 'المدينة', leadCity),
+        h('label.field', 'الوردية', leadPeriod))) : null;
+    const syncLead = () => {
+      if (leadCard) leadCard.style.display = role.value === 'field_lead' ? '' : 'none';
+    };
+    syncLead();
+    role.addEventListener('change', syncLead);
+
     const syncTitle = () => {
       if (!titleCard) return;
       const ok = role.value === 'coordinator';
@@ -174,10 +196,13 @@ export async function render(ctx, opts = {}) {
     const citySel = h('select', { 'aria-label': 'مدينة العمل' },
       h('option', { value: '' }, '— غير محدَّدة —'),
       Object.entries(CITY).map(([k, v]) => h('option', { value: k, selected: m.city === k }, v)));
-    const cityCard = h('fieldset.stack', { style: { display: trackOf(m) === 'field' ? '' : 'none' } },
+    // تُطلب من الجميع: ففي المترجمين المتخصصين من يعمل عن بُعد (ملاحظة ٢٢٢)
+    const cityCard = h('fieldset.stack',
       h('legend', 'مدينة العمل'),
-      h('label.field', 'المسجد الذي يرشد فيه', citySel),
-      h('p.small.muted', 'تُبنى عليها دعواته: فاجتماعُ مكة لأهل مكة، واجتماعُ المدينة لأهلها.'));
+      h('label.field', 'الحرم الذي يعمل فيه', citySel),
+      h('p.small.muted', 'تُسأل من كل عضو: المرشدون وإجابةُ السائلين في مكة والمدينة، '
+        + 'والمترجمون المتخصصون أصلُهم مكة وفيهم من يعمل عن بُعد. '
+        + 'وعليها تُبنى دعواتُه ونطاقُ حضوره: فاجتماعُ مكة لأهل مكة، واجتماعُ المدينة لأهلها.'));
 
     // وفريق إجابة السائلين: لا فتوى لأحدٍ البتّة (ملاحظة ١٨٦)
     const answersCard = h('fieldset.stack', { style: { display: trackOf(m) === 'answers' ? '' : 'none' } },
@@ -187,7 +212,6 @@ export async function render(ctx, opts = {}) {
 
     syncMay();
     trackSel.addEventListener('change', () => {
-      cityCard.style.display = trackSel.value === 'field' ? '' : 'none';
       answersCard.style.display = trackSel.value === 'answers' ? '' : 'none';
       // من نُقل إلى الترجمة يترجم بحكم دوره، فتُحدَّد له من نفسها
       if (trackSel.value === 'translation' && trackOf(m) !== 'translation') mayBox.checked = true;
@@ -227,31 +251,36 @@ export async function render(ctx, opts = {}) {
       h('legend', 'التحقق بخطوتين'),
       h('label.check', mfaBox, h('span', 'يُلزَم هذا الحساب بالتحقق بخطوتين')),
       h('p.small.muted', isManager()
-        ? 'من أُلزم لا يدخل حتى يفعّله بتطبيق المصادقة على جوّاله. والتفعيل بيده هو، '
+        ? 'التفعيلُ والإيقافُ من هنا لا من حساب العضو. ومن أُلزم لا يدخل حتى يسجّل تطبيق المصادقة على جوّاله، '
           + 'فلا يملكه أحدٌ عنه. ورفعُ الإلزام لا يمسح تسجيلًا قائمًا: من سجّل تطبيقًا '
           + 'ظلّ يُطالَب بالرمز حتى يُمسح تسجيلُه.'
         : 'الإلزام بيد مدير المشروع.'),
-      isManager() ? h('div.row', clearBtn) : null,
-      isManager() ? clearMsg : null);
+      can('team') ? h('div.row', clearBtn) : null,
+      can('team') ? clearMsg : null);
 
     // قائمة صلاحيات الحساب الإداري — لمدير المشروع (ملاحظة ١٧٢)
     const permBoxes = new Map();
-    const permCard = h('fieldset.stack', { style: { display: ['coordinator', 'supervisor'].includes(m.role) ? '' : 'none' } },
+    // لا تُرسم أصلًا لغير مدير المشروع: لا مقفلةً ولا للاطّلاع (ملاحظة ٢١٣)
+    const permCard = !isManager() ? null
+      : h('fieldset.stack', { style: { display: ['coordinator', 'supervisor', 'field_lead'].includes(m.role) ? '' : 'none' } },
       h('legend', 'صلاحيات الحساب'),
-      h('p.small.muted', 'الأصل أن تكون كلها مفتوحة. وما تُغلقه هنا يُحجب من القائمة، '
-        + 'ويُمنع في قاعدة البيانات لا في الشاشة وحدها.'),
+      h('p.small.muted', 'الأصل أن تكون كلها مفتوحة إلا ما لا يُستدرك كالحذف، فأصلُه المنع. '
+        + 'وما تُغلقه هنا يُحجب من القائمة، ويُمنع في قاعدة البيانات لا في الشاشة وحدها. '
+        + 'ولا يرى العضوُ قائمتَه هذه.'),
       h('div.perm-grid', PERM_KEYS.map(k => {
-        const cb = h('input', { type: 'checkbox', checked: m.perms?.[k] === false ? null : true,
-          disabled: !isManager() || null, 'aria-label': PERM_LABEL[k] });
+        const open = PERM_CLOSED.includes(k) ? m.perms?.[k] === true : m.perms?.[k] !== false;
+        const cb = h('input', { type: 'checkbox', checked: open ? true : null, 'aria-label': PERM_LABEL[k] });
         permBoxes.set(k, cb);
-        return h('label.check', cb, h('span', PERM_LABEL[k]));
+        return h('label.check', cb,
+          h('span', PERM_LABEL[k], PERM_CLOSED.includes(k) ? h('small.muted', ' — أصلُه المنع') : null));
       })),
-      isManager() ? h('div.row',
+      h('div.row',
         h('button.btn.xs', { type: 'button', onclick: () => permBoxes.forEach(c => { c.checked = true; }) }, 'فتح الكل'),
-        h('button.btn.xs', { type: 'button', onclick: () => permBoxes.forEach(c => { c.checked = false; }) }, 'إغلاق الكل'))
-        : h('p.small.muted', 'ضبط الصلاحيات بيد مدير المشروع.'));
+        h('button.btn.xs', { type: 'button', onclick: () => permBoxes.forEach(c => { c.checked = false; }) }, 'إغلاق الكل')));
     role.addEventListener('change', () => {
-      permCard.style.display = ['coordinator', 'supervisor'].includes(role.value) ? '' : 'none';
+      if (permCard) {
+        permCard.style.display = ['coordinator', 'supervisor', 'field_lead'].includes(role.value) ? '' : 'none';
+      }
     });
 
     // اللغات من قائمة منسدلة مع رقائق تُحذف بضغطة (ملاحظة ٥٢)
@@ -325,6 +354,7 @@ export async function render(ctx, opts = {}) {
         h('div.grid-2',
           h('label.field', 'الدور', role, !isManager() && h('small', 'تغيير الأدوار الإدارية بيد مدير المشروع')),
           titleCard,
+          leadCard,
           h('label.field', 'الفريق', trackSel,
             h('small', 'ومن هنا يُنقل العضو إلى إجابة السائلين: نقلُ السؤال ونقلُ الجواب، بلا فتوى'))),
         h('fieldset', h('legend', 'اللغات المؤهل فيها'), h('div.stack', { style: { gap: '10px' } }, langSelect, langChips)),
@@ -342,8 +372,8 @@ export async function render(ctx, opts = {}) {
           return true;
         }, value: () => ({ role: role.value, languages: [...chosen], track: trackSel.value,
           may: mayBox.checked,
-          city: trackSel.value === 'field' ? (citySel.value || null) : null,
-          perms: Object.fromEntries([...permBoxes].filter(([, c]) => !c.checked).map(([k]) => [k, false])),
+          city: citySel.value || null,
+          perms: Object.fromEntries([...permBoxes].map(([k, c]) => [k, c.checked])),
           contact: { full_name: fld.full_name.value.trim(), whatsapp: fld.whatsapp.value.trim(),
             nationality: fld.nationality.value.trim(), national_id: fld.national_id.value.trim().toUpperCase(),
             id_type: fld.id_type.value, residence: fld.residence.value.trim() } }) },
@@ -353,6 +383,15 @@ export async function render(ctx, opts = {}) {
     if (!result) return;
     try {
       await db.rpc('admin_update_member', { p_member: m.id, p_status: null, p_role: result.role === m.role ? null : result.role, p_languages: result.languages });
+      // ونطاقُ القيادة بعد الدور كذلك
+      if (isManager()) {
+        const wantCity = result.role === 'field_lead' ? (leadCity.value || null) : null;
+        const wantPeriod = result.role === 'field_lead' ? (leadPeriod.value || null) : null;
+        if (wantCity !== (m.lead_city || null) || wantPeriod !== (m.lead_period || null)) {
+          await db.rpc('set_lead_scope', { p_member: m.id, p_city: wantCity, p_period: wantPeriod })
+            .catch(e => toast(e.message, 'bad'));
+        }
+      }
       // والصفةُ بعد الدور، فلا تُكتب على غير منسق
       if (isManager()) {
         const want = result.role === 'coordinator' ? (titleSel.value || null) : null;
@@ -375,7 +414,7 @@ export async function render(ctx, opts = {}) {
       if ((result.city || null) !== (m.city || null)) {
         await db.rpc('set_member_city', { p_member: m.id, p_city: result.city });
       }
-      if (isManager() && ['coordinator', 'supervisor'].includes(result.role)) {
+      if (isManager() && ['coordinator', 'supervisor', 'field_lead'].includes(result.role)) {
         const before = JSON.stringify(m.perms || {});
         if (before !== JSON.stringify(result.perms)) {
           await db.rpc('set_member_perms', { p_member: m.id, p_perms: result.perms });
@@ -639,8 +678,33 @@ export async function render(ctx, opts = {}) {
   }
 
   const showPerf = group === 'translators';
+
+  // الفريقان الميدانيان في مكة والمدينة، متباعدان وقادتُهما مختلفون —
+  // فيُفصلان بتبويبين في الشاشة لا ببندين في القائمة (ملاحظتا ٢٢٠ و٢٢٢)
+  const CITY_SPLIT = ['field', 'answers'].includes(group);
+  const STORE_KEY = `hs.cityTab.${group}`;
+  let cityTab = '';
+  if (CITY_SPLIT) { try { cityTab = localStorage.getItem(STORE_KEY) || ''; } catch { cityTab = ''; } }
+  const cityTabs = h('div.seg-tabs');
+  function drawCityTabs() {
+    const opts = [['', 'الحرمان'], ...Object.entries(CITY)];
+    cityTabs.replaceChildren(...opts.map(([k, label]) => {
+      const n = members.filter(m => m.status !== 'pending' && (!k || m.city === k)).length;
+      const b = h('button.btn.sm', { type: 'button', 'aria-pressed': k === cityTab ? 'true' : 'false' },
+        label, h('span.sub', ` ${n}`));
+      if (k === cityTab) b.classList.add('primary');
+      b.onclick = () => {
+        cityTab = k;
+        try { localStorage.setItem(STORE_KEY, k); } catch { /* تخزين غير متاح */ }
+        drawCityTabs(); draw();
+      };
+      return b;
+    }));
+  }
+
   function draw() {
     const list = members.filter(m => m.status !== 'pending')
+      .filter(m => !CITY_SPLIT || !cityTab || m.city === cityTab)
       .filter(m => !filterLang.value || langsOf(m).includes(filterLang.value))
       .filter(m => !filterStatus.value || m.status === filterStatus.value)
       .filter(m => !q.value.trim() || m.full_name.includes(q.value.trim()) || m.email.includes(q.value.trim()));
@@ -649,7 +713,8 @@ export async function render(ctx, opts = {}) {
       h('tbody', list.map(m => h('tr',
         h('td', { 'data-label': 'الاسم' }, h('b', m.full_name), h('span.sub', { dir: 'ltr' }, m.email)),
         h('td', { 'data-label': 'الدور' }, roleLabel(m),
-          m.admin_title ? h('div.small.muted', 'بصلاحية منسق') : null),
+          m.admin_title ? h('div.small.muted', 'بصلاحية منسق') : null,
+          m.role === 'field_lead' ? h('div.small.muted', leadScope(m)) : null),
         h('td', { 'data-label': 'اللغات' }, langsOf(m).map(langName).join('، ') || '—'),
         showPerf
           ? h('td', { 'data-label': 'التقييم' },
@@ -668,7 +733,7 @@ export async function render(ctx, opts = {}) {
           !m.may_translate && trackOf(m) === 'translation'
             ? h('span.badge.warn', { title: 'لا يظهر في قائمة الإسناد' }, 'لا يترجم') : null,
           m.mfa_required ? h('span.badge', { title: 'مُلزَم بالتحقق بخطوتين' }, 'تحقق') : null,
-          Object.values(m.perms || {}).some(v => v === false)
+          isManager() && Object.values(m.perms || {}).some(v => v === false)
             ? h('span.badge.warn', { title: 'بعض الصلاحيات مغلقة' },
                 `${Object.values(m.perms).filter(v => v === false).length} مغلقة`) : null,
           dataBadge(m)),
@@ -681,12 +746,13 @@ export async function render(ctx, opts = {}) {
           m.status === 'active'
             ? h('button.btn.sm.danger', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'disabled') }, 'تعطيل')
             : h('button.btn.sm', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'active') }, 'تفعيل'),
-          isManager()
+          can('delete_member')
             ? h('button.btn.sm.ghost', { type: 'button', title: 'حذفٌ لا يُستدرك',
                 onclick: () => removeMember(m) }, 'حذف') : null)))))))
       : emptyState('لا أعضاء مطابقون', 'غيّر عوامل التصفية.'));
   }
   [filterLang, filterStatus, q].forEach(el => el.addEventListener('input', draw));
+  if (CITY_SPLIT) drawCityTabs();
   draw();
 
   const pending = members.filter(m => m.status === 'pending');
@@ -702,7 +768,7 @@ export async function render(ctx, opts = {}) {
         h('button.btn.sm', { type: 'button', onclick: () => edit(m) }, 'مراجعة الملف'),
         h('button.btn.sm.primary', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'active') }, 'تفعيل'),
         h('button.btn.sm.danger', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'disabled') }, 'رفض'),
-        isManager()
+        can('delete_member')
           ? h('button.btn.sm.ghost', { type: 'button', title: 'حذفٌ لا يُستدرك',
               onclick: () => removeMember(m) }, 'حذف') : null)))
         : h('p.muted', 'لا توجد طلبات جديدة.'),
@@ -712,11 +778,11 @@ export async function render(ctx, opts = {}) {
     h('label.field', 'بحث', q), h('label.field', 'اللغة', filterLang), h('label.field', 'الحالة', filterStatus));
 
   // أجزاء تُركَّب داخل شاشة «شؤون الفريق» الموحّدة (ملاحظة ٩٨)
-  if (opts.parts) return { tools, joins: joinsCard, filters: filtersRow, table, pendingCount: pending.length, members, privOf, bankOf, reload, track, group };
+  if (opts.parts) return { tools, joins: joinsCard, filters: filtersRow, table, cityTabs: CITY_SPLIT ? cityTabs : null, pendingCount: pending.length, members, privOf, bankOf, reload, track, group };
 
   return h('div',
     h('div.page-head', tools,
       h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'فريق العمل'),
         h('p.muted', 'ينضم الأعضاء عبر صفحة التسجيل، ثم يفعّلهم المنسق. التعطيل يحفظ سجل العضو بدل حذفه، ولا يُعطَّل من لديه مهمة قائمة.'))),
-    joinsCard, filtersRow, table);
+    joinsCard, CITY_SPLIT ? cityTabs : null, filtersRow, table);
 }

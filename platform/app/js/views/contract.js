@@ -207,14 +207,16 @@ export async function render(ctx) {
       h('p.small.muted', 'هذا الجدول مرجعٌ من العقد. لا تُطبَّق قيمه على أجور الفريق، ولا يُحسم بها شيء آليًّا؛ '
         + 'والغرامات ونسب التقييم تُعرض بيانًا للإدارة لا تطبيقًا.')));
 
+  // أزرارُ التصدير في الأعلى بعد اختيار الشهر مباشرة (ملاحظة ٢١٦)
   const claimPane = () => h('div.stack',
     h('section.card.stack',
-      h('div.row.between', h('h3', 'مسودّة المستخلص الشهري'),
-        h('div.row', fmtSel, expBtn)),
-      h('div.grid-2',
+      h('h3', 'مسودّة المستخلص الشهري'),
+      h('div.export-bar',
         h('label.field', 'الشهر', monthIn),
-        h('label.field.row', { style: { alignItems: 'center', gap: '8px' } },
-          withPrices, h('span', 'إظهار قيم الكراسة (مسودّة مطالبة)'))),
+        h('label.field', 'صيغة التصدير', fmtSel),
+        h('div.field', h('span.field-head', '\u200b'), expBtn)),
+      h('label.field.row', { style: { alignItems: 'center', gap: '8px' } },
+        withPrices, h('span', 'إظهار قيم الكراسة (مسودّة مطالبة)')),
       claimBox));
 
   const TABS = [

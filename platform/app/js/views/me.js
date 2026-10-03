@@ -6,7 +6,7 @@ import { PHOTO_RULES, preparePhoto, readStashed, clearStashed, dataUrlToBlob, ur
 import { bankSection } from './bank.js';
 import { normalizeLayout, staticCard, HARAMAIN_LOGO, CARD } from '../carddesign.js';
 import { nationalitySelect } from '../nationalities.js';
-import { signaturePad, signatureImg } from '../signature.js';
+import { signaturePad, signatureImg, signatureUpload } from '../signature.js';
 
 const ID_LABEL = { national: 'رقم الهوية أو الإقامة', passport: 'رقم جواز السفر' };
 
@@ -257,8 +257,11 @@ export async function render(ctx) {
       const start = h('button.btn.primary', { type: 'button' }, 'رسم التوقيع');
       start.onclick = () => padUI();
       sigBox.replaceChildren(
-        h('p.small.muted', 'ارسم توقيعك مرة واحدة، فيُدرَج تلقائيًّا كلما وقّعت بالعلم على المراسلات.'),
-        h('div.row', start));
+        h('p.small.muted', 'ارسم توقيعك مرة واحدة أو ارفع صورته، فيُدرَج تلقائيًّا كلما وقّعت بالعلم على المراسلات.'),
+        h('div.row', start),
+        signatureUpload({ memberId: me.id, onSaved: path => {
+          priv.signature_path = path; priv.signature_at = new Date().toISOString(); drawSig();
+        } }));
     }
   };
   const padUI = () => {
@@ -279,7 +282,10 @@ export async function render(ctx) {
     });
     sigBox.replaceChildren(
       h('p.small.muted', 'ارسم توقيعك داخل الإطار بإصبعك على الجوال أو بالفأرة على الحاسب.'),
-      pad.el, h('div.row', save, clear));
+      pad.el, h('div.row', save, clear),
+      signatureUpload({ memberId: me.id, onSaved: path => {
+        priv.signature_path = path; priv.signature_at = new Date().toISOString(); drawSig();
+      } }));
   };
   drawSig();
 
@@ -293,10 +299,14 @@ export async function render(ctx) {
     h('div.row.between', h('h3', 'التحقق بخطوتين'),
       state.mfaEnrolled ? h('span.badge.ok', h('span.tick', { 'aria-hidden': 'true' }, '✓'), 'مفعَّل')
                         : h('span.badge.warn', 'غير مفعَّل')),
+    // التفعيلُ والإيقافُ بيد إدارة المشروع، ويبقى للعضو تجديدُ رموز
+    // استرداده وحدها (ملاحظة ٢١٢)
     h('p.small.muted', state.mfaEnrolled
       ? 'يُطلب منك رمز من تطبيق المصادقة عند كل دخول، فلا يدخل حسابك أحد بكلمة المرور وحدها.'
-      : 'أضف رمزًا من تطبيق المصادقة على جوالك إلى كلمة المرور. وهو إلزامي على حسابات الإدارة.'),
-    h('div.row', h('a.btn', { href: '/mfa' }, state.mfaEnrolled ? 'إدارة التحقق بخطوتين' : 'تفعيل التحقق بخطوتين')));
+      : 'يُفعَّل لحسابك من إدارة المشروع. وما دام لم يُفعَّل، فحسابك يُفتح بكلمة المرور وحدها.'),
+    state.mfaEnrolled
+      ? h('div.row', h('a.btn', { href: '/mfa' }, 'رموز الاسترداد'))
+      : null);
 
   const card = await cardSection(me, privRows[0] || {}, langRows.map(r => r.language_code),
     cardRows[0] || null, settingsRows[0] || null);

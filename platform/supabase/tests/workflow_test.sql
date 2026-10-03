@@ -2560,7 +2560,8 @@ begin
   if v_txt ~ 'الرواتب|التسعيرة|المستحقات|المصرفية|المستخلص|ريال' then
     raise exception 'FAIL: ذكرٌ مالي في صفحة المبادرة';
   end if;
-  if jsonb_array_length(v -> 'sections') <> 20 then
+  -- وأُضيف قسمُ المنصة فصارت إحدى وعشرين (ملاحظة: خدمات المنصة)
+  if jsonb_array_length(v -> 'sections') <> 21 then
     raise exception 'FAIL: أقسام المبادرة (%)', jsonb_array_length(v -> 'sections');
   end if;
   foreach v_txt in array array['الترجمة الفورية', 'الدليل المصطلحي الشرعي الموحَّد',
@@ -4617,10 +4618,10 @@ begin
   if v_rec.missing is null or v_rec.complete is null then
     raise exception 'FAIL: المصفوفةُ بلا عدِّ ناقصٍ ولا حكمِ اكتمال';
   end if;
-  -- وما لا يلزم الحسابَ يُعلَم بأنه لا يلزمه: المدينةُ لغير المرشد
+  -- والمدينةُ تُطلب من كل عضو، ففي المترجمين من يعمل عن بُعد (ملاحظة ٢٢٢)
   select * into v_rec from public.member_data_matrix() where member_id = v_mgr;
-  if v_rec.city_state <> 'na' then
-    raise exception 'FAIL: طُلبت المدينةُ من غير مرشدٍ مكاني (%)', v_rec.city_state;
+  if v_rec.city_state not in ('ok', 'none') then
+    raise exception 'FAIL: حالُ المدينة غير معروف (%)', v_rec.city_state;
   end if;
   if v_rec.languages not in ('ok', 'none', 'na') then
     raise exception 'FAIL: حالُ اللغات غير معروف (%)', v_rec.languages;
@@ -5042,4 +5043,154 @@ begin
   delete from auth.users where id = v_b;
 
   raise notice 'PASS: حذفُ الحساب لمدير المشروع، ويُردّ عمن له سجلٌّ أو عملٌ قائم';
+end $$;
+
+-- =====================================================================
+-- ٥٧) الصلاحياتُ والنطاقُ والمستودعُ والحضور بالموقع (ملاحظات ٢١١–٢٢٢)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        v_yus uuid := '00000000-0000-0000-0000-00000000000c';
+        v_fld uuid;
+        v_work uuid; v_item uuid; v_no text; v_site uuid; v_n int; v_g jsonb;
+        v_lead uuid;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  -- عضوٌ من فريق الإرشاد المكاني، أيًّا كان من بلغه في مجرى الاختبار
+  select id into v_fld from public.profiles where track = 'field' and status = 'active' limit 1;
+  if v_fld is null then
+    select id into v_fld from public.profiles where role = 'translator' and status = 'active' limit 1;
+    update public.profiles set track = 'field' where id = v_fld;
+  end if;
+
+  -- ========== ٢١٤: «حذف الحساب» أصلُه المنع ==========
+  if (select default_open from public.perm_keys where key = 'delete_member') then
+    raise exception 'FAIL: صلاحيةُ الحذف مفتوحةٌ ابتداءً';
+  end if;
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  if public.has_perm('delete_member') then
+    raise exception 'FAIL: المنسقُ يحذف بلا منحٍ صريح';
+  end if;
+  if not public.has_perm('team') then
+    raise exception 'FAIL: أُغلقت صلاحيةٌ أصلُها الفتح';
+  end if;
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_perms(v_crd, jsonb_build_object('delete_member', true));
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  if not public.has_perm('delete_member') then
+    raise exception 'FAIL: لم تُفتح صلاحيةُ الحذف بمنحٍ صريح';
+  end if;
+
+  -- ========== ٢١١: مسحُ التسجيل لصاحب صلاحية الفريق ==========
+  insert into auth.mfa_factors (user_id, status) values (v_yus, 'verified');
+  perform public.admin_clear_mfa(v_yus);            -- المنسقُ يملك صلاحية الفريق
+  if exists (select 1 from auth.mfa_factors where user_id = v_yus) then
+    raise exception 'FAIL: لم يُمسح التسجيل بصلاحية الفريق';
+  end if;
+
+  -- ========== ٢٢١: نطاقُ قائد الفريق الميداني ==========
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  insert into auth.users (email, raw_user_meta_data) values
+    ('lead221@example.com',
+     '{"full_name":"قائد الوردية","languages":["en"],"national_id":"1000000221","whatsapp":"+966500000221"}')
+    returning id into v_lead;
+  update public.profiles set status = 'active', role = 'field_lead' where id = v_lead;
+  perform public.set_lead_scope(v_lead, 'makkah', null);
+  if (select lead_city from public.profiles where id = v_lead) <> 'makkah' then
+    raise exception 'FAIL: لم يُضبط نطاقُ القيادة';
+  end if;
+  update public.profiles set city = 'makkah' where id = v_fld;
+  perform set_config('request.jwt.claim.sub', v_lead::text, true);
+  if not public.is_field_lead() then raise exception 'FAIL: لم يُعرف قائدُ الفريق'; end if;
+  if not public.in_my_lead_scope(v_fld) then
+    raise exception 'FAIL: المرشدُ في مكة خارج نطاق قائدِ مكة';
+  end if;
+  if public.in_my_lead_scope(v_yus) then
+    raise exception 'FAIL: المترجمُ دخل نطاقَ قائد الفريق الميداني';
+  end if;
+  -- ومن خرج من القيادة سقط نطاقُه
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  update public.profiles set role = 'translator' where id = v_lead;
+  if (select lead_city from public.profiles where id = v_lead) is not null then
+    raise exception 'FAIL: بقي النطاقُ على غير قائد';
+  end if;
+
+  -- ========== ٢١٨: المستودع — خارج الحساب، وله رقمُ توثيق ==========
+  v_work := public.save_repo_work(jsonb_build_object(
+    'title', 'خطبة قديمة', 'material_type', 'خطب', 'sermon_type', 'خطبة جمعة',
+    'mosque', 'makkah', 'work_date', '2023-03-10',
+    'items', jsonb_build_array(
+      jsonb_build_object('language_code', 'ar', 'is_source', true, 'body_html', 'نصٌّ عربي', 'words', 2),
+      jsonb_build_object('language_code', 'en', 'media_url', 'https://example.com/a.mp3'))));
+  if v_work is null then raise exception 'FAIL: لم يُحفظ عملُ المستودع'; end if;
+  select count(*) into v_n from public.repo_items where work_id = v_work;
+  if v_n <> 2 then raise exception 'FAIL: نسخُ العمل (%)', v_n; end if;
+  select doc_no into v_no from public.repo_items where work_id = v_work and language_code = 'en';
+  if v_no is null or v_no !~ '^H[0-9]{2}-EN-' then
+    raise exception 'FAIL: رقمُ التوثيق في المستودع (%)', coalesce(v_no, 'ø');
+  end if;
+  -- ولا يدخل في أساس العقد
+  if exists (select 1 from public.production_rows r
+              where r.title = 'خطبة قديمة') then
+    raise exception 'FAIL: دخل عملُ المستودع في دليل الإنتاج';
+  end if;
+  if (select translations from public.repo_rows where id = v_work) <> 1 then
+    raise exception 'FAIL: عدُّ ترجمات المستودع';
+  end if;
+
+  -- ========== ٢١٩: الحضور بالموقع ==========
+  select id into v_site from public.work_sites where city = 'makkah' and is_default limit 1;
+  if v_site is null then raise exception 'FAIL: لا نطاقَ افتراضيًّا لمكة'; end if;
+  -- والمسافةُ تُحسب هنا: الكعبةُ إلى المسجد النبوي نحو ٣٤٠ كم
+  if round(public.geo_distance_m(21.422487, 39.826206, 24.467227, 39.611111) / 1000) not between 330 and 350 then
+    raise exception 'FAIL: حسابُ المسافة خطأ (%)',
+      round(public.geo_distance_m(21.422487, 39.826206, 24.467227, 39.611111) / 1000);
+  end if;
+
+  update public.profiles set city = 'makkah' where id = v_fld;
+  perform set_config('request.jwt.claim.sub', v_fld::text, true);
+  if (select id from public.site_for(v_fld)) <> v_site then
+    raise exception 'FAIL: لم يُقَس المرشدُ على نطاق مدينته';
+  end if;
+  -- من هو خارج النطاق يُردّ
+  begin
+    perform public.geo_check_in(24.467227, 39.611111, 10, false);
+    raise exception 'FAIL: قُبل حضورٌ من خارج النطاق';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  -- وضعيفُ الإشارة يُردّ
+  begin
+    perform public.geo_check_in(21.4225, 39.8262, 900, false);
+    raise exception 'FAIL: قُبل حضورٌ بإشارةٍ ضعيفة';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  -- ومن هو داخل النطاق يُقبل، وتُسجَّل مسافتُه
+  v_g := public.geo_check_in(21.4225, 39.8262, 12, false);
+  if (v_g ->> 'ok') <> 'true' then raise exception 'FAIL: رُدّ حضورٌ داخل النطاق (%)', v_g; end if;
+  if not exists (select 1 from public.shifts
+                  where member_id = v_fld and check_in_at is not null and in_dist_m is not null) then
+    raise exception 'FAIL: لم تُسجَّل مسافةُ الحضور';
+  end if;
+  begin
+    perform public.geo_check_in(21.4225, 39.8262, 12, false);
+    raise exception 'FAIL: سُجّل الحضورُ مرتين';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  -- ========== ٢٢٢: المدينةُ تُطلب من الجميع ==========
+  update public.profiles set city = null where id = v_yus;
+  if not ('المدينة' = any(public.profile_missing(v_yus))) then
+    raise exception 'FAIL: لم تُطلب المدينةُ من المترجم';
+  end if;
+
+  delete from public.repo_works where id = v_work;
+  delete from auth.users where id = v_lead;
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_perms(v_crd, '{}'::jsonb);
+
+  raise notice 'PASS: الصلاحياتُ بأصولها، ونطاقُ القيادة، والمستودع، والحضورُ بالموقع';
 end $$;

@@ -23,10 +23,27 @@ const OPS_PERIOD = { day: 'اليوم كلُّه', morning: 'الفترة الص
 
 export async function opsSection() {
   let month = thisMonth();
+  let lastSheet = null;
   const box = h('div.stack');
 
   const monthInput = h('input', { type: 'month', value: month, 'aria-label': 'شهر التقرير' });
   monthInput.onchange = () => { month = monthInput.value || thisMonth(); draw(); };
+
+  // التقريرُ موحَّدٌ لا يُفصَل، والاختيارُ عند التصدير وحده (ملاحظة ٢١٦)
+  const citySel = h('select', { 'aria-label': 'نطاق التصدير' },
+    h('option', { value: '' }, 'الحرمان معًا'),
+    h('option', { value: 'makkah' }, 'المسجد الحرام'),
+    h('option', { value: 'madinah' }, 'المسجد النبوي'));
+  const fmtSel = h('select', { 'aria-label': 'صيغة التصدير' },
+    h('option', { value: 'xlsx' }, 'Excel — جدول بيانات'),
+    h('option', { value: 'docx' }, 'Word على كليشة الهيئة'),
+    h('option', { value: 'pdf' }, 'PDF على كليشة الهيئة'));
+  const expBtn = h('button.btn.sm.primary', { type: 'button' }, '⤓ تصدير التقرير');
+  const exportBar = h('div.export-bar',
+    h('label.field', 'الشهر', monthInput),
+    h('label.field', 'النطاق', citySel),
+    h('label.field', 'الصيغة', fmtSel),
+    h('div.field', h('span.field-head', '\u200b'), expBtn));
 
   const n2 = v => Number(v || 0).toLocaleString('en-US',
     { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -380,13 +397,13 @@ export async function opsSection() {
         h('p.small.muted', 'ونسبة المستخلص من جدول العقد: من ٩٠ إلى ١٠٠ ← ١٠٠٪، '
           + 'ومن ٨٠ إلى ٨٩ ← ٩٠٪، ومن ٧٠ إلى ٧٩ ← ٨٠٪، وأقلُّ من ٧٠ ← ٧٠٪ مع توجيه إنذار. '
           + 'والتكلفة اليومية قيمةُ الشهر على عدد الأيام التشغيلية وعدد أفراد الفريق.')),
-      h('div.row',
-        h('button.btn.sm', { type: 'button',
-          onclick: () => exportOps(rows, total, absent, coll, evalCut, vat) },
-          '⤓ تصدير إلى Excel')));
+      );
+    lastSheet = () => exportOps(rows, total, absent, coll, evalCut, vat);
   }
 
-  const exportOps = (rows, total, absent, coll, evalCut, vat) => {
+  const exportOps = async (rows, total, absent, coll, evalCut, vat) => {
+    // النطاقُ المختار: الحرمان، أو حرمٌ بعينه ومعه ما لا موقعَ له (ملاحظة ٢١٦)
+    if (citySel.value) rows = rows.filter(r => !r.mosque || r.mosque === citySel.value);
     const head = ['م', 'البند', 'الموقع', 'الموسم', 'عدد الأفراد', 'الأيام التشغيلية',
       'التكلفة الشهرية الفردية', 'القيمة اليومية للتشغيل', 'قيمة الفرد اليومية',
       'التكلفة الإجمالية', 'الغياب المسجَّل', 'المغطَّى ببديل', 'التقصير المحسوم',
@@ -414,18 +431,28 @@ export async function opsSection() {
       [18, f2(evalCut)], [19, f2(afterDed)]));
     out.push(pad('ضريبة القيمة المضافة ١٥٪', [19, f2(vat)]));
     out.push(pad('الإجمالي شامل الضريبة', [19, f2(afterDed + vat)]));
+    const scope = citySel.value ? OPS_MOSQUE[citySel.value] : 'الحرمان معًا';
+    const label = `التكاليف التشغيلية — ${month} — ${scope}`;
+    const note = `${label} · حُرِّر في ${fmtDate(new Date())}`;
     try {
-      downloadBlob(buildXlsx(out, { sheetName: 'التكاليف التشغيلية', allText: true }),
-        `التكاليف-التشغيلية-${month}.xlsx`);
+      if (fmtSel.value === 'xlsx') {
+        downloadBlob(buildXlsx(out, { sheetName: 'التكاليف التشغيلية', allText: true }), `${label}.xlsx`);
+      } else {
+        const { exportWord, exportPdf } = await import('./teamexport.js');
+        if (fmtSel.value === 'docx') await exportWord(out, label, { note });
+        else if (!exportPdf(out, label, { note })) return toast('اسمح بالنوافذ المنبثقة.', 'bad');
+      }
+      toast('جرى التصدير.', 'ok');
     } catch (e) { toast(e.message, 'bad'); }
   };
 
+  expBtn.onclick = () => { if (lastSheet) lastSheet(); };
+
   await draw();
   return h('div.stack',
-    h('div.row.between',
-      h('div', h('h3', 'التقرير الشهري للتكاليف التشغيلية'),
-        h('p.small.muted', 'على كراسة المنافسة: بندًا بندًا بعدده وتكلفته وأيامه التشغيلية، '
-          + 'وما حُسم للغياب وللغياب الجماعي وللتقييم، ثم الضريبة والصافي.')),
-      h('label.field', 'الشهر', monthInput)),
+    h('div', h('h3', 'التقرير الشهري للتكاليف التشغيلية'),
+      h('p.small.muted', 'على كراسة المنافسة: بندًا بندًا بعدده وتكلفته وأيامه التشغيلية، '
+        + 'وما حُسم للغياب وللغياب الجماعي وللتقييم، ثم الضريبة والصافي.')),
+    exportBar,
     box);
 }

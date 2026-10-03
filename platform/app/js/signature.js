@@ -48,3 +48,43 @@ export function signaturePad({ width = 560, height = 180 } = {}) {
 
 // صورة التوقيع المحفوظ
 export const signatureImg = (url, alt = 'التوقيع') => h('img.sig-img', { src: url, alt });
+
+// ---------------------------------------------------------------------
+// رفعُ صورة التوقيع: لمن كان توقيعُه مصوَّرًا أو ممسوحًا، فلا يُلزَم
+// بالرسم باليد. والرسمُ باقٍ كما هو، والخياران معًا (ملاحظة ٢١٥)
+// ---------------------------------------------------------------------
+const SIG_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+const SIG_MAX = 2 * 1024 * 1024;        // ميغابايتان تكفي صورةَ توقيع
+
+export function signatureUpload({ memberId, onSaved, label = 'أو ارفع صورة توقيعك' }) {
+  const input = h('input', { type: 'file', accept: SIG_TYPES.join(','), 'aria-label': 'صورة التوقيع' });
+  const note = h('p.small.muted', 'صورةٌ بخلفيةٍ بيضاء أو شفافة، بصيغة PNG أو JPG، لا تتجاوز ميغابايتين.');
+  const err = h('p.small.warn', { hidden: true });
+
+  input.onchange = async () => {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    err.hidden = true;
+    if (!SIG_TYPES.includes(f.type)) {
+      err.textContent = 'الصيغة غير مقبولة: PNG أو JPG أو WebP.'; err.hidden = false; input.value = ''; return;
+    }
+    if (f.size > SIG_MAX) {
+      err.textContent = 'الصورة أكبر من ميغابايتين — اضغطها ثم أعد الرفع.'; err.hidden = false; input.value = ''; return;
+    }
+    try {
+      const { db, storage } = await import('./sb.js');
+      const { toast } = await import('./ui.js');
+      const ext = f.type === 'image/png' ? 'png' : f.type === 'image/webp' ? 'webp' : 'jpg';
+      const path = `${memberId}/sig-${Date.now()}.${ext}`;
+      await storage.upload('signatures', path, f);
+      await db.rpc('set_my_signature', { p_path: path });
+      toast('حُفظت صورة توقيعك.', 'ok');
+      onSaved && onSaved(path);
+    } catch (e) {
+      err.textContent = e.message; err.hidden = false;
+    } finally { input.value = ''; }
+  };
+
+  return h('div.stack.sig-upload', { style: { gap: '6px' } },
+    h('label.field', label, input), note, err);
+}

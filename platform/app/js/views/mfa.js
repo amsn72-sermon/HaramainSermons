@@ -8,6 +8,13 @@ import { qrSvgText } from '../qr.js';
 
 const APPS = 'Google Authenticator أو Microsoft Authenticator أو أي تطبيق يدعم رموز TOTP';
 
+// المضيُّ إلى الوجهة بتحميلٍ كامل: أضمنُ من الانتقال الداخلي بعد تبدُّل
+// رمز الجلسة، فتُقرأ الحالُ كلُّها من جديد (ملاحظة ٢٠٩)
+function goTo(ctx) {
+  const next = ctx?.query?.get('next') || '/app';
+  location.replace(next.startsWith('/') ? next : '/app');
+}
+
 // نصُّ otpauth بالمعيار: الجهةُ حروفٌ لاتينيةٌ بلا شرطاتٍ مائلة، والوسمُ
 // «الجهة:الحساب»، وكلُّ جزءٍ مرمَّزٌ وحدَه — وهذا ما ترفض التطبيقاتُ ما خالفه
 const ISSUER = 'Haramain Sermons';
@@ -22,10 +29,14 @@ export function otpauthUri(secret, account) {
 // يُقاس الفارق من ترويسة Date في رد الخادم نفسه (ملاحظة ١٠٣)
 async function clockSkew() {
   try {
-    const base = (window.HS_CONFIG || {}).supabaseUrl;
+    const conf = window.HS_CONFIG || {};
+    const base = conf.supabaseUrl;
     if (!base) return null;
     const t0 = Date.now();
-    const res = await fetch(`${base}/auth/v1/settings`, { cache: 'no-store' });
+    // الطلبُ بلا مفتاح الواجهة يُردّ بـ401 فيضيع الفحص (ملاحظة ٢١٠)
+    const res = await fetch(`${String(base).replace(/\/+$/, '')}/auth/v1/settings`,
+      { cache: 'no-store', headers: conf.supabaseAnonKey ? { apikey: conf.supabaseAnonKey } : {} });
+    if (!res.ok) return null;
     const head = res.headers.get('date');
     if (!head) return null;
     const rtt = (Date.now() - t0) / 2;
@@ -72,9 +83,24 @@ const shell = (title, body) => h('div',
 // ---------------------------------------------------------------------
 export async function render(ctx) {
   const st = await mfaState();
+  await loadMfaState();
   if (st.satisfied && st.enrolled) return shell('التحقق بخطوتين مفعَّل', done(ctx));
-  return st.enrolled ? shell('التحقق بخطوتين', await askCode(ctx, st.verified[0]))
-                     : shell('تفعيل التحقق بخطوتين', await enrollBox(ctx));
+  if (st.enrolled) return shell('التحقق بخطوتين', await askCode(ctx, st.verified[0]));
+  // التفعيلُ بيد الإدارة لا بيد العضو: من لم يُلزَم به لا يفعّله لنفسه (ملاحظة ٢١٢)
+  if (!mfaRequiredForMe()) return shell('التحقق بخطوتين', notYours());
+  return shell('تفعيل التحقق بخطوتين', await enrollBox(ctx));
+}
+
+// أُلزم حسابُه بعينه، أو كان من الإدارة والإلزامُ عام
+const mfaRequiredForMe = () =>
+  state.profile?.mfa_required === true || (isAdmin() && state.mfaRequired !== false);
+
+function notYours() {
+  return h('div.stack',
+    h('p', 'التحقق بخطوتين يُفعَّل لحسابك من إدارة المشروع، لا من هنا.'),
+    h('p.small.muted', 'فإذا فُعّل لحسابك، طُلب منك تسجيلُ تطبيق المصادقة عند أول دخول، '
+      + 'وعُرضت عليك رموزُ الاسترداد مرةً واحدة. وما دام لم يُفعَّل، فحسابُك يُفتح بكلمة المرور وحدها.'),
+    h('div.row', h('a.btn.primary', { href: '/app' }, 'متابعة العمل')));
 }
 
 function done(ctx) {
@@ -111,7 +137,9 @@ async function askCode(ctx, factor) {
       await auth.mfa.verify(factor.id, ch.id, code.value);
       await loadMfaState(true);
       toast('تم التحقق.', 'ok');
-      ctx.navigate(ctx.query?.get('next') || '/app', { replace: true });
+      // تحميلٌ كامل لا انتقالٌ داخلي: رمزُ الجلسة تبدّل، والرسمُ الداخلي
+      // كان يسابق نفسَه فيبقى على الشاشة ما كان (ملاحظة ٢٠٩)
+      goTo(ctx);
     } catch (e) {
       err.replaceChildren(h('ul',
         h('li', /invalid|expired/i.test(e.message) ? 'رمز غير صحيح أو انتهت صلاحيته — جرّب الرمز الجديد.' : e.message),
@@ -183,12 +211,12 @@ async function showCodes(ctx, box) {
     const out = await db.rpc('make_recovery_codes');
     codes = (Array.isArray(out) ? out : []).map(r => (typeof r === 'string' ? r : r?.make_recovery_codes)).filter(Boolean);
   } catch { /* لا يمنع الدخول */ }
-  if (!codes.length) { ctx.navigate(ctx.query?.get('next') || '/app', { replace: true }); return; }
+  if (!codes.length) { goTo(ctx); return; }
 
   const kept = h('input', { type: 'checkbox', 'aria-label': 'حفظت الرموز' });
   const next = h('button.btn.primary', { type: 'button', disabled: true }, 'متابعة العمل');
   kept.onchange = () => { next.disabled = !kept.checked; };
-  next.onclick = () => ctx.navigate(ctx.query?.get('next') || '/app', { replace: true });
+  next.onclick = () => goTo(ctx);
 
   const copy = h('button.btn', { type: 'button' }, 'نسخ الرموز');
   copy.onclick = async () => {

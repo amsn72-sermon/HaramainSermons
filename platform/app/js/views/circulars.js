@@ -3,7 +3,7 @@ import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDateTime, req, ma
 import { db, storage, auth } from '../sb.js';
 import { state, isAdmin, isManager, ROLE_LABEL, langName, loadCircularState } from '../store.js';
 import { pdfViewer } from '../pdfview.js';
-import { signaturePad, signatureImg } from '../signature.js';
+import { signaturePad, signatureImg, signatureUpload } from '../signature.js';
 
 export const KIND_LABEL = {
   notice: 'تعميم', directive: 'توجيه', warning: 'تحذير', invitation: 'دعوة'
@@ -63,7 +63,8 @@ function readerCard(c, mine, onDone) {
     const clear = h('button.btn.sm', { type: 'button', onclick: () => pad.clear() }, 'مسح');
     sigWrap.replaceChildren(
       h('span.small.muted', 'ارسم توقيعك هنا (يُحفظ في ملفك ويُستعمل في المرات القادمة):'),
-      pad.el, h('div.row', clear));
+      pad.el, h('div.row', clear),
+      signatureUpload({ memberId: state.profile.id, onSaved: path => { savedSig = path; pad = null; drawSigArea(); } }));
   };
   drawSigArea();
 

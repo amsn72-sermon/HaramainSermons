@@ -89,7 +89,7 @@ export async function render(ctx, group = 'translators') {
       if (key === 'team') panel.replaceChildren(...[
         group === 'admins' ? registrationCard(ctx) : null,
         group === 'admins' ? securityCard(ctx) : null,
-        team.joins, team.filters, team.table].filter(Boolean));
+        team.joins, team.cityTabs, team.filters, team.table].filter(Boolean));
       else if (key === 'docs') panel.replaceChildren(await docsSection(ctx, team, scr, group));
       else panel.replaceChildren(await bankAdmin(ctx, { parts: true, only: ids, reloadPath: `${scr.path}?tab=bank` }));
     } catch (err) { panel.replaceChildren(h('p.small.bad', err.message)); }

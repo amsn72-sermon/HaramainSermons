@@ -20,7 +20,11 @@ export const state = {
 };
 
 export const ROLE_LABEL = { manager: 'مدير المشروع', coordinator: 'منسق', translator: 'مترجم',
-  supervisor: 'مدير المشروع من الهيئة' };
+  supervisor: 'مدير المشروع من الهيئة', field_lead: 'قائد الفريق الميداني' };
+// وردياتُ الإرشاد الثلاث: عليها يُبنى نطاقُ القائد (ملاحظة ٢٢١)
+export const PERIOD_LABEL = { morning: 'الصباحية', evening: 'المسائية', night: 'الليلية' };
+export const leadScope = m => (m?.role !== 'field_lead' ? '' :
+  [CITY[m.lead_city] || 'الحرمان', PERIOD_LABEL[m.lead_period] || 'كل الورديات'].join(' — '));
 
 // صفتان تُكتبان على حساب المنسق، وصلاحيتُهما صلاحيتُه نفسُها (ملاحظة ٢٠٠)
 export const ADMIN_TITLE = {
@@ -91,11 +95,16 @@ export const PERM_LABEL = {
   interpretation: 'سجلّ الترجمة الفورية',
   glossary: 'اعتماد الدليل المصطلحي',
   rooms: 'القاعات واللقاءات وجدولتها',
+  delete_member: 'حذف حسابات الأعضاء',
   settings: 'اللغات والخطباء وإعداد سير العمل',
   reports: 'دليل الإنتاج والأرشيف والتصدير'
 };
 export const PERM_KEYS = Object.keys(PERM_LABEL);
-export const can = key => (isManager() ? true : state.profile?.perms?.[key] !== false);
+// الأصلُ في المفاتيح الفتح، إلا ما لا يُستدرك فأصلُه المنع (ملاحظة ٢١٤)
+export const PERM_CLOSED = ['delete_member'];
+export const can = key => (isManager() ? true
+  : PERM_CLOSED.includes(key) ? state.profile?.perms?.[key] === true
+  : state.profile?.perms?.[key] !== false);
 
 export async function loadProfile() {
   if (!auth.session) { state.profile = null; return null; }

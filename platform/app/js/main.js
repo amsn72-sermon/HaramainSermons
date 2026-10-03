@@ -27,6 +27,8 @@ const routes = [
   ['/app/team', () => import('./views/staff.js'), true, true],
   ['/app/field', () => import('./views/staff.js').then(m => ({ render: m.field })), true, true],
   ['/app/answers', () => import('./views/staff.js').then(m => ({ render: m.answers })), true, true],
+  ['/app/repo', () => import('./views/repo.js'), true, true],
+  ['/app/attend', () => import('./views/attend.js'), true, true],
   ['/app/languages', () => import('./views/languages.js'), true, true],
   ['/app/khateebs', () => import('./views/khateebs.js'), true, true],
   ['/app/workflow', () => import('./views/workflow.js'), true, true],
@@ -53,7 +55,7 @@ const routes = [
 const PERM_OF = {
   '/app/new': 'materials',
   '/app/staff': 'team', '/app/staff/admins': 'team', '/app/team': 'team', '/app/field': 'team',
-  '/app/answers': 'team',
+  '/app/answers': 'team', '/app/repo': 'archive', '/app/attend': 'shifts',
   '/app/cards': 'cards',
   '/app/payroll': 'payroll',
   '/app/bank-accounts': 'banks',

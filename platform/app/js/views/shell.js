@@ -84,6 +84,7 @@ export function staffShell(view, path) {
     ? [group('سير العمل', [
          link('/app', 'المتابعة'),
          link('/app/archive', 'أرشيف الترجمة'),
+         link('/app/repo', 'مستودع الترجمة'),
          link('/app/stats', 'دليل الإنتاج'),
          link('/app/interpretation', 'الترجمة الفورية')]),
        group('الفريق', [
@@ -103,13 +104,14 @@ export function staffShell(view, path) {
          link('/app/glossary', 'الدليل المصطلحي'),
          link('/app/audio-guide', 'دليل التسجيل الصوتي')]),
        broadcast,
-       group('حسابي', [mine, link('/about', 'عن المنصة')])]
+       group('حسابي', [mine, link('/app/attend', 'حضوري'), link('/about', 'عن المنصة')])]
     : isAdmin()
     ? [group('سير العمل', [
          link('/app', 'المتابعة'),
          link('/app/new', 'إضافة مادة'),
          link('/app/tasks', 'مهامي'),
          link('/app/archive', 'أرشيف الترجمة'),
+         link('/app/repo', 'مستودع الترجمة'),
          link('/app/stats', 'دليل الإنتاج'),
          link('/app/interpretation', 'الترجمة الفورية'),
          isManager() ? link('/app/contract', 'بنود العقد والمستخلص') : null].filter(Boolean)),
@@ -132,18 +134,18 @@ export function staffShell(view, path) {
          link('/app/glossary', 'الدليل المصطلحي'),
          link('/app/audio-guide', 'دليل التسجيل الصوتي')]),
        broadcast,
-       group('حسابي', [mine, link('/about', 'عن المنصة')])]
+       group('حسابي', [mine, link('/app/attend', 'حضوري'), link('/about', 'عن المنصة')])]
     : ['field', 'answers'].includes(p.track) && !p.may_translate
       // الإرشاد وإجابة السائلين: لا تُسنَد إليهما ترجمة، فلا قائمة مهام
       // (ملاحظتا ٩٩ و١٨٦)
       ? [group('عملي', [link('/app/rooms', 'القاعات واللقاءات')]),
-         broadcast, group('حسابي', [mine, mail, link('/about', 'عن المنصة')])]
+         broadcast, group('حسابي', [mine, link('/app/attend', 'حضوري'), mail, link('/about', 'عن المنصة')])]
       : [group('عملي', [link('/app/tasks', 'مهامي'), mail,
            link('/app/rooms', 'القاعات واللقاءات'),
            link('/app/glossary', 'الدليل المصطلحي'),
            link('/app/audio-guide', 'دليل التسجيل الصوتي')]),
          broadcast,
-         group('حسابي', [mine, link('/about', 'عن المنصة')])];
+         group('حسابي', [mine, link('/app/attend', 'حضوري'), link('/about', 'عن المنصة')])];
   // شارة ما لم يُوقَّع عليه بالعلم
   db.rpc('my_pending_circulars').then(n => {
     const count = Number(Array.isArray(n) ? n[0] : n) || 0;

@@ -436,5 +436,10 @@ async function monthSection() {
 
   box.append(h('div.card.stack', h('div.row.wrap', h('label.field', 'الشهر', month))), body);
   await load();
+  // مواقعُ الحضور تُضبط من هنا، فلا يطول الشريط الجانبي (ملاحظة ٢١٩)
+  try {
+    const { sitesCard } = await import('./sites.js');
+    box.append(await sitesCard());
+  } catch { /* لا تمنع الشاشةَ إن تعذّرت */ }
   return box;
 }

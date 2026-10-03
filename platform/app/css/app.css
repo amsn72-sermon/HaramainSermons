@@ -1322,3 +1322,39 @@ button.room-tile:hover { border-color: var(--gold); transform: translateY(-2px);
 .wait-dots span:nth-child(3) { animation-delay: .4s; }
 @keyframes waitPulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .wait-dots span { animation: none; opacity: .6; } }
+
+/* ------------------------------------------------------------------
+   تبويبا الحرمين في قوائم الفرق الميدانية (ملاحظة ٢٢٠)
+------------------------------------------------------------------- */
+.seg-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 2px 0 10px; }
+.seg-tabs .btn .sub { opacity: .7; font-size: .85em; }
+
+/* ------------------------------------------------------------------
+   شريطُ التصدير أعلى الشاشة: الشهر ثم النطاق ثم الصيغة ثم الزر (ملاحظة ٢١٦)
+------------------------------------------------------------------- */
+.export-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;
+  padding: 10px 12px; border-radius: 12px; background: var(--surface-2, rgb(255 255 255 / 4%)); }
+.export-bar .field { margin: 0; min-width: 150px; }
+.export-bar .btn { white-space: nowrap; }
+@media (max-width: 560px) { .export-bar .field { min-width: 100%; } }
+
+/* ------------------------------------------------------------------
+   خريطةٌ صغيرةٌ بلا مكتبة: مربّعات OSM ودبّوسٌ ودائرةُ النطاق (ملاحظة ٢١٩)
+------------------------------------------------------------------- */
+.map-wrap { position: relative; overflow: hidden; border-radius: 12px;
+  border: 1px solid var(--border); background: #e8e2d8; touch-action: none;
+  cursor: grab; user-select: none; }
+.map-wrap.dragging { cursor: grabbing; }
+.map-tiles { position: absolute; inset: 0; }
+.map-tile { position: absolute; width: 256px; height: 256px; pointer-events: none; }
+.map-pin { position: absolute; left: 50%; top: 50%; width: 14px; height: 14px;
+  margin: -7px 0 0 -7px; border-radius: 50%; background: #c0392b;
+  box-shadow: 0 0 0 3px #fff, 0 1px 4px rgb(0 0 0 / 35%); pointer-events: none; }
+.map-ring { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  border: 2px solid rgb(192 57 43 / 85%); background: rgb(192 57 43 / 12%);
+  border-radius: 50%; pointer-events: none; }
+.map-tools { position: absolute; inset-inline-end: 8px; top: 8px; display: grid; gap: 4px; }
+.map-credit { position: absolute; inset-inline-start: 6px; bottom: 4px; font-size: .7rem;
+  color: #333; background: rgb(255 255 255 / 75%); padding: 1px 6px; border-radius: 6px; }
+.repo-item { background: var(--surface-2, rgb(255 255 255 / 4%)); }
+.sig-upload input[type="file"] { font-size: .9em; }
