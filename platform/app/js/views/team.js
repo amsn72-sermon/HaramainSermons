@@ -127,28 +127,49 @@ export async function render(ctx, opts = {}) {
       h('option', { value: '' }, 'منسق (بلا صفة)'),
       Object.entries(ADMIN_TITLE).map(([k, v]) =>
         h('option', { value: k, selected: m.admin_title === k }, v)));
+    // تظهر دائمًا لمدير المشروع — ولو كان العضو غيرَ منسق — فيعلم أنها هنا،
+    // وتُقفَل مع بيان سببِ قفلها (ملاحظة ٢٠٢)
+    const titleWhy = h('p.small.muted');
     const titleCard = isManager() ? h('fieldset.stack',
-      { style: { display: role.value === 'coordinator' ? '' : 'none' } },
       h('legend', 'صفة العمليات'),
       h('p.small.muted', 'تُكتب على حساب المنسق فتظهر في الشاشات وبطاقة العمل، '
-        + 'وصلاحيتُه تبقى صلاحيةَ المنسق نفسَها لا تزيد ولا تنقص.'),
-      h('label.field', 'الصفة', titleSel)) : null;
-    role.addEventListener('change', () => {
-      if (titleCard) titleCard.style.display = role.value === 'coordinator' ? '' : 'none';
-    });
+        + 'وصلاحيتُه تبقى صلاحيةَ المنسق نفسَها لا تزيد ولا تنقص. ولا تظهر في التسجيل: '
+        + 'التحويلُ إليها بيد مدير المشروع وحده.'),
+      h('label.field', 'الصفة', titleSel),
+      titleWhy) : null;
+    const syncTitle = () => {
+      if (!titleCard) return;
+      const ok = role.value === 'coordinator';
+      titleSel.disabled = !ok;
+      titleWhy.textContent = ok ? '' : 'الصفة للمنسقين: حوّل «الدور» إلى منسق لتُفتح.';
+    };
+    syncTitle();
+    role.addEventListener('change', syncTitle);
     // نقل العضو بين الفريقين: ترقية المتميّز من الإرشاد إلى الترجمة (ملاحظة ٩٩)
     const trackSel = h('select', { 'aria-label': 'الفريق' },
       Object.entries(TRACK_LABEL).map(([k, v]) => h('option', { value: k, selected: trackOf(m) === k }, v)));
 
-    // المتميّز من المرشدين المكانيين تُسنَد إليه الترجمة بلغته (ملاحظة ١٧٣)
+    // «يترجم»: خيارٌ أمام كل عضوٍ من الفريق كائنًا ما كان مسلكُه — فمن
+    // حُدِّد له ظهر في قائمة الإسناد للغته التي يتحدث بها (ملاحظة ٢٠٦)
     const mayBox = h('input', { type: 'checkbox', checked: m.may_translate ? true : null,
-      'aria-label': 'يترجم بلغته المسجَّلة' });
-    const mayCard = h('fieldset.stack', { style: { display: trackOf(m) === 'field' ? '' : 'none' } },
-      h('legend', 'المرشد المتميّز'),
-      h('label.check', mayBox, h('span', 'تُسنَد إليه أعمال ترجمة بلغته المسجَّلة')),
-      h('p.small.muted', 'الأصل في فريق الإرشاد المكاني ألّا تُسنَد إليه ترجمة. '
-        + 'وهذا استثناءٌ للمتميّز، ولا يتجاوز لغاته المسجَّلة أعلاه. '
-        + 'ولا تُرفع الإتاحة وفي يده عملٌ لم يُنجز.'));
+      'aria-label': 'يترجم' });
+    const mayWhy = h('p.small.muted');
+    const mayCard = h('fieldset.stack',
+      h('legend', 'يترجم'),
+      h('label.check', mayBox, h('span', 'يظهر في قائمة الإسناد للغاته المسجَّلة')),
+      mayWhy);
+    const syncMay = () => {
+      mayWhy.textContent = trackSel.value === 'translation'
+        ? 'المترجم المتخصص يترجم بحكم دوره. وإن رفعتَ التحديد لم يظهر في قائمة '
+          + 'الإسناد ولم تُسنَد إليه مرحلةٌ جديدة — كمن غاب أو انقطع. ولا يُرفع '
+          + 'وفي يده عملٌ لم يُنجز.'
+        : trackSel.value === 'answers'
+          ? 'الأصل في فريق إجابة السائلين ألّا تُسنَد إليه ترجمة. فإن حدَّدتَه '
+            + 'ظهر في الإسناد، ولا يتجاوز لغاته المسجَّلة أعلاه.'
+          : 'الأصل في فريق الإرشاد المكاني ألّا تُسنَد إليه ترجمة. وهذا استثناءٌ '
+            + 'للمتميّز، ولا يتجاوز لغاته المسجَّلة أعلاه. ولا تُرفع الإتاحة وفي '
+            + 'يده عملٌ لم يُنجز.';
+    };
     // مدينة المرشد: عليها تُبنى دعوات التدريب والاجتماعات (ملاحظة ١٨٥)
     const citySel = h('select', { 'aria-label': 'مدينة العمل' },
       h('option', { value: '' }, '— غير محدَّدة —'),
@@ -164,23 +185,54 @@ export async function render(ctx, opts = {}) {
       h('p.small', NO_FATWA),
       h('p.small.muted', 'ولا يُسجَّل في هذه القائمة أحد ابتداءً: إنما يُنقل إليها من هنا.'));
 
+    syncMay();
     trackSel.addEventListener('change', () => {
-      mayCard.style.display = trackSel.value === 'field' ? '' : 'none';
       cityCard.style.display = trackSel.value === 'field' ? '' : 'none';
       answersCard.style.display = trackSel.value === 'answers' ? '' : 'none';
-      if (trackSel.value !== 'field') mayBox.checked = false;
+      // من نُقل إلى الترجمة يترجم بحكم دوره، فتُحدَّد له من نفسها
+      if (trackSel.value === 'translation' && trackOf(m) !== 'translation') mayBox.checked = true;
+      syncMay();
     });
 
     // إلزام هذا الحساب بالتحقق بخطوتين — لمدير المشروع (ملاحظة ١٧١)
     const mfaBox = h('input', { type: 'checkbox', checked: m.mfa_required ? true : null,
       disabled: !isManager() || null, 'aria-label': 'إلزام التحقق بخطوتين' });
+    // مسحُ التسجيل: من فقد جوّاله ورموزَ استرداده لا مخرج له إلا هذا (ملاحظة ٢٠٥).
+    // وخطوتان قبل التنفيذ، فالفعلُ لا يُستدرك.
+    const clearMsg = h('p.small.muted');
+    const clearBtn = h('button.btn.sm.danger', { type: 'button' }, 'امسح تسجيل التحقق');
+    let armed = false;
+    clearBtn.onclick = async () => {
+      if (!armed) {
+        armed = true;
+        clearBtn.textContent = 'اضغط مرةً أخرى للتأكيد';
+        clearMsg.textContent = 'سيسقط تسجيلُ تطبيق المصادقة ورموزُ الاسترداد، '
+          + 'ويُطلب منه التسجيلُ من جديد عند أول دخول. وكلمةُ المرور لا تتغيّر.';
+        setTimeout(() => { armed = false; clearBtn.textContent = 'امسح تسجيل التحقق'; }, 6000);
+        return;
+      }
+      armed = false; clearBtn.disabled = true;
+      try {
+        await db.rpc('admin_clear_mfa', { p_member: m.id });
+        clearBtn.textContent = 'مُسح التسجيل';
+        clearMsg.textContent = 'سُقط التسجيل. أبلغه ليدخل ويسجّل التطبيق من جديد.';
+        toast('مُسح تسجيل التحقق لهذا العضو.', 'ok');
+      } catch (e) {
+        clearBtn.disabled = false; clearBtn.textContent = 'امسح تسجيل التحقق';
+        toast(e.message, 'bad');
+      }
+    };
+
     const mfaCard = h('fieldset.stack',
       h('legend', 'التحقق بخطوتين'),
       h('label.check', mfaBox, h('span', 'يُلزَم هذا الحساب بالتحقق بخطوتين')),
       h('p.small.muted', isManager()
         ? 'من أُلزم لا يدخل حتى يفعّله بتطبيق المصادقة على جوّاله. والتفعيل بيده هو، '
-          + 'فلا يملكه أحدٌ عنه.'
-        : 'الإلزام بيد مدير المشروع.'));
+          + 'فلا يملكه أحدٌ عنه. ورفعُ الإلزام لا يمسح تسجيلًا قائمًا: من سجّل تطبيقًا '
+          + 'ظلّ يُطالَب بالرمز حتى يُمسح تسجيلُه.'
+        : 'الإلزام بيد مدير المشروع.'),
+      isManager() ? h('div.row', clearBtn) : null,
+      isManager() ? clearMsg : null);
 
     // قائمة صلاحيات الحساب الإداري — لمدير المشروع (ملاحظة ١٧٢)
     const permBoxes = new Map();
@@ -279,7 +331,7 @@ export async function render(ctx, opts = {}) {
         mayCard, cityCard, answersCard, permCard, mfaCard),
       buttons: [
         { label: 'حفظ', kind: 'primary', validate: () => {
-          if (mayBox.checked && trackSel.value === 'field' && !chosen.size) {
+          if (mayBox.checked && !chosen.size) {
             toast('سجّل لغات المرشد أولًا، فالإسناد يكون بحسب لغته.', 'bad'); return false; }
           const nid = fld.national_id.value.trim().toUpperCase();
           if (nid && fld.id_type.value === 'passport' && !/^[A-Z0-9]{5,15}$/.test(nid)) {
@@ -289,7 +341,7 @@ export async function render(ctx, opts = {}) {
           if (fld.full_name.value.trim().length < 3) { toast('اكتب الاسم الكامل.', 'bad'); return false; }
           return true;
         }, value: () => ({ role: role.value, languages: [...chosen], track: trackSel.value,
-          may: mayBox.checked && trackSel.value === 'field',
+          may: mayBox.checked,
           city: trackSel.value === 'field' ? (citySel.value || null) : null,
           perms: Object.fromEntries([...permBoxes].filter(([, c]) => !c.checked).map(([k]) => [k, false])),
           contact: { full_name: fld.full_name.value.trim(), whatsapp: fld.whatsapp.value.trim(),
@@ -317,7 +369,7 @@ export async function render(ctx, opts = {}) {
         toast(`نُقل ${m.full_name} إلى ${TRACK_LABEL[result.track]}.`, 'ok');
       }
       // المرشد المتميّز، والصلاحيات، وإلزام التحقق — كلٌّ في موضعه (ملاحظات ١٧١–١٧٣)
-      if (result.track === 'field' && result.may !== !!m.may_translate) {
+      if (result.may !== !!m.may_translate) {
         await db.rpc('set_member_may_translate', { p_member: m.id, p_on: result.may });
       }
       if ((result.city || null) !== (m.city || null)) {
@@ -555,6 +607,37 @@ export async function render(ctx, opts = {}) {
     });
   }
 
+  // حذفُ الحساب: لمدير المشروع، ويُكتب اسمُ العضو تأكيدًا فلا يقع بزلّة
+  // ضغطة. ومن له سجلٌّ في المنصة يُردّ حذفُه ويُدلّ على التعطيل (ملاحظة ٢٠٧)
+  async function removeMember(m) {
+    const name = h('input', { 'aria-label': 'اسم العضو للتأكيد', autocomplete: 'off', spellcheck: 'false' });
+    const why = h('input', { 'aria-label': 'سبب الحذف', placeholder: 'تسجيلٌ مكرَّر، أو لم يُباشر العمل…' });
+    const res = await dialog({
+      title: `حذف حساب ${m.full_name}`,
+      body: h('div.stack',
+        h('div.form-errors', { role: 'alert' },
+          h('b', 'الحذف لا يُستدرك.'),
+          h('p.small', 'يُمحى الحساب وبياناته الشخصية ولغاتُه وحسابه البنكي. '
+            + 'وإن كان له سجلُّ عملٍ في المنصة — ترجمةٌ أو توقيعٌ أو مناوبةٌ أو تقييم — '
+            + 'رُدّ الحذفُ، فالوجهُ حينئذٍ تعطيلُ الحساب لا محوه.')),
+        h('label.field', 'اكتب اسم العضو كما هو مسجَّل', h('small', m.full_name), name),
+        h('label.field', 'سبب الحذف (يُقيَّد في سجلّ المحذوفين)', why)),
+      buttons: [
+        { label: 'احذف الحساب', kind: 'danger',
+          validate: () => (name.value.trim().replace(/\s+/g, ' ') === m.full_name.trim().replace(/\s+/g, ' ')
+            ? true : 'اكتب الاسم كما هو مسجَّل أعلاه'),
+          value: () => ({ name: name.value.trim(), reason: why.value.trim() }) },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
+    try {
+      await db.rpc('admin_delete_member', { p_member: m.id, p_name: res.name, p_reason: res.reason || null });
+      toast(`حُذف حساب ${m.full_name}.`, 'ok');
+      reload();
+    } catch (err) { toast(err.message, 'bad'); }
+  }
+
   const showPerf = group === 'translators';
   function draw() {
     const list = members.filter(m => m.status !== 'pending')
@@ -578,7 +661,12 @@ export async function render(ctx, opts = {}) {
           : h('span.badge.warn', 'لم توقّع')),
         h('td', { 'data-label': 'الحالة' },
           h('span.badge', { class: m.status === 'active' ? 'ok' : 'bad' }, STATUS_LABEL[m.status]),
-          m.may_translate ? h('span.badge.gold', { title: 'تُسنَد إليه الترجمة بلغته' }, 'يترجم') : null,
+          // «يترجم» تُعلَّم على غير فريق الترجمة لأنها فيهم استثناء،
+          // وغيابُها عن المترجم المتخصص يُعلَّم لأنه فيه خروجٌ عن الأصل
+          m.may_translate && trackOf(m) !== 'translation'
+            ? h('span.badge.gold', { title: 'يظهر في الإسناد للغاته المسجَّلة' }, 'يترجم') : null,
+          !m.may_translate && trackOf(m) === 'translation'
+            ? h('span.badge.warn', { title: 'لا يظهر في قائمة الإسناد' }, 'لا يترجم') : null,
           m.mfa_required ? h('span.badge', { title: 'مُلزَم بالتحقق بخطوتين' }, 'تحقق') : null,
           Object.values(m.perms || {}).some(v => v === false)
             ? h('span.badge.warn', { title: 'بعض الصلاحيات مغلقة' },
@@ -592,7 +680,10 @@ export async function render(ctx, opts = {}) {
           h('button.btn.sm', { type: 'button', onclick: () => edit(m) }, 'الملف والتعديل'),
           m.status === 'active'
             ? h('button.btn.sm.danger', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'disabled') }, 'تعطيل')
-            : h('button.btn.sm', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'active') }, 'تفعيل'))))))))
+            : h('button.btn.sm', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'active') }, 'تفعيل'),
+          isManager()
+            ? h('button.btn.sm.ghost', { type: 'button', title: 'حذفٌ لا يُستدرك',
+                onclick: () => removeMember(m) }, 'حذف') : null)))))))
       : emptyState('لا أعضاء مطابقون', 'غيّر عوامل التصفية.'));
   }
   [filterLang, filterStatus, q].forEach(el => el.addEventListener('input', draw));
@@ -610,7 +701,10 @@ export async function render(ctx, opts = {}) {
           h('div.small', 'اللغات: ', langsOf(m).map(langName).join('، ') || '—')),
         h('button.btn.sm', { type: 'button', onclick: () => edit(m) }, 'مراجعة الملف'),
         h('button.btn.sm.primary', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'active') }, 'تفعيل'),
-        h('button.btn.sm.danger', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'disabled') }, 'رفض'))))
+        h('button.btn.sm.danger', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'disabled') }, 'رفض'),
+        isManager()
+          ? h('button.btn.sm.ghost', { type: 'button', title: 'حذفٌ لا يُستدرك',
+              onclick: () => removeMember(m) }, 'حذف') : null)))
         : h('p.muted', 'لا توجد طلبات جديدة.'),
       h('p.small.muted', 'رابط التسجيل لمشاركته مع المترجمين: ', h('span', { dir: 'ltr' }, location.origin + '/register')));
 

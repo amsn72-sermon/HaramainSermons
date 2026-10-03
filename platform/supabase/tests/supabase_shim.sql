@@ -11,10 +11,27 @@ alter default privileges in schema public grant execute on functions to anon, au
 
 create schema auth;
 grant usage on schema auth to anon, authenticated;
+-- أعمدة مطابقة لما تنشئه خدمة الحسابات، بقدر ما تحتاجه الاختبارات
 create table auth.users (
   id uuid primary key default gen_random_uuid(),
+  instance_id uuid,
+  aud text,
+  role text,
   email text unique,
-  raw_user_meta_data jsonb default '{}'::jsonb
+  encrypted_password text,
+  email_confirmed_at timestamptz,
+  raw_app_meta_data jsonb default '{}'::jsonb,
+  raw_user_meta_data jsonb default '{}'::jsonb,
+  confirmation_token text default '',
+  recovery_token text default '',
+  email_change text default '',
+  email_change_token_new text default '',
+  email_change_token_current text default '',
+  phone_change text default '',
+  phone_change_token text default '',
+  reauthentication_token text default '',
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
 );
 create function auth.uid() returns uuid language sql stable as $$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
@@ -34,3 +51,15 @@ create function storage.foldername(name text) returns text[] language sql immuta
   select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1]
 $$;
 grant execute on function storage.foldername(text) to anon, authenticated;
+
+-- أجهزةُ التحقق بخطوتين كما تنشئها خدمةُ الحسابات، بقدر ما تحتاجه الاختبارات
+create table auth.mfa_factors (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  friendly_name text,
+  factor_type text default 'totp',
+  status text default 'unverified',
+  secret text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);

@@ -17,7 +17,8 @@ export async function render(ctx) {
   });
   // فريق الإرشاد المكاني لا تُسنَد إليه أعمال ترجمة (ملاحظة ٩٩)
   // فريق الإرشاد المكاني لا تُسنَد إليه ترجمة، إلا المتميّز فبلغته (ملاحظة ١٧٣)
-  const members = everyone.filter(m => m.track !== 'field' || m.may_translate);
+  // ولا يظهر في الإسناد إلا من حُدِّد له «يترجم» (ملاحظة ٢٠٦)
+  const members = everyone.filter(m => m.may_translate);
   const langsOf = m => new Set((m.member_languages || []).map(x => x.language_code));
   const activeStages = state.stages.filter(s => s.is_active);
   const slaStages = activeStages.filter(s => !s.outside_sla);

@@ -394,7 +394,7 @@ export async function render(ctx) {
   const loadMembers = async () => members || (members = (await db.select('profiles', {
     select: 'id,full_name,role,track,may_translate,member_languages(language_code)',
     status: 'eq.active', order: 'full_name.asc' }))
-    .filter(m => m.track !== 'field' || m.may_translate));
+    .filter(m => m.may_translate));
   const reload = () => ctx.navigate(location.pathname + location.search, { replace: true });
 
   // تغيير مسؤول مرحلة لم تكتمل (ومنها المترجم قبل الاستلام أو أثناءه)

@@ -1,11 +1,22 @@
 // التحقق بخطوتين برمز من تطبيق المصادقة (Google Authenticator أو Microsoft Authenticator)
 // إلزامي لمدير المشروع والمنسقين، واختياري لغيرهم (ملاحظة ١٠٣).
 import { h, toast, busy } from '../ui.js';
-import { auth } from '../sb.js';
+import { auth, db } from '../sb.js';
 import { state, isAdmin, loadMfaState } from '../store.js';
 import { brand, themeToggle, footer } from './shell.js';
+import { qrSvgText } from '../qr.js';
 
 const APPS = 'Google Authenticator أو Microsoft Authenticator أو أي تطبيق يدعم رموز TOTP';
+
+// نصُّ otpauth بالمعيار: الجهةُ حروفٌ لاتينيةٌ بلا شرطاتٍ مائلة، والوسمُ
+// «الجهة:الحساب»، وكلُّ جزءٍ مرمَّزٌ وحدَه — وهذا ما ترفض التطبيقاتُ ما خالفه
+const ISSUER = 'Haramain Sermons';
+export function otpauthUri(secret, account) {
+  const e = encodeURIComponent;
+  return `otpauth://totp/${e(ISSUER)}:${e(account)}`
+    + `?secret=${encodeURIComponent(String(secret || '').replace(/\s+/g, ''))}`
+    + `&issuer=${e(ISSUER)}&algorithm=SHA1&digits=6&period=30`;
+}
 
 // رموز التطبيق تُحسب بالوقت: فارق يتجاوز نصف دقيقة يُبطلها كلها.
 // يُقاس الفارق من ترويسة Date في رد الخادم نفسه (ملاحظة ١٠٣)
@@ -67,9 +78,25 @@ export async function render(ctx) {
 }
 
 function done(ctx) {
-  return h('div.stack',
+  const left = h('p.small.muted', 'جارٍ عدّ رموز الاسترداد…');
+  db.rpc('recovery_codes_left')
+    .then(n => {
+      const c = Number(n) || 0;
+      left.className = c ? 'small muted' : 'small warn';
+      left.textContent = c
+        ? `بقي من رموز الاسترداد ${c} من ثمانية.`
+        : 'لا رموز استرداد لحسابك — ولّدها الآن لئلا يُغلق عليك الباب إن فقدت جوالك.';
+    })
+    .catch(() => { left.textContent = ''; });
+
+  const box = h('div.stack',
     h('div.policy-state.signed', h('span.tick', { 'aria-hidden': 'true' }, '✓'), 'حسابك محمي برمز من تطبيق المصادقة.'),
-    h('div.row', h('a.btn.primary', { href: '/app' }, 'متابعة العمل')));
+    left,
+    h('div.row',
+      h('a.btn.primary', { href: '/app' }, 'متابعة العمل'),
+      h('button.btn', { type: 'button',
+        onclick: () => showCodes(ctx, box) }, 'رموز استرداد جديدة')));
+  return box;
 }
 
 // إدخال الرمز عند الدخول
@@ -107,7 +134,79 @@ async function askCode(ctx, factor) {
     h('label.field', 'الرمز (ستة أرقام)', code),
     h('div.row', go,
       h('button.btn', { type: 'button', onclick: async () => { await auth.signOut(); ctx.navigate('/login', { replace: true }); } }, 'خروج')),
-    h('p.small.muted', 'الرمز يتغيّر كل ثلاثين ثانية. وإن فقدت جوالك فراجع مدير المشروع لإلغاء التطبيق المسجَّل وإعادة تفعيله.'));
+    h('p.small.muted', 'الرمز يتغيّر كل ثلاثين ثانية.'),
+    recoveryBox(ctx));
+}
+
+// ---------------------------------------------------------------------
+// رموزُ الاسترداد: مخرجُ من لا يصل إلى التطبيق (ملاحظة ٢٠٥)
+// ---------------------------------------------------------------------
+function recoveryBox(ctx) {
+  const inp = h('input', { dir: 'ltr', placeholder: 'XXXXX-XXXXX', 'aria-label': 'رمز الاسترداد',
+    autocomplete: 'off', spellcheck: 'false' });
+  const go = h('button.btn', { type: 'button' }, 'استعمال الرمز');
+  const err = h('div.form-errors', { hidden: true, role: 'alert' });
+  go.onclick = () => busy(go, async () => {
+    const v = inp.value.trim();
+    if (v.replace(/[^0-9A-Za-z]/g, '').length < 6) {
+      err.replaceChildren(h('ul', h('li', 'اكتب رمز الاسترداد كما حفظته'))); err.hidden = false; return;
+    }
+    try {
+      const ok = await db.rpc('use_recovery_code', { p_code: v });
+      if (ok === true || ok === 'true') {
+        toast('قُبل رمز الاسترداد، وسقط التسجيل القديم. سجّل التطبيق من جديد.', 'ok');
+        await loadMfaState(true);
+        location.reload();
+      } else {
+        err.replaceChildren(h('ul', h('li', 'هذا الرمز غير صحيح أو سبق استعماله.')));
+        err.hidden = false; inp.value = '';
+      }
+    } catch (e) {
+      err.replaceChildren(h('ul', h('li', e.message))); err.hidden = false;
+    }
+  });
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') go.click(); });
+
+  return h('details.mfa-recovery',
+    h('summary', 'لا تصل إلى تطبيق المصادقة؟'),
+    h('p.small', 'استعمل أحد رموز الاسترداد التي عُرضت عليك يوم التفعيل. '
+      + 'يُستعمل الرمز مرةً واحدة، ويُسقط التسجيل القائم فتسجّل التطبيق من جديد.'),
+    err,
+    h('div.mfa-row', inp, go),
+    h('p.small.muted', 'وإن فقدت الرموز والجوال معًا فمدير المشروع يمسح التسجيل من شاشة الفريق.'));
+}
+
+// عرضُ الرموز مرةً واحدةً بعد التفعيل، ولا سبيل إلى استعادتها بعدها
+async function showCodes(ctx, box) {
+  let codes = [];
+  try {
+    const out = await db.rpc('make_recovery_codes');
+    codes = (Array.isArray(out) ? out : []).map(r => (typeof r === 'string' ? r : r?.make_recovery_codes)).filter(Boolean);
+  } catch { /* لا يمنع الدخول */ }
+  if (!codes.length) { ctx.navigate(ctx.query?.get('next') || '/app', { replace: true }); return; }
+
+  const kept = h('input', { type: 'checkbox', 'aria-label': 'حفظت الرموز' });
+  const next = h('button.btn.primary', { type: 'button', disabled: true }, 'متابعة العمل');
+  kept.onchange = () => { next.disabled = !kept.checked; };
+  next.onclick = () => ctx.navigate(ctx.query?.get('next') || '/app', { replace: true });
+
+  const copy = h('button.btn', { type: 'button' }, 'نسخ الرموز');
+  copy.onclick = async () => {
+    try { await navigator.clipboard.writeText(codes.join('\n')); toast('نُسخت الرموز.', 'ok'); }
+    catch { toast('تعذّر النسخ — انسخها يدويًّا.', 'bad'); }
+  };
+  const print = h('button.btn', { type: 'button', onclick: () => window.print() }, 'طباعة');
+
+  box.replaceChildren(
+    h('div.policy-state.signed', h('span.tick', { 'aria-hidden': 'true' }, '✓'), 'فُعّل التحقق بخطوتين.'),
+    h('h3', 'رموز الاسترداد'),
+    h('p', 'ثمانية رموز، كلٌّ منها يُستعمل مرةً واحدة. احفظها في مكان آمن خارج جوالك: '
+      + 'بها تدخل إن فقدت الجوال أو حذفت الحساب من التطبيق.'),
+    h('p.small.warn', 'تُعرض الآن ولا تُعرض بعدها أبدًا — فلا يُحفظ منها عندنا إلا بصمتُها.'),
+    h('ol.mfa-codes', { dir: 'ltr' }, codes.map(c => h('li', h('code', c)))),
+    h('div.row', copy, print),
+    h('label.check', kept, h('span', 'حفظتُ الرموز في مكان آمن')),
+    h('div.row', next));
 }
 
 // تسجيل التطبيق أول مرة: رمز QR ثم تأكيد برمز
@@ -123,11 +222,19 @@ async function enrollBox(ctx) {
     } catch { /* لا يمنع التسجيل */ }
     const stamp = new Date().toLocaleDateString('ar-SA-u-ca-gregory-nu-latn');
     const f = await auth.mfa.enroll(`${state.profile?.full_name || 'حساب'} — ${stamp} ${Math.random().toString(36).slice(2, 5)}`);
-    const qr = f.totp?.qr_code || '';
     const secret = f.totp?.secret || '';
     const img = h('div.mfa-qr');
-    // رمز QR يصل من الخادم صورة SVG جاهزة
-    if (qr.startsWith('<')) img.innerHTML = qr; else img.append(h('img', { src: qr, alt: 'رمز التسجيل' }));
+    // الرمزُ الواصلُ من خادم الحسابات كانت تطبيقاتُ المصادقة ترفضه، لأن الجهة
+    // (issuer) فيه عنوانُ موقعٍ كاملٌ بشرطتين مائلتين فينكسر مسارُ otpauth.
+    // فنبنيه هنا من المفتاح نفسِه بنصٍّ نظيفٍ مرمَّز، وحافةٍ بيضاء أربعِ وحدات
+    // كما يوجب المعيار (ملاحظة ٢٠٤)
+    const uri = otpauthUri(secret, auth.user?.email || state.profile?.full_name || 'حساب');
+    if (secret) {
+      img.innerHTML = qrSvgText(uri, { margin: 4 });
+    } else {
+      const qr = f.totp?.qr_code || '';
+      if (qr.startsWith('<')) img.innerHTML = qr; else img.append(h('img', { src: qr, alt: 'رمز التسجيل' }));
+    }
 
     const code = codeInput('رمز التأكيد');
     const err = h('div.form-errors', { hidden: true, role: 'alert' });
@@ -140,8 +247,7 @@ async function enrollBox(ctx) {
         const ch = await auth.mfa.challenge(f.id);
         await auth.mfa.verify(f.id, ch.id, code.value);
         await loadMfaState(true);
-        toast('فُعّل التحقق بخطوتين.', 'ok');
-        ctx.navigate(ctx.query?.get('next') || '/app', { replace: true });
+        await showCodes(ctx, box);        // الرموزُ تُعرض مرةً واحدة قبل المتابعة
       } catch (e) {
         const skew = await clockSkew();
         err.replaceChildren(h('ul',

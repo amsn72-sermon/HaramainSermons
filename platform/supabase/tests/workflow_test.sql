@@ -4713,3 +4713,333 @@ begin
 
   raise notice 'PASS: كشفُ البيانات وتذكيرُه، والكلماتُ المحتسَبة، وصفتا العمليات بصلاحية المنسق';
 end $$;
+
+-- =====================================================================
+-- ٥٤) مخرجُ التحقق بخطوتين، وردهةُ القاعة (ملاحظتا ٢٠٣ و٢٠٥)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        v_yus uuid := '00000000-0000-0000-0000-00000000000c';
+        v_codes text[]; v_room uuid; v_row uuid;
+        v_g jsonb; v_g2 jsonb; v_url1 text; v_url2 text; v_n int;
+begin
+  -- ================= رموزُ الاسترداد =================
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  insert into auth.mfa_factors (user_id, status) values (v_crd, 'verified');
+
+  select array_agg(x) into v_codes from public.make_recovery_codes() x;
+  if coalesce(array_length(v_codes, 1), 0) <> 8 then
+    raise exception 'FAIL: رموزُ الاسترداد ليست ثمانية (%)', coalesce(array_length(v_codes, 1), 0);
+  end if;
+  -- لا يُحفظ الرمزُ نفسُه، إنما بصمتُه
+  if exists (select 1 from public.mfa_recovery
+              where user_id = v_crd and code_hash = any(v_codes)) then
+    raise exception 'FAIL: حُفظ رمزُ الاسترداد كما هو';
+  end if;
+
+  if public.use_recovery_code('00000-00000') then
+    raise exception 'FAIL: قُبل رمزُ استردادٍ لا وجود له';
+  end if;
+  if not public.use_recovery_code(v_codes[1]) then
+    raise exception 'FAIL: رُدّ رمزُ استردادٍ صحيح';
+  end if;
+  -- ويُسقط التسجيلَ القائم، فيعود الحسابُ إلى كلمة المرور
+  if exists (select 1 from auth.mfa_factors where user_id = v_crd) then
+    raise exception 'FAIL: بقي تسجيلُ التحقق بعد رمز الاسترداد';
+  end if;
+  if public.use_recovery_code(v_codes[1]) then
+    raise exception 'FAIL: استُعمل رمزُ الاسترداد مرتين';
+  end if;
+  if public.recovery_codes_left() <> 7 then
+    raise exception 'FAIL: عددُ الباقي من الرموز خطأ (%)', public.recovery_codes_left();
+  end if;
+  -- والشرطةُ والمسافةُ وحالُ الحرف لا تضرّ
+  if not public.use_recovery_code(lower(replace(v_codes[2], '-', ' '))) then
+    raise exception 'FAIL: لم تُسوَّ صيغةُ رمز الاسترداد';
+  end if;
+
+  -- ================= مسحُ التسجيل بيد مدير المشروع =================
+  insert into auth.mfa_factors (user_id, status) values (v_yus, 'verified');
+  perform set_config('request.jwt.claim.sub', v_yus::text, true);
+  begin
+    perform public.admin_clear_mfa(v_yus);
+    raise exception 'FAIL: مسح العضوُ تسجيلَ التحقق بنفسه';
+  exception when sqlstate '42501' then null;
+  end;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.admin_clear_mfa(v_yus);
+  if exists (select 1 from auth.mfa_factors where user_id = v_yus) then
+    raise exception 'FAIL: لم يُمسح تسجيلُ التحقق';
+  end if;
+  if (select mfa_reset_at from public.profiles where id = v_yus) is null then
+    raise exception 'FAIL: لم يُؤرَّخ مسحُ التسجيل';
+  end if;
+
+  -- ================= ردهةُ القاعة =================
+  select id into v_room from public.rooms order by sort, name limit 1;
+  update public.rooms set join_url = 'https://meet.example.com/HaramainRoom' where id = v_room;
+
+  -- الإداريُّ يدخل بلا إذن، ويأخذ الاسمَ التامّ للغرفة
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  v_g := public.meet_gate('r', v_room);
+  if (v_g ->> 'host') <> 'true' or (v_g ->> 'state') <> 'admitted' then
+    raise exception 'FAIL: لم يدخل المنسقُ بلا إذن (%)', v_g;
+  end if;
+  v_url1 := v_g ->> 'url';
+  if v_url1 is null or v_url1 = 'https://meet.example.com/HaramainRoom' then
+    raise exception 'FAIL: اسمُ الغرفة بلا جزءٍ عشوائي (%)', coalesce(v_url1, 'ø');
+  end if;
+  if v_url1 not like 'https://meet.example.com/HaramainRoom-%' then
+    raise exception 'FAIL: الجزءُ العشوائي في غير موضعه (%)', v_url1;
+  end if;
+
+  -- ومن سواه ينتظر، ولا يُسلَّم الاسم
+  perform set_config('request.jwt.claim.sub', v_yus::text, true);
+  v_g2 := public.meet_gate('r', v_room);
+  if (v_g2 ->> 'state') <> 'waiting' then
+    raise exception 'FAIL: دخل المترجمُ بلا إذن (%)', v_g2;
+  end if;
+  if (v_g2 ->> 'url') is not null then
+    raise exception 'FAIL: سُلّم اسمُ الغرفة لمن لم يُؤذن له';
+  end if;
+  -- ولا يرى من في الردهة
+  select count(*) into v_n from public.meet_waiting('r', v_room);
+  if v_n <> 0 then raise exception 'FAIL: رأى غيرُ الإداريّ قائمةَ الردهة'; end if;
+  begin
+    perform public.meet_decide(gen_random_uuid(), true);
+    raise exception 'FAIL: أذِن غيرُ الإداريّ بالدخول';
+  exception when sqlstate '42501' then null;
+  end;
+
+  -- الإداريُّ يرى الطلبَ فيأذن
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  select l.id into v_row from public.meet_waiting('r', v_room) l where l.member_id = v_yus;
+  if v_row is null then raise exception 'FAIL: لم يظهر الطلبُ في الردهة'; end if;
+  perform public.meet_decide(v_row, true);
+
+  perform set_config('request.jwt.claim.sub', v_yus::text, true);
+  v_g2 := public.meet_gate('r', v_room);
+  if (v_g2 ->> 'state') <> 'admitted' or (v_g2 ->> 'url') <> v_url1 then
+    raise exception 'FAIL: لم يُفتح البابُ بعد الإذن (%)', v_g2;
+  end if;
+
+  -- وتبديلُ الاسم يُخرج من ليس إداريًّا فيعود إلى الردهة
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  v_url2 := public.meet_rotate('r', v_room);
+  if v_url2 = v_url1 then raise exception 'FAIL: لم يتبدّل اسمُ الغرفة'; end if;
+  if (select state from public.meet_lobby
+       where scope = 'r' and ref_id = v_room and member_id = v_yus) <> 'waiting' then
+    raise exception 'FAIL: بقي المأذونُ مأذونًا بعد تبديل الاسم';
+  end if;
+  if (select state from public.meet_lobby
+       where scope = 'r' and ref_id = v_room and member_id = v_crd) <> 'admitted' then
+    raise exception 'FAIL: أُخرج الإداريُّ بتبديل الاسم';
+  end if;
+
+  -- والردُّ يُغلق الباب
+  perform set_config('request.jwt.claim.sub', v_yus::text, true);
+  perform public.meet_gate('r', v_room);
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  select l.id into v_row from public.meet_waiting('r', v_room) l where l.member_id = v_yus;
+  perform public.meet_decide(v_row, false);
+  perform set_config('request.jwt.claim.sub', v_yus::text, true);
+  v_g2 := public.meet_gate('r', v_room);
+  if (v_g2 ->> 'state') <> 'denied' or (v_g2 ->> 'url') is not null then
+    raise exception 'FAIL: لم يُغلق البابُ بالردّ (%)', v_g2;
+  end if;
+
+  raise notice 'PASS: رموزُ الاسترداد ومسحُ التسجيل، وردهةُ القاعة بإذن الإداريّين';
+end $$;
+
+-- =====================================================================
+-- ٥٥) «يترجم» خيارٌ أمام كل عضو، والإسنادُ لا يكون إلا لمن حُدِّد له
+--     (ملاحظة ٢٠٦)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_new uuid; v_mat uuid; v_trk uuid; v_ok boolean;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+
+  insert into auth.users (email, raw_user_meta_data) values
+    ('may206@example.com',
+     '{"full_name":"عضو خيار الترجمة","languages":["en"],"national_id":"1000000206","whatsapp":"+966500000206"}')
+    returning id into v_new;
+  update public.profiles set status = 'active' where id = v_new;
+
+  -- من سُجّل في الترجمة يترجم بحكم دوره
+  if not (select may_translate from public.profiles where id = v_new) then
+    raise exception 'FAIL: المترجم المتخصص لا يترجم ابتداءً';
+  end if;
+
+  -- ومن خرج من الترجمة عاد الأصلُ فيه المنع
+  perform public.set_member_track(v_new, 'answers');
+  if (select may_translate from public.profiles where id = v_new) then
+    raise exception 'FAIL: بقيت الإتاحةُ لمن خرج من فريق الترجمة';
+  end if;
+
+  -- ولا تُفتح إلا بلغةٍ مسجَّلة
+  delete from public.member_languages where member_id = v_new;
+  begin
+    perform public.set_member_may_translate(v_new, true);
+    raise exception 'FAIL: فُتحت الإتاحةُ بلا لغة';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  insert into public.member_languages (member_id, language_code) values (v_new, 'en');
+  perform public.set_member_may_translate(v_new, true);
+  if not (select may_translate from public.profiles where id = v_new) then
+    raise exception 'FAIL: لم تُفتح الإتاحةُ لفريق إجابة السائلين';
+  end if;
+
+  -- ومتى فُتحت أُسندت إليه الترجمةُ بلغته وحدها
+  insert into public.materials (title, material_type, sermon_type, mosque, sermon_date,
+                                khateeb_id, deliverable, source_html, created_by)
+  values ('مادة خيار الترجمة', 'خطب', 'خطبة جمعة', 'makkah', current_date,
+          (select id from public.khateebs order by id limit 1), 'text', '<p>نص</p>', v_mgr)
+  returning id into v_mat;
+  insert into public.tracks (material_id, language_code, status, receipt_due_at)
+  values (v_mat, 'en', 'in_progress', now() + interval '2 days') returning id into v_trk;
+
+  insert into public.track_stages (track_id, stage_key, sort, assignee_id, status)
+  values (v_trk, 'translation', 1, v_new, 'waiting');
+
+  -- وبغير لغته يُردّ
+  begin
+    update public.tracks set language_code = 'ur' where id = v_trk;
+    update public.track_stages set assignee_id = v_new where track_id = v_trk;
+    raise exception 'FAIL: أُسند إليه عملٌ بغير لغته المسجَّلة';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  update public.tracks set language_code = 'en' where id = v_trk;
+
+  -- ولا تُرفع الإتاحةُ وفي يده عملٌ لم يُنجز
+  begin
+    perform public.set_member_may_translate(v_new, false);
+    raise exception 'FAIL: رُفعت الإتاحةُ وفي يده عملٌ قائم';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  -- فإذا أُنجز رُفعت، فلم يعد يُسنَد إليه شيء
+  update public.track_stages set status = 'done' where track_id = v_trk;
+  perform public.set_member_may_translate(v_new, false);
+  v_ok := false;
+  begin
+    insert into public.track_stages (track_id, stage_key, sort, assignee_id, status)
+    values (v_trk, 'review', 2, v_new, 'waiting');
+  exception when others then v_ok := true;
+  end;
+  if not v_ok then raise exception 'FAIL: أُسند إلى من لم يُحدَّد له «يترجم»'; end if;
+
+  -- ومن أُعيد إلى الترجمة عاد يترجم
+  perform public.set_member_track(v_new, 'translation');
+  if not (select may_translate from public.profiles where id = v_new) then
+    raise exception 'FAIL: لم تعد الإتاحةُ لمن أُعيد إلى فريق الترجمة';
+  end if;
+
+  delete from public.track_stages where track_id = v_trk;
+  delete from public.tracks where id = v_trk;
+  delete from public.materials where id = v_mat;
+  delete from public.profiles where id = v_new;
+  delete from auth.users where id = v_new;
+
+  raise notice 'PASS: «يترجم» خيارٌ أمام كل عضو، ولا إسناد إلا لمن حُدِّد له';
+end $$;
+
+-- =====================================================================
+-- ٥٦) حذفُ حسابِ عضو: لمدير المشروع، بأسوارِه وقيدِه (ملاحظة ٢٠٧)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        v_a uuid; v_b uuid; v_mat uuid; v_trk uuid; v_n int;
+begin
+  insert into auth.users (email, raw_user_meta_data) values
+    ('del207a@example.com',
+     '{"full_name":"عضو بلا سجل","languages":["en"],"national_id":"1000000207","whatsapp":"+966500000207"}')
+    returning id into v_a;
+  insert into auth.users (email, raw_user_meta_data) values
+    ('del207b@example.com',
+     '{"full_name":"عضو له سجل","languages":["en"],"national_id":"1000000208","whatsapp":"+966500000208"}')
+    returning id into v_b;
+  update public.profiles set status = 'active' where id in (v_a, v_b);
+
+  -- المنسق لا يحذف
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  begin
+    perform public.admin_delete_member(v_a, 'عضو بلا سجل');
+    raise exception 'FAIL: حذف المنسقُ حسابًا';
+  exception when sqlstate '42501' then null;
+  end;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+
+  -- ولا يحذف أحدٌ حسابَ نفسه
+  begin
+    perform public.admin_delete_member(v_mgr, (select full_name from public.profiles where id = v_mgr));
+    raise exception 'FAIL: حذف المديرُ حسابَ نفسه';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  -- ولا يقع الحذفُ باسمٍ غير مطابق
+  begin
+    perform public.admin_delete_member(v_a, 'اسمٌ آخر');
+    raise exception 'FAIL: حُذف الحسابُ باسمٍ غير مطابق';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  -- ومن في يده عملٌ لم يُنجز لا يُحذف
+  insert into public.materials (title, material_type, sermon_type, mosque, sermon_date,
+                                khateeb_id, deliverable, source_html, created_by)
+  values ('مادة الحذف', 'خطب', 'خطبة جمعة', 'makkah', current_date,
+          (select id from public.khateebs order by id limit 1), 'text', '<p>نص</p>', v_mgr)
+  returning id into v_mat;
+  insert into public.tracks (material_id, language_code, status, receipt_due_at)
+  values (v_mat, 'en', 'in_progress', now() + interval '2 days') returning id into v_trk;
+  insert into public.track_stages (track_id, stage_key, sort, assignee_id, status)
+  values (v_trk, 'translation', 1, v_b, 'waiting');
+  begin
+    perform public.admin_delete_member(v_b, 'عضو له سجل');
+    raise exception 'FAIL: حُذف من في يده عملٌ لم يُنجز';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  -- ومن له سجلٌّ منجَز لا يُمحى، وإنما يُعطَّل
+  update public.track_stages set status = 'done' where track_id = v_trk;
+  begin
+    perform public.admin_delete_member(v_b, 'عضو له سجل');
+    raise exception 'FAIL: مُحي عضوٌ له سجلٌّ في المنصة';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  if not exists (select 1 from public.profiles where id = v_b) then
+    raise exception 'FAIL: ذهب صاحبُ السجلّ رغم ردّ الحذف';
+  end if;
+
+  -- ومن لا سجلَّ له يُحذف، ويُقيَّد في سجلّ المحذوفين
+  perform public.admin_delete_member(v_a, ' عضو   بلا سجل ', 'تسجيلٌ مكرَّر');
+  if exists (select 1 from public.profiles where id = v_a) then
+    raise exception 'FAIL: بقي الحسابُ بعد حذفه';
+  end if;
+  if exists (select 1 from auth.users where id = v_a) then
+    raise exception 'FAIL: بقي الحسابُ في خدمة الحسابات';
+  end if;
+  select count(*) into v_n from public.removed_members
+   where email = 'del207a@example.com' and removed_by = v_mgr and reason = 'تسجيلٌ مكرَّر';
+  if v_n <> 1 then raise exception 'FAIL: لم يُقيَّد المحذوف في سجلّ المحذوفين'; end if;
+
+  delete from public.track_stages where track_id = v_trk;
+  delete from public.tracks where id = v_trk;
+  delete from public.materials where id = v_mat;
+  delete from public.removed_members where email = 'del207a@example.com';
+  delete from auth.users where id = v_b;
+
+  raise notice 'PASS: حذفُ الحساب لمدير المشروع، ويُردّ عمن له سجلٌّ أو عملٌ قائم';
+end $$;

@@ -1296,3 +1296,29 @@ button.room-tile:hover { border-color: var(--gold); transform: translateY(-2px);
   .cd-tools { grid-template-columns: repeat(3, 1fr); }
   .cd-tool .small { display: none; }
 }
+
+/* ------------------------------------------------------------------
+   رموز الاسترداد للتحقق بخطوتين (ملاحظة ٢٠٥)
+------------------------------------------------------------------- */
+.mfa-codes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 14px;
+  margin: 10px 0; padding-inline-start: 22px; }
+.mfa-codes code { font-size: 1.05em; letter-spacing: 1.5px; padding: 4px 8px; border-radius: 8px;
+  background: var(--surface-2, rgb(255 255 255 / 6%)); display: inline-block; }
+.mfa-recovery { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line, rgb(255 255 255 / 10%)); }
+.mfa-recovery summary { cursor: pointer; font-size: .92em; }
+.mfa-recovery input { max-width: 190px; text-transform: uppercase; }
+@media print {
+  .mfa-codes { page-break-inside: avoid; }
+}
+@media (max-width: 520px) { .mfa-codes { grid-template-columns: 1fr; } }
+
+/* ------------------------------------------------------------------
+   ردهة انتظار القاعة (ملاحظة ٢٠٣)
+------------------------------------------------------------------- */
+.wait-dots { display: flex; gap: 8px; margin: 6px 0 2px; }
+.wait-dots span { width: 9px; height: 9px; border-radius: 50%; background: var(--gold, #bc9661);
+  opacity: .35; animation: waitPulse 1.2s ease-in-out infinite; }
+.wait-dots span:nth-child(2) { animation-delay: .2s; }
+.wait-dots span:nth-child(3) { animation-delay: .4s; }
+@keyframes waitPulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .wait-dots span { animation: none; opacity: .6; } }
