@@ -6,6 +6,32 @@
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https://api.haramainsermons.com https://tile.openstreetmap.org https://a.tile.openstreetmap.org https://b.tile.openstreetmap.org https://c.tile.openstreetmap.org; media-src 'self' blob: https://api.haramainsermons.com; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' https://api.haramainsermons.com https://raw.githubusercontent.com https://nominatim.openstreetmap.org; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://api.haramainsermons.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 
+# شفرةُ الواجهة تُراجَع في كل طلب، فيظهر الجديدُ فورًا بلا مسحِ ذاكرةٍ
+# ولا مطالبةِ الأعضاء بتحديثٍ قسري (ملاحظة ٢٣٩)
+/js/*
+  Cache-Control: no-cache
+  Content-Type: text/javascript; charset=utf-8
+
+/css/*
+  Cache-Control: no-cache
+  Content-Type: text/css; charset=utf-8
+
+/index.html
+  Cache-Control: no-cache
+
+/initiative.html
+  Cache-Control: no-cache
+
+/arafah.html
+  Cache-Control: no-cache
+
+/verify.html
+  Cache-Control: no-cache
+
+/config.js
+  Cache-Control: no-cache
+  Content-Type: text/javascript; charset=utf-8
+
 /vendor/*
   Cache-Control: public, max-age=31536000, immutable
 

@@ -6,6 +6,8 @@ import { h, toast, busy, dialog, emptyState, fmtDate, fmtHijri, confirm } from '
 import { db, storage } from '../sb.js';
 import { state, MATERIAL_TYPES, SERMON_TYPES, MOSQUE, langName, isAdmin, can } from '../store.js';
 import { typeIcon } from '../icons.js';
+import { pickColumns, narrowSheet } from '../columns.js';
+import { buildXlsx, downloadBlob } from '../xlsx.js';
 
 const needsSermonType = t => t === 'خطب';
 const yearOf = r => (r.work_date ? Number(String(r.work_date).slice(0, 4)) : null);
@@ -195,20 +197,38 @@ export async function render(ctx) {
   }
 
   // ---------------- الكشف ----------------
-  function draw() {
+  // التحديدُ للتصدير المجمَّع (ملاحظة ٢٣٧)
+  const picked = new Set();
+  const shown = () => {
     const term = q.value.trim();
-    const list = rows
+    return rows
       .filter(r => !typeSel.value || r.material_type === typeSel.value)
       .filter(r => !mosqueSel.value || r.mosque === mosqueSel.value)
       .filter(r => !yearSel.value || String(yearOf(r)) === yearSel.value)
       .filter(r => !langSel.value || (r.languages || '').split(',').includes(langSel.value))
       .filter(r => !term || (r.title || '').includes(term));
+  };
+  const selected = () => rows.filter(r => picked.has(r.id));
+
+  function draw() {
+    const list = shown();
+    const allOn = list.length > 0 && list.every(r => picked.has(r.id));
+    const head = h('input', { type: 'checkbox', checked: allOn ? true : null,
+      'aria-label': 'حدّد المعروض' });
+    head.onchange = () => {
+      list.forEach(r => (head.checked ? picked.add(r.id) : picked.delete(r.id)));
+      draw(); drawBar();
+    };
 
     table.replaceChildren(
       h('p.small.muted', `${list.length} عملًا من ${rows.length}`),
       list.length ? h('div.table-wrap', h('table.responsive',
-        h('thead', h('tr', ['العنوان', 'النوع', 'المسجد', 'التاريخ', 'اللغات', ''].map(t => h('th', t)))),
+        h('thead', h('tr', h('th', head),
+          ...['العنوان', 'النوع', 'المسجد', 'التاريخ', 'اللغات', ''].map(t => h('th', t)))),
         h('tbody', list.map(r => h('tr',
+          h('td', h('input', { type: 'checkbox', checked: picked.has(r.id) ? true : null,
+            'aria-label': `تحديد ${r.title}`,
+            onchange: e => { e.target.checked ? picked.add(r.id) : picked.delete(r.id); drawBar(); } })),
           h('td', { 'data-label': 'العنوان' }, h('b', r.title),
             r.khateeb_name ? h('span.sub', r.khateeb_name) : null),
           h('td', { 'data-label': 'النوع' }, r.sermon_type || r.material_type),
@@ -224,6 +244,195 @@ export async function render(ctx) {
             mayEdit ? 'ابدأ بإضافة عمل، أو استورد دفعةً من أعمال السنوات الماضية.'
                     : 'لم يُضَف إلى المستودع شيءٌ بعد.'));
   }
+
+
+  // ---------------- شريطُ التحديد والتصدير المجمَّع (ملاحظة ٢٣٧) ----------------
+  const REPO_COLS = [
+    { key: 'n', label: 'م' }, { key: 'title', label: 'العنوان' },
+    { key: 'type', label: 'نوع العمل' }, { key: 'sub', label: 'النوع الفرعي' },
+    { key: 'mosque', label: 'المسجد' }, { key: 'hijri', label: 'التاريخ الهجري' },
+    { key: 'greg', label: 'التاريخ الميلادي' }, { key: 'langs', label: 'اللغات' },
+    { key: 'docs', label: 'أرقام التوثيق' }, { key: 'khateeb', label: 'الخطيب أو المؤلف' },
+    { key: 'notes', label: 'ملاحظة' }
+  ];
+
+  const sheetOfRepo = (list, items) => {
+    const docsOf = w => items.filter(i => i.work_id === w.id)
+      .map(i => i.doc_no).filter(Boolean).join(' · ');
+    return [REPO_COLS.map(c => c.label),
+      ...list.map((r, i) => [
+        String(i + 1), r.title || '—', r.material_type || '—', r.sermon_type || '—',
+        MOSQUE[r.mosque] || '—',
+        r.work_date ? fmtHijri(r.work_date) : '—',
+        r.work_date ? fmtDate(r.work_date) : '—',
+        (r.languages || '').split(',').filter(Boolean).map(c => langName(c) || c).join('، ') || '—',
+        docsOf(r) || '—', r.khateeb_name || '—', r.notes || ''
+      ])];
+  };
+
+  const itemsOf = async (list) => {
+    if (!list.length) return [];
+    try {
+      return await db.select('repo_items',
+        { select: '*', work_id: `in.(${list.map(r => r.id).join(',')})` });
+    } catch { return []; }
+  };
+
+  // ١) كشفٌ — Excel وWord وPDF على الكليشة
+  async function exportList(list) {
+    const items = await itemsOf(list);
+    const keys = await pickColumns({ key: 'repo', title: 'أعمدة كشف المستودع',
+      columns: REPO_COLS, required: ['title'] });
+    if (!keys) return;
+    const sheet = narrowSheet(sheetOfRepo(list, items), REPO_COLS, keys);
+    const title = `مستودع الترجمة — ${list.length} عملًا`;
+    const note = `أُصدر في ${fmtDate(new Date())} — المستودعُ خارج حساب العقد`;
+    const fmt = await fmtAsk();
+    if (!fmt) return;
+    try {
+      if (fmt === 'xlsx') downloadBlob(buildXlsx(sheet, { sheetName: 'المستودع', allText: true }), `${title}.xlsx`);
+      else {
+        const { exportWord, exportPdf } = await import('../teamexport.js');
+        if (fmt === 'docx') await exportWord(sheet, title, { note });
+        else if (!exportPdf(sheet, title, { note })) return toast('اسمح بالنوافذ المنبثقة.', 'bad');
+      }
+      toast('جرى التصدير.', 'ok');
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  async function fmtAsk() {
+    const sel = h('select', { 'aria-label': 'الصيغة' },
+      h('option', { value: 'xlsx' }, 'Excel — جدول بيانات'),
+      h('option', { value: 'docx' }, 'Word على كليشة الهيئة'),
+      h('option', { value: 'pdf' }, 'PDF على كليشة الهيئة'));
+    return dialog({ title: 'صيغة الكشف',
+      body: h('label.field', 'الصيغة', sel),
+      buttons: [{ label: 'تابع', kind: 'primary', value: () => sel.value },
+        { label: 'إلغاء', value: null }] });
+  }
+
+  // ٢) كتابٌ مجمَّع — كأرشيف الترجمة، ولا يدخله إلا ما له نص
+  async function exportBook(list) {
+    const items = await itemsOf(list);
+    const withText = items.filter(i => String(i.body_html || '').trim());
+    const codes = [...new Set(withText.map(i => i.language_code))].sort();
+    if (!codes.length) {
+      return toast('لا نصوصَ في المحدَّد — وإنما ملفاتٌ مرفوعة. استعمل «حزمة الملفات».', 'bad');
+    }
+    const onlyFiles = list.length - new Set(withText.map(i => i.work_id)).size;
+
+    const titleIn = h('input', { value: 'من مستودع الترجمة', 'aria-label': 'عنوان الكتاب' });
+    const boxes = codes.map(c => h('label.check',
+      h('input', { type: 'checkbox', value: c, checked: true, 'aria-label': langName(c) || c }),
+      h('span', langName(c) || c)));
+    const withAr = h('input', { type: 'checkbox', checked: true, 'aria-label': 'ضمّ الأصل العربي' });
+
+    const res = await dialog({
+      title: 'كتابٌ مجمَّع من المستودع',
+      body: h('div.stack',
+        h('p.small.muted', `من ${list.length} عملًا محدَّدًا: `
+          + `${new Set(withText.map(i => i.work_id)).size} له نصٌّ يدخل الكتاب`
+          + (onlyFiles ? `، و${onlyFiles} ملفاتٌ تدخل الحزمة لا الكتاب.` : '.')),
+        h('label.field', 'عنوان الكتاب', titleIn),
+        h('fieldset.stack', h('legend', 'اللغات'), h('div.row.wrap', boxes)),
+        h('label.check', withAr, h('span', 'اضمم الأصل العربي قبل تراجم كل عمل'))),
+      buttons: [
+        { label: 'ابنِ الكتاب', kind: 'primary',
+          validate: () => (boxes.some(b => b.querySelector('input').checked)
+            ? true : 'اختر لغةً واحدة على الأقل'),
+          value: () => ({ title: titleIn.value.trim() || 'من مستودع الترجمة',
+            codes: boxes.map(b => b.querySelector('input'))
+              .filter(i => i.checked).map(i => i.value),
+            arabic: withAr.checked }) },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
+
+    const { printBook, sortBook } = await import('../bookexport.js');
+    const byWork = new Map(list.map(w => [w.id, w]));
+    let opened = 0;
+    for (const code of res.codes) {
+      const picks = [];
+      for (const it of withText.filter(i => i.language_code === code)) {
+        const w = byWork.get(it.work_id); if (!w) continue;
+        if (res.arabic) {
+          const src = withText.find(x => x.work_id === w.id && x.language_code === 'ar');
+          if (src && src.id !== it.id) picks.push(shapeBook(w, src));
+        }
+        picks.push(shapeBook(w, it));
+      }
+      if (!picks.length) continue;
+      if (printBook(sortBook(picks),
+        { title: res.title, period: 'المستودع', language: code, edition: '' },
+        { autoPrint: false })) opened++;
+      await new Promise(r => setTimeout(r, 400));
+    }
+    if (!opened) toast('اسمح بالنوافذ المنبثقة لبناء الكتاب.', 'bad');
+    else toast(opened === 1 ? 'فُتح الكتاب.' : `فُتحت ${opened} كتب — كلٌّ بلغته.`, 'ok');
+  }
+
+  // شكلُ العمل كما يفهمه بانيا الكتاب
+  const shapeBook = (w, it) => ({
+    material: { title: w.title, material_type: w.material_type, sermon_type: w.sermon_type,
+      mosque: w.mosque, sermon_date: w.work_date, author: w.khateeb_name,
+      khateeb: w.khateeb_name ? { name: w.khateeb_name } : null },
+    khateeb: w.khateeb_name || null,
+    track: { translation_html: it.body_html, doc_no: it.doc_no,
+      doc_no_at: w.work_date, completed_at: w.work_date,
+      language_code: it.language_code, is_source: !!it.is_source }
+  });
+
+  // ٣) حزمةُ ملفات — الأصولُ المرفوعة بأرقام توثيقها، ومعها كشفُ المحتوى
+  async function exportFiles(list) {
+    const items = (await itemsOf(list)).filter(i => i.file_path);
+    if (!items.length) return toast('لا ملفاتٍ مرفوعةً في المحدَّد.', 'bad');
+    const byWork = new Map(list.map(w => [w.id, w]));
+    const safe = v => String(v || '').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
+
+    const prog = h('p.small.muted', `جارٍ جمع ${items.length} ملفًّا…`);
+    table.prepend(h('div.card', prog));
+    const files = [];
+    const index = [['م', 'رقم التوثيق', 'العنوان', 'اللغة', 'اسم الملف']];
+    let n = 0;
+    for (const it of items) {
+      const w = byWork.get(it.work_id); if (!w) continue;
+      prog.textContent = `جارٍ جمع الملفات… ${++n} من ${items.length}`;
+      const name = `${safe(it.doc_no || w.title)} — ${safe(w.title)} — ${safe(langName(it.language_code) || it.language_code)}`
+        + (it.file_path.match(/\.[a-z0-9]+$/i) ? it.file_path.match(/\.[a-z0-9]+$/i)[0] : '');
+      index.push([String(n), it.doc_no || '—', w.title, langName(it.language_code) || it.language_code, name]);
+      try {
+        const url = await storage.signedUrl('repo', it.file_path, 600);
+        const buf = new Uint8Array(await (await fetch(url)).arrayBuffer());
+        files.push([name, buf]);
+      } catch { /* يُتخطّى ما تعذّر */ }
+    }
+    prog.parentElement?.remove();
+    if (!files.length) return toast('تعذّر جمعُ الملفات.', 'bad');
+    files.push(['كشف المحتوى.csv',
+      '\uFEFF' + index.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n')]);
+    try {
+      const { zipFiles } = await import('../xlsx.js');
+      downloadBlob(zipFiles(files), `مستودع الترجمة — ${files.length - 1} ملفًّا.zip`);
+      toast(`حُزمت ${files.length - 1} ملفًّا.`, 'ok');
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  const bar = h('div.pick-bar', { hidden: true });
+  const drawBar = () => {
+    const n = picked.size;
+    bar.hidden = n === 0;
+    if (!n) return;
+    const list = selected();
+    bar.replaceChildren(
+      h('b', `${n} عملًا محدَّدًا`),
+      h('div.row.wrap',
+        h('button.btn.sm', { type: 'button', onclick: () => exportList(list) }, 'كشف'),
+        h('button.btn.sm', { type: 'button', onclick: () => exportBook(list) }, '📕 كتابٌ مجمَّع'),
+        h('button.btn.sm', { type: 'button', onclick: () => exportFiles(list) }, '⤓ حزمةُ ملفات'),
+        h('button.btn.sm.ghost', { type: 'button',
+          onclick: () => { picked.clear(); draw(); drawBar(); } }, 'ألغِ التحديد')));
+  };
 
   // ---------------- أيقوناتُ الأنواع (ملاحظة ٢٢٦) ----------------
   const tiles = h('div.repo-types');
@@ -383,6 +592,7 @@ export async function render(ctx) {
         h('p.muted', 'أعمالُ السنوات الماضية من خطبٍ ودروسٍ وكتب. '
           + 'وهي خارج حساب العقد: تُحفظ ويُبحَث فيها ويُصدَّر منها، ولا تدخل في المستخلص ولا الأجور.'))),
     tiles,
+    bar,
     h('section.card.stack',
       h('div.filters', q, typeSel, mosqueSel, yearSel, langSel)),
     table);

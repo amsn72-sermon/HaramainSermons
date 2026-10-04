@@ -1426,3 +1426,44 @@ button.room-tile:hover { border-color: var(--gold); transform: translateY(-2px);
 .gl-card .sub { font-size: .76rem; color: var(--muted); }
 .gl-card .sub.warn { color: var(--warn-text, #a15c00); }
 .gl-more { border-style: dashed; }
+
+/* اختيارُ أعمدة التصدير (ملاحظة ٢٤٠) */
+.col-picker { display: grid; gap: 6px 14px;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  max-height: 44vh; overflow: auto; padding: 4px 2px; }
+.col-pick { gap: 8px; align-items: center; }
+.col-pick .badge { font-size: .7rem; }
+
+/* لوحةُ مؤشرات البنود — ثلاثٌ في الصف (ملاحظة ٢٤١) */
+.kpi-grid { display: grid; gap: 12px; margin-bottom: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1000px) { .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px)  { .kpi-grid { grid-template-columns: 1fr; } }
+
+.kpi-tile { border: 1px solid var(--line); border-radius: 14px; padding: 14px;
+  background: var(--card); display: flex; flex-direction: column; gap: 8px;
+  border-top: 3px solid var(--line); }
+.kpi-tile.is-ok   { border-top-color: var(--ok, #2e7d52); }
+.kpi-tile.is-warn { border-top-color: var(--accent); }
+.kpi-tile.is-bad  { border-top-color: var(--bad, #b3261e); }
+.kpi-head { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.kpi-head b { font-size: .92rem; line-height: 1.5; }
+.kpi-num { font-size: 1.9rem; font-weight: 700; line-height: 1.1;
+  font-variant-numeric: tabular-nums; }
+.kpi-unit { font-size: .8rem; font-weight: 400; color: var(--muted);
+  margin-inline-start: 6px; }
+.kpi-tile p { margin: 0; }
+.kpi-gold .kpi-tile { border-top-color: var(--accent); }
+.kpi-gold .kpi-num { color: var(--accent-text); }
+
+/* صفُّ المستخلص الذي قُدِّم بغير الفعلي (ملاحظة ٢٤٢) */
+tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.gold { color: var(--accent-text); }
+
+/* شريطُ التحديد للتصدير المجمَّع (ملاحظة ٢٣٧) */
+.pick-bar { position: sticky; bottom: 0; z-index: 5; margin: 10px 0;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 10px 14px; border: 1px solid var(--accent);
+  border-radius: 12px; background: var(--card);
+  box-shadow: 0 -4px 18px rgb(0 0 0 / .18); }
+.pick-bar b { color: var(--accent-text); }

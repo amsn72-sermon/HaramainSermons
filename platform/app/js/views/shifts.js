@@ -5,6 +5,7 @@ import { db } from '../sb.js';
 import { isAdmin } from '../store.js';
 import { SHIFT_STATUS, hhmm, lateText, DAY_NAMES, weekStart, addDays, today, monthLabel, monthStart, thisMonth } from '../pay.js';
 import { exportExcel, exportPdf } from '../teamexport.js';
+import { pickColumns, narrowSheet } from '../columns.js';
 
 const SPOTS = ['المسجد الحرام — المسعى', 'المسجد الحرام — صحن المطاف', 'المسجد الحرام — التوسعة',
   'المسجد النبوي — باب السلام', 'المسجد النبوي — الساحات', 'مكتب الإرشاد'];
@@ -419,12 +420,30 @@ async function monthSection() {
         String(list.reduce((s, r) => s + r.late_minutes, 0))]
     ];
     const title = `تقرير الحضور — ${monthLabel(period)}`;
+    // أعمدةُ تقرير الشهر تُنتقى قبل التصدير (ملاحظة ٢٤٠)
+    const SHIFT_COLS = [
+      { key: 'name', label: 'المرشد' }, { key: 'shifts', label: 'الورديات' },
+      { key: 'present', label: 'حضور' }, { key: 'absent', label: 'غياب' },
+      { key: 'leaves', label: 'إجازات' }, { key: 'late', label: 'دقائق التأخير' }
+    ];
+    const narrowed = async () => {
+      const keys = await pickColumns({ key: 'shifts', title: 'أعمدة تقرير الحضور',
+        columns: SHIFT_COLS, required: ['name'] });
+      return keys ? narrowSheet(sheetRows(), SHIFT_COLS, keys) : null;
+    };
     body.replaceChildren(h('div.card.stack',
       h('div.row.between.wrap', h('h3', title),
         h('div.row',
-          h('button.btn.sm', { type: 'button', onclick: () => exportExcel(sheetRows(), title) }, 'تصدير Excel'),
+          h('button.btn.sm', { type: 'button', onclick: async () => {
+            const rows = await narrowed(); if (rows) exportExcel(rows, title);
+          } }, 'تصدير Excel'),
           h('button.btn.sm', { type: 'button',
-            onclick: () => { if (!exportPdf(sheetRows(), title, { note: `عدد المرشدين: ${list.length} — ${fmtDate(new Date())}` })) toast('اسمح بالنوافذ المنبثقة لتصدير التقرير', 'bad'); } },
+            onclick: async () => {
+              const rows = await narrowed(); if (!rows) return;
+              if (!exportPdf(rows, title, { note: `عدد المرشدين: ${list.length} — ${fmtDate(new Date())}` })) {
+                toast('اسمح بالنوافذ المنبثقة لتصدير التقرير', 'bad');
+              }
+            } },
             'تقرير PDF على الكليشة'))),
       h('div.table-wrap', h('table.responsive',
         h('thead', h('tr', ['المرشد', 'الورديات', 'حضور', 'غياب', 'إجازات', 'التأخير'].map(t => h('th', t)))),

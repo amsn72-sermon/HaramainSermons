@@ -5857,3 +5857,182 @@ begin
 
   raise notice 'PASS: تسلسلُ الفريق بأيقوناته، وقسمُ التدريب، وبطاقاتٌ تتصدّر أطولَ الأقسام';
 end $$;
+
+-- =====================================================================
+-- ٦٥) الردهةُ لا تُفرج قبل دخول المضيف (ملاحظة ٢٣٦ أ)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_tr  uuid := '00000000-0000-0000-0000-00000000000c';
+        v_room uuid; v_g jsonb;
+begin
+  select id into v_room from public.rooms limit 1;
+  if v_room is null then raise exception 'FAIL: لا قاعةَ للاختبار'; end if;
+
+  delete from public.meet_lobby where scope = 'r' and ref_id = v_room;
+
+  -- العضوُ ينتظر في الردهة
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  v_g := public.meet_gate('r', v_room);
+  if (v_g ->> 'state') <> 'waiting' then
+    raise exception 'FAIL: لم يُحجز العضوُ في الردهة (%)', v_g;
+  end if;
+
+  -- يُؤذن له، ولا مضيفَ في الغرفة: فلا يُفتح له الرابط
+  update public.meet_lobby set state = 'admitted', decided_at = now()
+   where scope = 'r' and ref_id = v_room and member_id = v_tr;
+  v_g := public.meet_gate('r', v_room);
+  if (v_g ->> 'state') <> 'nohost' then
+    raise exception 'FAIL: أُفرج عنه ولا مضيفَ في الغرفة (%)', v_g;
+  end if;
+  if nullif(v_g ->> 'url', '') is not null then
+    raise exception 'FAIL: فُتح الرابطُ قبل دخول المضيف';
+  end if;
+
+  -- ثم يدخل المضيف: فيُفتح البابُ من نفسه
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  v_g := public.meet_gate('r', v_room);
+  if (v_g ->> 'host') <> 'true' or (v_g ->> 'state') <> 'admitted' then
+    raise exception 'FAIL: المضيفُ لم يدخل بلا إذن (%)', v_g;
+  end if;
+
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  v_g := public.meet_gate('r', v_room);
+  if (v_g ->> 'state') <> 'admitted' then
+    raise exception 'FAIL: لم يُفرج عنه بعد دخول المضيف (%)', v_g;
+  end if;
+  if (v_g ->> 'hosts')::int < 1 then
+    raise exception 'FAIL: لم يُعدَّ المضيفُ حاضرًا';
+  end if;
+
+  delete from public.meet_lobby where scope = 'r' and ref_id = v_room;
+  raise notice 'PASS: الردهةُ لا تُفرج عن أحدٍ قبل دخول المضيف، وتُفرج متى دخل';
+end $$;
+
+-- =====================================================================
+-- ٦٦) مسودّةُ المستخلص: فعليٌّ ومحتسَبٌ وأعمدةٌ تُضاف (ملاحظة ٢٤٢)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        v_m date := date_trunc('month', current_date)::date;
+        v_code int; v_rec record; v_n int; v_d jsonb;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select code into v_code from public.contract_items order by code limit 1;
+  if v_code is null then raise exception 'FAIL: لا بنودَ عقد'; end if;
+
+  delete from public.claim_rows where month = v_m;
+  delete from public.claim_drafts where month = v_m;
+  delete from public.claim_log where month = v_m;
+
+  -- في الأصل: المحتسَبُ هو الفعليُّ نفسُه
+  select * into v_rec from public.claim_sheet(v_m) where code = v_code;
+  if v_rec.qty_claim is distinct from v_rec.qty_actual then
+    raise exception 'FAIL: المحتسَبُ لا يساوي الفعليَّ ابتداءً';
+  end if;
+  if v_rec.edited then raise exception 'FAIL: عُدَّ الصفُّ محرَّرًا بلا تحرير'; end if;
+
+  -- يُقدَّم بكميةٍ غير الفعلية بسببها
+  perform public.save_claim_row(jsonb_build_object(
+    'month', v_m, 'item_code', v_code, 'qty_claim', 12, 'reason', 'إعفاءٌ من الهيئة'));
+  select * into v_rec from public.claim_sheet(v_m) where code = v_code;
+  if v_rec.qty_claim <> 12 then raise exception 'FAIL: لم تُحفظ الكميةُ المحتسَبة'; end if;
+  if not v_rec.edited then raise exception 'FAIL: لم يُعلَّم الصفُّ محرَّرًا'; end if;
+  if v_rec.reason is null then raise exception 'FAIL: لم يُحفظ السبب'; end if;
+
+  -- والفعليُّ لا يُمسّ
+  if v_rec.qty_actual is distinct from (select c.qty_done from public.claim_month(v_m) c
+                                         where c.code = v_code) then
+    raise exception 'FAIL: مُسَّت الكميةُ الفعلية';
+  end if;
+
+  -- والقيمةُ تُضرب بالمحتسَبة لا بالفعلية
+  if v_rec.unit_price is not null
+     and v_rec.amount is distinct from round(v_rec.unit_price * 12, 2) then
+    raise exception 'FAIL: القيمةُ لم تُضرب بالمحتسَبة (%)', v_rec.amount;
+  end if;
+
+  -- والتعديلُ يُسجَّل
+  select count(*) into v_n from public.claim_log where month = v_m and item_code = v_code;
+  if v_n <> 1 then raise exception 'FAIL: لم يُسجَّل التعديل (%)', v_n; end if;
+
+  -- والردُّ إلى الفعلي
+  perform public.reset_claim_row(v_m, v_code);
+  select * into v_rec from public.claim_sheet(v_m) where code = v_code;
+  if v_rec.edited then raise exception 'FAIL: لم يُردَّ الصفُّ إلى الفعلي'; end if;
+
+  -- أعمدةٌ تُضاف وأسماءٌ تُحرَّر
+  perform public.save_claim_columns(jsonb_build_object(
+    'month', v_m,
+    'columns', jsonb_build_array(jsonb_build_object('key', 'c1', 'label', 'رقم الأمر')),
+    'labels', jsonb_build_object('qty_claim', 'الكمية المعتمدة')));
+  v_d := public.claim_draft(v_m);
+  if jsonb_array_length(v_d -> 'columns') <> 1 then
+    raise exception 'FAIL: لم يُحفظ العمودُ المضاف';
+  end if;
+  if (v_d -> 'labels' ->> 'qty_claim') <> 'الكمية المعتمدة' then
+    raise exception 'FAIL: لم يُحفظ اسمُ العمود';
+  end if;
+
+  -- ويُملأ العمودُ المضاف في الصف
+  perform public.save_claim_row(jsonb_build_object(
+    'month', v_m, 'item_code', v_code,
+    'extras', jsonb_build_object('c1', 'أمر ١٢٣')));
+  select * into v_rec from public.claim_sheet(v_m) where code = v_code;
+  if (v_rec.extras ->> 'c1') <> 'أمر ١٢٣' then
+    raise exception 'FAIL: لم تُحفظ قيمةُ العمود المضاف';
+  end if;
+
+  -- وهذا كلُّه لمدير المشروع وحدَه
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  begin
+    perform public.save_claim_row(jsonb_build_object(
+      'month', v_m, 'item_code', v_code, 'qty_claim', 5));
+    raise exception 'FAIL: حرّر المنسقُ المستخلص';
+  exception when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  if (select count(*) from public.claim_sheet(v_m)) <> 0 then
+    raise exception 'FAIL: رأى المنسقُ مسودّةَ المستخلص';
+  end if;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  delete from public.claim_rows where month = v_m;
+  delete from public.claim_drafts where month = v_m;
+  delete from public.claim_log where month = v_m;
+  raise notice 'PASS: المستخلصُ بكميةٍ فعليةٍ لا تُمسّ ومحتسَبةٍ تُقدَّم، وأعمدةٍ تُضاف وتُسمّى';
+end $$;
+
+-- =====================================================================
+-- ٦٧) تفريقُ الفريق بعد التحديث لا قبله — تحديثٌ شاملٌ لا يصطدم بنفسه
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_tr  uuid := '00000000-0000-0000-0000-00000000000c';
+        v_fld uuid;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select id into v_fld from public.profiles
+   where track = 'field' and status = 'active' and id <> v_tr limit 1;
+  if v_fld is null then raise exception 'FAIL: لا مرشدَ للاختبار'; end if;
+
+  perform public.set_lead_kind(v_tr, 'translation');
+  perform public.set_member_lead(v_fld, v_tr);
+
+  -- تحديثٌ يشمل القائدَ وفريقَه معًا: كان يصطدم بنفسه
+  update public.profiles set lead_id = null, lead_kind = null;
+
+  if exists (select 1 from public.profiles where lead_id is not null or lead_kind is not null) then
+    raise exception 'FAIL: بقي إسنادٌ بعد التحديث الشامل';
+  end if;
+
+  -- ويبقى التفريقُ عاملًا في الحالة المفردة
+  perform public.set_lead_kind(v_tr, 'translation');
+  perform public.set_member_lead(v_fld, v_tr);
+  perform public.set_lead_kind(v_tr, null);
+  if (select lead_id from public.profiles where id = v_fld) is not null then
+    raise exception 'FAIL: لم يتفرّق الفريقُ عند رفع صفة القيادة';
+  end if;
+
+  raise notice 'PASS: تفريقُ الفريق بعد التحديث، فلا يصطدم التحديثُ الشاملُ بنفسه';
+end $$;

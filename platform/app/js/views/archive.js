@@ -6,6 +6,7 @@ import { state, langName, hadLateness, isManager, MATERIAL_TYPES, SERMON_TYPES }
 import { downloadDocx, printTranslation } from '../export.js';
 import { heading, fileName, applyPattern } from '../page.js';
 import { exportExcel, exportPdf, exportWord } from '../teamexport.js';
+import { pickColumns, narrowSheet } from '../columns.js';
 import { reopenDialog } from './revise.js';
 import { deleteDialog, restoreFromArchive } from './parts.js';
 
@@ -181,6 +182,17 @@ export async function render(ctx) {
   // ----------------------------------------------------------------
   // التصدير: كشف الأرشيف بالمدة المختارة — Excel وWord وPDF على الكليشة
   // ----------------------------------------------------------------
+  // أعمدةُ كشف الأرشيف — تُنتقى قبل التصدير (ملاحظة ٢٤٠)
+  const ARCHIVE_COLS = [
+    { key: 'n', label: 'م' }, { key: 'doc', label: 'رقم التوثيق' },
+    { key: 'type', label: 'نوع العمل' }, { key: 'sub', label: 'النوع الفرعي' },
+    { key: 'scope', label: 'الجهة' }, { key: 'title', label: 'العنوان' },
+    { key: 'who', label: 'الخطيب أو المؤلف' }, { key: 'date', label: 'تاريخ المادة' },
+    { key: 'lang', label: 'اللغة' }, { key: 'approved', label: 'تاريخ الاعتماد' },
+    { key: 'pub', label: 'النشر' }, { key: 'by', label: 'مَن أنجزه' }
+  ];
+  let archCols = null;        // ما اختاره المستخدم آخرَ مرة
+
   function sheetOf(list) {
     const head = ['م', 'رقم التوثيق', 'نوع العمل', 'النوع الفرعي', 'الجهة', 'العنوان', 'الخطيب أو المؤلف',
       'تاريخ المادة', 'اللغة', 'تاريخ الاعتماد', 'النشر', 'مَن أنجزه'];
@@ -374,15 +386,33 @@ export async function render(ctx) {
   function exportRow(list) {
     const title = `أرشيف أعمال الترجمة — ${scopeLabel()}`;
     const note = `${list.length} عملًا — ${periodLabel()} — أُصدر في ${fmtDate(new Date())}`;
+    // تُنتقى الأعمدةُ مرةً ثم تُستعمل في الصيغ الثلاث (ملاحظة ٢٤٠)
+    const narrowed = async () => {
+      const keys = await pickColumns({ key: 'archive', title: 'أعمدة كشف الأرشيف',
+        columns: ARCHIVE_COLS, required: ['title'] });
+      if (!keys) return null;
+      archCols = keys;
+      return narrowSheet(sheetOf(list), ARCHIVE_COLS, keys);
+    };
     const wordBtn = h('button.btn.sm', { type: 'button' }, 'تصدير Word');
-    wordBtn.onclick = () => busy(wordBtn, () => exportWord(sheetOf(list), title, { note })
-      .catch(e => toast(e.message, 'bad')));
+    wordBtn.onclick = () => busy(wordBtn, async () => {
+      const rows = await narrowed(); if (!rows) return;
+      await exportWord(rows, title, { note }).catch(e => toast(e.message, 'bad'));
+    });
+    const xlBtn = h('button.btn.sm', { type: 'button' }, 'تصدير Excel');
+    xlBtn.onclick = () => busy(xlBtn, async () => {
+      const rows = await narrowed(); if (!rows) return;
+      exportExcel(rows, title);
+    });
     return h('div.row.wrap.arch-exports',
       h('span.small.muted', `${list.length} عملًا — ${periodLabel()}`),
-      h('button.btn.sm', { type: 'button', onclick: () => exportExcel(sheetOf(list), title) }, 'تصدير Excel'),
+      xlBtn,
       wordBtn,
       h('button.btn.sm', { type: 'button',
-        onclick: () => { if (!exportPdf(sheetOf(list), title, { note })) toast('اسمح بالنوافذ المنبثقة للتصدير', 'bad'); } },
+        onclick: async () => {
+          const rows = await narrowed(); if (!rows) return;
+          if (!exportPdf(rows, title, { note })) toast('اسمح بالنوافذ المنبثقة للتصدير', 'bad');
+        } },
         'تصدير PDF'),
       h('button.btn.sm.primary', { type: 'button',
         onclick: e => busy(e.currentTarget, () => bookDialog(list).catch(err => toast(err.message, 'bad'))) },

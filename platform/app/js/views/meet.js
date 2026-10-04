@@ -100,6 +100,17 @@ export async function render(ctx) {
         h('div.row', enter),
         status,
         h('p.small.muted', 'وإن حُجبت النافذة فاسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد الضغط.'));
+    } else if (st === 'nohost') {
+      // قُبل طلبُه، ولم يدخل مضيفٌ الغرفةَ بعد. فلا يُفتح له الرابطُ
+      // لئلا تستقبله رسالةُ «أنا المضيف» (ملاحظة ٢٣٦ أ)
+      enterCard.replaceChildren(
+        h('h3', 'أُذن لك — والمضيفُ لم يدخل بعد'),
+        h('p', 'طلبُك مقبول، ولا ينقص إلا دخولُ المنسق إلى الغرفة. ',
+          'وما إن يدخل حتى يُفتح لك البابُ هنا من نفسه.'),
+        h('div.wait-dots', { 'aria-hidden': 'true' }, h('span'), h('span'), h('span')),
+        h('p.small.muted', 'ولا نفتح لك الجلسةَ قبله لئلا تستقبلك رسالةُ خدمة اللقاءات '
+          + '«في انتظار المضيف».'),
+        h('p.small.muted', 'ابقَ على هذه الصفحة.'));
     } else if (st === 'denied') {
       enterCard.replaceChildren(
         h('h3', 'لم يُؤذن لك بالدخول'),
@@ -177,8 +188,9 @@ export async function render(ctx) {
       if (g?.url) url = g.url;
       if (was !== g?.state) {
         drawEnter();
+        if (g?.state === 'nohost') toast('أُذن لك — ننتظر دخول المنسق.', 'ok');
         if (g?.state === 'admitted') {
-          toast('أُذن لك بالدخول.', 'ok');
+          toast(was === 'nohost' ? 'دخل المنسقُ — الباب مفتوح.' : 'أُذن لك بالدخول.', 'ok');
           if (kind === 'm') await db.rpc('join_meeting', { p_id: id }).catch(() => {});
         }
       }

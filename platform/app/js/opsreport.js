@@ -4,6 +4,7 @@ import { h, toast, confirm, dialog, req, fmtDate } from './ui.js';
 import { db } from './sb.js';
 import { monthStart, thisMonth } from './pay.js';
 import { buildXlsx, downloadBlob } from './xlsx.js';
+import { pickColumns, narrowSheet } from './columns.js';
 
 const VAT = 0.15;          // ضريبة القيمة المضافة كما في الكراسة
 
@@ -434,13 +435,22 @@ export async function opsSection() {
     const scope = citySel.value ? OPS_MOSQUE[citySel.value] : 'الحرمان معًا';
     const label = `التكاليف التشغيلية — ${month} — ${scope}`;
     const note = `${label} · حُرِّر في ${fmtDate(new Date())}`;
+
+    // أعمدةُ هذا الكشف واحدٌ وعشرون، ولا يُقدَّم كلُّها في كل مرة (ملاحظة ٢٤٠)
+    const cols = head.map((label2, i) => ({ key: `c${i}`, label: label2 }));
+    const keys = await pickColumns({ key: 'ops', title: 'أعمدة التقرير التشغيلي',
+      columns: cols, required: ['c1'],
+      note: 'كشفٌ طويلُ الأعمدة — اختر ما تُقدّمه إلى الهيئة.' });
+    if (!keys) return;
+    const sheet = narrowSheet(out, cols, keys);
+
     try {
       if (fmtSel.value === 'xlsx') {
-        downloadBlob(buildXlsx(out, { sheetName: 'التكاليف التشغيلية', allText: true }), `${label}.xlsx`);
+        downloadBlob(buildXlsx(sheet, { sheetName: 'التكاليف التشغيلية', allText: true }), `${label}.xlsx`);
       } else {
         const { exportWord, exportPdf } = await import('./teamexport.js');
-        if (fmtSel.value === 'docx') await exportWord(out, label, { note });
-        else if (!exportPdf(out, label, { note })) return toast('اسمح بالنوافذ المنبثقة.', 'bad');
+        if (fmtSel.value === 'docx') await exportWord(sheet, label, { note });
+        else if (!exportPdf(sheet, label, { note })) return toast('اسمح بالنوافذ المنبثقة.', 'bad');
       }
       toast('جرى التصدير.', 'ok');
     } catch (e) { toast(e.message, 'bad'); }
