@@ -1,6 +1,6 @@
 import { auth, configured, db } from './sb.js';
 import { h, toast } from './ui.js';
-import { state, loadProfile, loadReference, loadPolicyState, loadCircularState, loadMfaState, isAdmin, isManager, isActive, isSupervisor, can } from './store.js';
+import { state, loadProfile, loadReference, loadPolicyState, loadCircularState, loadMfaState, isAdmin, isManager, isActive, isSupervisor, can, isTeamLead } from './store.js';
 import { staffShell } from './views/shell.js';
 import { start as idleStart, stop as idleStop } from './idle.js';
 
@@ -41,6 +41,8 @@ const routes = [
   ['/app/charter', () => import('./views/charter.js'), true, true],
   ['/app/payroll', () => import('./views/payroll.js'), true, true],
   ['/app/shifts', () => import('./views/shifts.js'), true, true],
+  ['/app/sites', () => import('./views/sites.js'), true, 'lead'],
+  ['/app/training', () => import('./views/training.js'), true],
   ['/app/stats', () => import('./views/stats.js'), true, 'reports'],
   ['/app/interpretation', () => import('./views/interpretation.js'), true, 'reports'],
   ['/app/contract', () => import('./views/contract.js'), true, 'manager'],
@@ -59,7 +61,7 @@ const PERM_OF = {
   '/app/cards': 'cards',
   '/app/payroll': 'payroll',
   '/app/bank-accounts': 'banks',
-  '/app/shifts': 'shifts',
+  '/app/shifts': 'shifts', '/app/sites': 'shifts',
   '/app/evaluation': 'evaluation',
   '/app/interpretation': 'interpretation',
   '/app/languages': 'settings', '/app/khateebs': 'settings', '/app/workflow': 'settings',
@@ -156,7 +158,10 @@ async function render() {
       const NOT_FOR_SUPERVISOR = ['/app/new', '/app/payroll', '/app/bank-accounts', '/app/circulars'];
       const supervisorMay = isSupervisor()
         && !NOT_FOR_SUPERVISOR.includes(path) && !path.startsWith('/app/revise');
-      const mayView = route.adminOnly === 'manager' ? isManager() : isAdmin() || supervisorMay;
+      // مواقعُ العمل يفتحها القائدُ ليرى فريقَه، ولا يحرّر (ملاحظة ٢٢٧)
+      const mayView = route.adminOnly === 'manager' ? isManager()
+        : route.adminOnly === 'lead' ? (isAdmin() || supervisorMay || isTeamLead())
+        : isAdmin() || supervisorMay;
       if (route.adminOnly && !mayView) return navigate('/app', { replace: true });
       // قائمة الصلاحيات: ما أُغلق على الحساب لا يُفتح ولو كُتب مساره (ملاحظة ١٧٢)
       const need = PERM_OF[path] || (path.startsWith('/app/revise') ? 'materials' : null);

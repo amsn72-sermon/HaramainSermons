@@ -3,7 +3,7 @@ import { h, fill, toast, busy, dialog, emptyState, fmtDate, fmtDateTime, confirm
 import { db, storage } from '../sb.js';
 import { state, isManager, PERM_LABEL, PERM_KEYS, ROLE_LABEL, STATUS_LABEL,
   TRACK_LABEL, trackOf, CITY, NO_FATWA, langName, stageName, roleLabel, ADMIN_TITLE,
-  PERM_CLOSED, PERIOD_LABEL, leadScope, can } from '../store.js';
+  PERM_CLOSED, leadScope, can, LEAD_KIND } from '../store.js';
 import { POLICY_KEY, POLICY_VERSION } from '../policy.js';
 import { TEAM_FIELDS, teamRows, exportExcel, exportWord, exportPdf } from '../teamexport.js';
 import { nationalitySelect } from '../nationalities.js';
@@ -138,26 +138,49 @@ export async function render(ctx, opts = {}) {
         + 'التحويلُ إليها بيد مدير المشروع وحده.'),
       h('label.field', 'الصفة', titleSel),
       titleWhy) : null;
-    // نطاقُ قائد الفريق الميداني: مدينةٌ ووردية، لا يرى غيرَهما (ملاحظة ٢٢١)
-    const leadCity = h('select', { 'aria-label': 'مدينة القيادة' },
-      h('option', { value: '' }, '— الحرمان معًا —'),
-      Object.entries(CITY).map(([k, v]) => h('option', { value: k, selected: m.lead_city === k }, v)));
-    const leadPeriod = h('select', { 'aria-label': 'وردية القيادة' },
-      h('option', { value: '' }, '— كل الورديات —'),
-      Object.entries(PERIOD_LABEL).map(([k, v]) =>
-        h('option', { value: k, selected: m.lead_period === k }, v)));
+    // القيادةُ صارت بالأسماء: يُعيَّن القائدُ بصفته، ويُسنَد إليه أعضاؤه
+    // بأعيانهم، ولكلِّ عضوٍ قائدٌ واحدٌ لا غير (ملاحظة ٢٢٨)
+    const kindSel = h('select', { 'aria-label': 'صفة القيادة' },
+      h('option', { value: '' }, '— ليس قائدًا —'),
+      h('option', { value: 'field', selected: m.lead_kind === 'field' }, 'قائد فريق ميداني'),
+      h('option', { value: 'translation', selected: m.lead_kind === 'translation' }, 'مشرف فريق الترجمة'));
+    const kindWhy = h('small.muted');
     const leadCard = isManager() ? h('fieldset.stack',
-      h('legend', 'نطاق القيادة الميدانية'),
-      h('p.small.muted', 'قائدُ الفريق الميداني يقود المرشدين المكانيين وإجابةَ السائلين في نطاقه: '
-        + 'مدينةٌ ووردية. فلا يرى من سواهم، ولا يكتب فيهم.'),
-      h('div.grid-2',
-        h('label.field', 'المدينة', leadCity),
-        h('label.field', 'الوردية', leadPeriod))) : null;
+      h('legend', 'القيادة والإشراف'),
+      h('p.small.muted', 'قائدُ الفريق الميداني يقود المرشدين وإجابةَ السائلين ممن أُسنِدوا إليه '
+        + 'بأسمائهم. ومشرفُ فريق الترجمة يُعيَّن من المترجمين الخبراء ويبقى مترجمًا على حاله. '
+        + 'ويتعدّد القادةُ، ولكلِّ عضوٍ قائدٌ واحد.'),
+      h('label.field', 'صفة القيادة', kindSel, kindWhy)) : null;
     const syncLead = () => {
-      if (leadCard) leadCard.style.display = role.value === 'field_lead' ? '' : 'none';
+      if (!leadCard) return;
+      const fieldOk = role.value === 'field_lead';
+      const trOk = (trackSel?.value || 'translation') === 'translation';
+      kindSel.options[1].disabled = !fieldOk;
+      kindSel.options[2].disabled = !trOk;
+      if ((kindSel.value === 'field' && !fieldOk) || (kindSel.value === 'translation' && !trOk)) {
+        kindSel.value = '';
+      }
+      kindWhy.textContent = !fieldOk && !trOk
+        ? 'القيادةُ الميدانيةُ لمن دورُه «قائد فريق ميداني»، والإشرافُ على الترجمة لمن فريقُه الترجمة.'
+        : '';
     };
-    syncLead();
-    role.addEventListener('change', syncLead);
+
+    // قائدُ هذا العضو — يُختار بالاسم، والنقلُ يُخرجه من فريق الأول من نفسه
+    const myLead = h('select', { 'aria-label': 'قائد هذا العضو' },
+      h('option', { value: '' }, '— بلا قائد —'));
+    const myLeadCard = can('team') ? h('label.field', 'قائد هذا العضو', myLead,
+      h('small', 'لكلِّ عضوٍ قائدٌ واحد: ونقلُه إلى قائدٍ يُخرجه من فريق الأول')) : null;
+    if (myLeadCard) {
+      db.rpc('lead_teams').then(rows => {
+        (rows || []).filter(r => r.lead_id !== m.id).forEach(r => myLead.append(
+          h('option', { value: r.lead_id, selected: m.lead_id === r.lead_id },
+            `${r.lead_name} — ${LEAD_KIND[r.lead_kind] || 'قائد'}`)));
+      }).catch(() => {});
+    }
+
+    // مدرِّبٌ من خبراء الفريق (ملاحظة ٢٣٢)
+    const trainerBox = h('input', { type: 'checkbox', checked: m.is_trainer ? true : null,
+      disabled: !can('team') || null, 'aria-label': 'مدرّب' });
 
     const syncTitle = () => {
       if (!titleCard) return;
@@ -170,6 +193,11 @@ export async function render(ctx, opts = {}) {
     // نقل العضو بين الفريقين: ترقية المتميّز من الإرشاد إلى الترجمة (ملاحظة ٩٩)
     const trackSel = h('select', { 'aria-label': 'الفريق' },
       Object.entries(TRACK_LABEL).map(([k, v]) => h('option', { value: k, selected: trackOf(m) === k }, v)));
+
+    // صفةُ القيادة تتبع الدورَ والفريق، فتُراجَع كلما تبدّل أحدُهما
+    syncLead();
+    role.addEventListener('change', syncLead);
+    trackSel.addEventListener('change', syncLead);
 
     // «يترجم»: خيارٌ أمام كل عضوٍ من الفريق كائنًا ما كان مسلكُه — فمن
     // حُدِّد له ظهر في قائمة الإسناد للغته التي يتحدث بها (ملاحظة ٢٠٦)
@@ -221,42 +249,61 @@ export async function render(ctx, opts = {}) {
     // إلزام هذا الحساب بالتحقق بخطوتين — لمدير المشروع (ملاحظة ١٧١)
     const mfaBox = h('input', { type: 'checkbox', checked: m.mfa_required ? true : null,
       disabled: !isManager() || null, 'aria-label': 'إلزام التحقق بخطوتين' });
-    // مسحُ التسجيل: من فقد جوّاله ورموزَ استرداده لا مخرج له إلا هذا (ملاحظة ٢٠٥).
-    // وخطوتان قبل التنفيذ، فالفعلُ لا يُستدرك.
+    // الإلغاءُ حلًّا جذريًّا: تسقط العواملُ كلُّها ورموزُ الاسترداد وعلاماتُ
+    // الجلسات، ويُعفى الحسابُ صراحةً فيدخل بكلمة المرور وحدها، حتى يُعاد
+    // إلزامُه بالمربّع أعلاه (ملاحظة ٢٢٤). وخطوتان قبل التنفيذ.
+    const MFA_OFF = 'ألغِ التحقق بخطوتين';
     const clearMsg = h('p.small.muted');
-    const clearBtn = h('button.btn.sm.danger', { type: 'button' }, 'امسح تسجيل التحقق');
+    const clearBtn = h('button.btn.sm.danger', { type: 'button' }, MFA_OFF);
+    const mfaStateBox = h('p.small');
+    const drawMfaState = (exempt, required) => {
+      mfaStateBox.className = exempt ? 'small warn' : 'small muted';
+      mfaStateBox.textContent = exempt
+        ? 'حالُ الحساب: معفًى — يدخل بكلمة المرور وحدها.'
+        : required ? 'حالُ الحساب: مُلزَم بالتحقق بخطوتين.'
+                   : 'حالُ الحساب: على الأصل — يتبع الإلزام العام.';
+    };
+    drawMfaState(m.mfa_exempt === true, m.mfa_required === true);
     let armed = false;
     clearBtn.onclick = async () => {
       if (!armed) {
         armed = true;
         clearBtn.textContent = 'اضغط مرةً أخرى للتأكيد';
-        clearMsg.textContent = 'سيسقط تسجيلُ تطبيق المصادقة ورموزُ الاسترداد، '
-          + 'ويُطلب منه التسجيلُ من جديد عند أول دخول. وكلمةُ المرور لا تتغيّر.';
-        setTimeout(() => { armed = false; clearBtn.textContent = 'امسح تسجيل التحقق'; }, 6000);
+        clearMsg.textContent = 'سيسقط كلُّ أثرٍ للتحقق: تسجيلُ التطبيق ورموزُ الاسترداد '
+          + 'وعلاماتُ الجلسات، ويُعفى الحسابُ فيدخل بكلمة المرور وحدها. '
+          + 'وكلمةُ المرور لا تتغيّر.';
+        setTimeout(() => { armed = false; clearBtn.textContent = MFA_OFF; }, 6000);
         return;
       }
       armed = false; clearBtn.disabled = true;
       try {
         await db.rpc('admin_clear_mfa', { p_member: m.id });
-        clearBtn.textContent = 'مُسح التسجيل';
-        clearMsg.textContent = 'سُقط التسجيل. أبلغه ليدخل ويسجّل التطبيق من جديد.';
-        toast('مُسح تسجيل التحقق لهذا العضو.', 'ok');
+        m.mfa_exempt = true; m.mfa_required = false;
+        mfaBox.checked = false;
+        drawMfaState(true, false);
+        clearBtn.textContent = 'أُلغي التحقق';
+        clearMsg.textContent = 'أُلغي التحقق وأُعفي الحساب. يدخل الآن بكلمة المرور وحدها، '
+          + 'ومتى أردتَ إعادتَه فعلّم «يُلزَم هذا الحساب» واحفظ.';
+        toast('أُلغي التحقق بخطوتين لهذا العضو.', 'ok');
       } catch (e) {
-        clearBtn.disabled = false; clearBtn.textContent = 'امسح تسجيل التحقق';
+        clearBtn.disabled = false; clearBtn.textContent = MFA_OFF;
         toast(e.message, 'bad');
       }
     };
 
     const mfaCard = h('fieldset.stack',
       h('legend', 'التحقق بخطوتين'),
+      mfaStateBox,
       h('label.check', mfaBox, h('span', 'يُلزَم هذا الحساب بالتحقق بخطوتين')),
       h('p.small.muted', isManager()
-        ? 'التفعيلُ والإيقافُ من هنا لا من حساب العضو. ومن أُلزم لا يدخل حتى يسجّل تطبيق المصادقة على جوّاله، '
-          + 'فلا يملكه أحدٌ عنه. ورفعُ الإلزام لا يمسح تسجيلًا قائمًا: من سجّل تطبيقًا '
-          + 'ظلّ يُطالَب بالرمز حتى يُمسح تسجيلُه.'
+        ? 'التفعيلُ والإلغاءُ من هنا لا من حساب العضو. ومن أُلزم لا يدخل حتى يسجّل تطبيق '
+          + 'المصادقة على جوّاله، فلا يملكه أحدٌ عنه. وللحساب ثلاثُ حالات: مُلزَمٌ، '
+          + 'ومعفًى، وعلى الأصل يتبع الإلزام العام.'
         : 'الإلزام بيد مدير المشروع.'),
       can('team') ? h('div.row', clearBtn) : null,
-      can('team') ? clearMsg : null);
+      can('team') ? clearMsg : null,
+      can('team') ? h('p.small.muted', 'وزرُّ الإلغاء حلٌّ جذريٌّ لأيِّ عطلٍ يقع: '
+        + 'يُسقط كلَّ أثرٍ للتحقق ويفتح الحساب، ثم يُعاد إلزامُه متى شئت فيسجّل من جديد.') : null);
 
     // قائمة صلاحيات الحساب الإداري — لمدير المشروع (ملاحظة ١٧٢)
     const permBoxes = new Map();
@@ -355,8 +402,14 @@ export async function render(ctx, opts = {}) {
           h('label.field', 'الدور', role, !isManager() && h('small', 'تغيير الأدوار الإدارية بيد مدير المشروع')),
           titleCard,
           leadCard,
+          myLeadCard,
           h('label.field', 'الفريق', trackSel,
             h('small', 'ومن هنا يُنقل العضو إلى إجابة السائلين: نقلُ السؤال ونقلُ الجواب، بلا فتوى'))),
+        can('team') ? h('fieldset.stack',
+          h('legend', 'التدريب'),
+          h('label.check', trainerBox, h('span', 'مدرِّبٌ من خبراء الفريق')),
+          h('p.small.muted', 'المدرِّبُ يُعدّ خططَ التدريب ويرفع موادَّه ويُشارِكها، '
+            + 'ويُسجّل تأهيلَ من درّبهم.')) : null,
         h('fieldset', h('legend', 'اللغات المؤهل فيها'), h('div.stack', { style: { gap: '10px' } }, langSelect, langChips)),
         mayCard, cityCard, answersCard, permCard, mfaCard),
       buttons: [
@@ -383,12 +436,22 @@ export async function render(ctx, opts = {}) {
     if (!result) return;
     try {
       await db.rpc('admin_update_member', { p_member: m.id, p_status: null, p_role: result.role === m.role ? null : result.role, p_languages: result.languages });
-      // ونطاقُ القيادة بعد الدور كذلك
+      // وصفةُ القيادة بعد الدور كذلك، ثم قائدُ العضو (ملاحظة ٢٢٨)
       if (isManager()) {
-        const wantCity = result.role === 'field_lead' ? (leadCity.value || null) : null;
-        const wantPeriod = result.role === 'field_lead' ? (leadPeriod.value || null) : null;
-        if (wantCity !== (m.lead_city || null) || wantPeriod !== (m.lead_period || null)) {
-          await db.rpc('set_lead_scope', { p_member: m.id, p_city: wantCity, p_period: wantPeriod })
+        const wantKind = kindSel.value || null;
+        if (wantKind !== (m.lead_kind || null)) {
+          await db.rpc('set_lead_kind', { p_member: m.id, p_kind: wantKind })
+            .catch(e => toast(e.message, 'bad'));
+        }
+      }
+      if (myLeadCard) {
+        const wantLead = myLead.value || null;
+        if (wantLead !== (m.lead_id || null)) {
+          await db.rpc('set_member_lead', { p_member: m.id, p_lead: wantLead })
+            .catch(e => toast(e.message, 'bad'));
+        }
+        if (!!trainerBox.checked !== !!m.is_trainer) {
+          await db.rpc('set_member_trainer', { p_member: m.id, p_on: trainerBox.checked })
             .catch(e => toast(e.message, 'bad'));
         }
       }
@@ -714,7 +777,8 @@ export async function render(ctx, opts = {}) {
         h('td', { 'data-label': 'الاسم' }, h('b', m.full_name), h('span.sub', { dir: 'ltr' }, m.email)),
         h('td', { 'data-label': 'الدور' }, roleLabel(m),
           m.admin_title ? h('div.small.muted', 'بصلاحية منسق') : null,
-          m.role === 'field_lead' ? h('div.small.muted', leadScope(m)) : null),
+          leadScope(m) ? h('div.small.muted', leadScope(m)) : null,
+          m.is_trainer ? h('span.badge', { title: 'مدرِّب' }, 'مدرِّب') : null),
         h('td', { 'data-label': 'اللغات' }, langsOf(m).map(langName).join('، ') || '—'),
         showPerf
           ? h('td', { 'data-label': 'التقييم' },

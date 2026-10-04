@@ -5,6 +5,8 @@ import { db, auth } from '../sb.js';
 import { state, isManager, loadProfile } from '../store.js';
 import { brand, themeToggle, footer } from './shell.js';
 import { qrImg } from '../qr.js';
+import { serviceKey, serviceIcon, downloadCard, printSheet } from '../servicecards.js';
+import { icon, sectionIcon } from '../icons.js';
 
 const readCode = key => { try { return sessionStorage.getItem('hs-page-' + key) || ''; } catch { return ''; } };
 // رابط الاطّلاع الخاص: يُرسَل للجهات بلا رقم سرّي، ويُحفظ للجلسة (ملاحظة ١٣٦)
@@ -144,16 +146,33 @@ function page(d) {
     if (kind === 'h3') return h('h3.ab-h3', val);
     if (kind === 'ul') return h('ul.ab-list', val.map(t => h('li', t)));
     if (kind === 'callout') return h('div.ab-callout', h('span.ab-callout-mark', '!'), h('p', val));
-    if (kind === 'cards') return h('div.ab-cards', val.map(([t, body]) =>
-      h('article.ab-card', h('h3', t), h('p', body))));
+    if (kind === 'cards') return h('div.ab-cards', val.map(([t, body, ico]) =>
+      h('article.ab-card', h('div.ab-card-head', ico ? icon(ico, { size: 20 }) : null, h('h3', t)),
+        h('p', body))));
     if (kind === 'diagram') return (DIAGRAMS[val] || (() => null))();
-    // خدمات المبادرة: كل خدمة ببطاقتها ورمزها، والضغط على الرمز يفتحها (ملاحظة ١٣٦)
-    if (kind === 'qrlinks') return h('div.ab-qr', (val || []).map(([label, url, note]) =>
-      h('a.ab-qr-card', { href: url, target: '_blank', rel: 'noopener' },
-        qrImg(url, { size: 132, alt: `رمز ${label}`, title: url }),
-        h('b', label),
-        note ? h('span.small.muted', note) : null,
-        h('span.ab-qr-url', { dir: 'ltr' }, String(url).replace(/^https?:\/\//, '')))));
+    // خدمات المبادرة: بطاقة موحّدة لكل خدمة، فيها رسمُها الدالّ عليها ورمزُها،
+    // وتُنزَّل صورةً أو تُطبع مع أخواتها في صفحة واحدة (ملاحظتا ١٣٦ و١٤٠)
+    if (kind === 'qrlinks') {
+      const services = (val || []).map(([label, url, note]) =>
+        ({ title: label, url, note: note || '', key: serviceKey(url) }));
+      const card = s => {
+        const dl = h('button.btn.xs', { type: 'button', title: 'تنزيل البطاقة صورةً' }, '⤓ تنزيل البطاقة');
+        dl.onclick = e => { e.preventDefault(); busy(dl, () => downloadCard(s).catch(err => toast(err.message, 'bad'))); };
+        return h('article.ab-qr-card',
+          h('div.ab-qr-head', serviceIcon(s.key), h('b', s.title)),
+          h('a.ab-qr-link', { href: s.url, target: '_blank', rel: 'noopener', title: s.url },
+            qrImg(s.url, { size: 138, alt: `رمز ${s.title}`, title: s.url })),
+          s.note ? h('span.small.muted', s.note) : null,
+          h('a.ab-qr-url', { href: s.url, target: '_blank', rel: 'noopener', dir: 'ltr' },
+            String(s.url).replace(/^https?:\/\//, '').replace(/\/$/, '')),
+          h('div.row.center', dl));
+      };
+      const sheet = h('button.btn.sm', { type: 'button' }, '🖶 طباعة البطاقات في صفحة واحدة');
+      sheet.onclick = () => { if (!printSheet(services)) toast('اسمح بالنوافذ المنبثقة للطباعة.', 'bad'); };
+      return h('div.stack',
+        h('div.ab-qr', services.map(card)),
+        h('div.row.center', sheet));
+    }
     // تشريح رقم التوثيق المطبوع على كل عمل (ملاحظة ١٣٤)
     if (kind === 'docno') return h('div.fig',
       h('div.docno-fig', (val || []).map(([seg, label]) =>
@@ -180,12 +199,17 @@ function page(d) {
         h('li', h('span.ab-step', String(i + 1)),
           h('div', h('b', name), h('span.ab-who', who), h('p', task))))),
       h('p.fig-cap', 'المسار القياسي: ست مراحل، لكل مرحلة مسؤول ومهمة'));
-    if (kind === 'roles') return h('div.ab-roles', (d.roles || []).map(([name, items]) =>
-      h('div.ab-role', h('h3', name), items.map(t => h('p', t)))));
+    if (kind === 'roles') return h('div.ab-roles', (d.roles || []).map(([name, items, ico], i) =>
+      h('div.ab-role',
+        h('div.ab-role-head', h('span.ab-role-num', String(i + 1)),
+          ico ? icon(ico, { size: 20 }) : null, h('h3', name)),
+        items.map(t => h('p', t)))));
     return null;
   };
 
-  const secEl = ([id, title, blocks]) => h('section.ab-sec', { id }, h('h2', title), blocks.map(block));
+  const secEl = ([id, title, blocks]) => h('section.ab-sec', { id },
+    h('div.ab-sec-head', sectionIcon(id, { size: 24 }), h('h2', title)),
+    blocks.map(block));
 
   const many = (d.sections || []).length > 2;
   const toc = many ? h('nav.ab-toc', { 'aria-label': 'محتويات الصفحة' },

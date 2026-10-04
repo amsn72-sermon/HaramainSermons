@@ -313,9 +313,11 @@ export async function render(ctx) {
   const bank = await bankSection(ctx);
   // الورديات والمستحقات: لا تظهر إلا لمن له وردية أو كشف معتمد (ملاحظتا ١١٦ و١١٧)
   const { salarySection, shiftsSection } = await import('./mypay.js');
-  const [shifts, salary] = await Promise.all([
+  const { contribCard } = await import('./glossary.js');
+  const [shifts, salary, contrib] = await Promise.all([
     shiftsSection().catch(() => null),
-    salarySection().catch(() => null)
+    salarySection().catch(() => null),
+    contribCard({ own: true }).catch(() => null)          // مشاركتي في الدليل (ملاحظة ٢٣٥)
   ]);
 
   return h('div',
@@ -335,6 +337,7 @@ export async function render(ctx) {
     editable,
     sigCard,
     mfaCard,
+    contrib,
     card,
     bank);
 }

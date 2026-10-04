@@ -49,7 +49,10 @@ export async function render(ctx) {
   const view = h('div',
     h('div.page-head', h('div.grow',
       h('div.eyebrow', 'الفريق'), h('h1', 'الحضور والانصراف'),
-      h('p.muted', 'ورديات المرشدين المكانيين ومواقعهم، يسجّل المرشد حضوره وانصرافه من جواله في يوم ورديته، ويُحتسب التأخير والغياب في تقرير الشهر.'))),
+      h('p.muted', 'ورديات المرشدين المكانيين، يسجّل المرشد حضوره وانصرافه من جواله في يوم ورديته، ويُحتسب التأخير والغياب في تقرير الشهر.'),
+      // المواقعُ أُفردت في قائمةٍ مستقلة، فهذه الشاشةُ للحضور وحدَه (ملاحظة ٢٢٧)
+      h('p.small.muted', 'وأماكنُ العمل وفتراتُه وتوليدُ المناوبات في قائمة ',
+        h('a', { href: '/app/sites' }, '«مواقع العمل»'), '.'))),
     h('div.tabs', { role: 'tablist' }, btns),
     panel);
   if (!members.length) {
@@ -436,10 +439,5 @@ async function monthSection() {
 
   box.append(h('div.card.stack', h('div.row.wrap', h('label.field', 'الشهر', month))), body);
   await load();
-  // مواقعُ الحضور تُضبط من هنا، فلا يطول الشريط الجانبي (ملاحظة ٢١٩)
-  try {
-    const { sitesCard } = await import('./sites.js');
-    box.append(await sitesCard());
-  } catch { /* لا تمنع الشاشةَ إن تعذّرت */ }
   return box;
 }

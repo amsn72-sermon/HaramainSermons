@@ -1,6 +1,6 @@
 import { h } from '../ui.js';
 import { auth, db } from '../sb.js';
-import { state, isAdmin, isManager, isSupervisor, can, ROLE_LABEL, roleLabel} from '../store.js';
+import { state, isAdmin, isManager, isSupervisor, can, ROLE_LABEL, roleLabel, isTeamLead } from '../store.js';
 
 export function themeToggle() {
   // الداكن هو الأصل كما في النسخة الأولى
@@ -95,8 +95,10 @@ export function staffShell(view, path) {
          link('/app/cards', 'بطاقات العمل'),
          link('/app/charter', 'ميثاق العمل'),
          link('/app/shifts', 'الحضور والانصراف'),
+         link('/app/sites', 'مواقع العمل'),
          link('/app/evaluation', 'تقييم المرشدين'),
-         link('/app/rooms', 'القاعات واللقاءات')]),
+         link('/app/rooms', 'القاعات واللقاءات'),
+         link('/app/training', 'التدريب والتأهيل')]),
        group('الإعدادات', [
          link('/app/languages', 'اللغات'),
          link('/app/khateebs', 'الخطباء'),
@@ -124,8 +126,10 @@ export function staffShell(view, path) {
          link('/app/charter', 'ميثاق العمل'),
          link('/app/payroll', 'الرواتب'),
          link('/app/shifts', 'الحضور والانصراف'),
+         link('/app/sites', 'مواقع العمل'),
          link('/app/evaluation', 'تقييم المرشدين'),
          link('/app/rooms', 'القاعات واللقاءات'),
+         link('/app/training', 'التدريب والتأهيل'),
          mail]),
        group('الإعدادات', [
          link('/app/languages', 'اللغات'),
@@ -138,10 +142,14 @@ export function staffShell(view, path) {
     : ['field', 'answers'].includes(p.track) && !p.may_translate
       // الإرشاد وإجابة السائلين: لا تُسنَد إليهما ترجمة، فلا قائمة مهام
       // (ملاحظتا ٩٩ و١٨٦)
-      ? [group('عملي', [link('/app/rooms', 'القاعات واللقاءات')]),
+      ? [group('عملي', [link('/app/rooms', 'القاعات واللقاءات'),
+           link('/app/training', 'التدريب والتأهيل'),
+           isTeamLead() ? link('/app/sites', 'فريقي ومواقعه') : null].filter(Boolean)),
          broadcast, group('حسابي', [mine, link('/app/attend', 'حضوري'), mail, link('/about', 'عن المنصة')])]
       : [group('عملي', [link('/app/tasks', 'مهامي'), mail,
            link('/app/rooms', 'القاعات واللقاءات'),
+           link('/app/training', 'التدريب والتأهيل'),
+           isTeamLead() ? link('/app/sites', 'فريقي ومواقعه') : null,
            link('/app/glossary', 'الدليل المصطلحي'),
            link('/app/audio-guide', 'دليل التسجيل الصوتي')]),
          broadcast,

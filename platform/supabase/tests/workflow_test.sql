@@ -2430,8 +2430,11 @@ begin
     'appearance', 5, 'attendance', 5, 'interaction', 4, 'language_skill', 5, 'compliance', 4,
     'supervisor_name', 'م. عبدالله — مشرف الهيئة', 'notes', 'التزام جيد'));
   -- الأسبوع نفسه لا يتكرر، وإنما يُحدَّث
+  -- يومٌ آخرُ من الأسبوع نفسِه: لا يُنشئ صفًّا ثانيًا. ويُؤخذ من بداية
+  -- الأسبوع لا من اليوم، فاليومُ قد يكون آخرَ الأسبوع فيقع التالي في غيره
   perform public.save_field_evaluation(jsonb_build_object(
-    'member_id', '00000000-0000-0000-0000-00000000000e', 'week_start', current_date + 1,
+    'member_id', '00000000-0000-0000-0000-00000000000e',
+    'week_start', date_trunc('week', current_date)::date + 1,
     'appearance', 5, 'attendance', 5, 'interaction', 4, 'language_skill', 5, 'compliance', 5,
     'supervisor_name', 'م. عبدالله — مشرف الهيئة'));
   if (select count(*) from public.field_evaluations) <> 1 then
@@ -2560,8 +2563,8 @@ begin
   if v_txt ~ 'الرواتب|التسعيرة|المستحقات|المصرفية|المستخلص|ريال' then
     raise exception 'FAIL: ذكرٌ مالي في صفحة المبادرة';
   end if;
-  -- وأُضيف قسمُ المنصة فصارت إحدى وعشرين (ملاحظة: خدمات المنصة)
-  if jsonb_array_length(v -> 'sections') <> 21 then
+  -- وأُضيف قسمُ التدريب فصارت اثنتين وعشرين (ملاحظة ٢٣٢)
+  if jsonb_array_length(v -> 'sections') <> 22 then
     raise exception 'FAIL: أقسام المبادرة (%)', jsonb_array_length(v -> 'sections');
   end if;
   foreach v_txt in array array['الترجمة الفورية', 'الدليل المصطلحي الشرعي الموحَّد',
@@ -3039,23 +3042,27 @@ declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
         v_lang text; v_track uuid; v_stage uuid; v_field uuid;
 begin
   -- ---------- إلزام التحقق بخطوتين لحسابٍ بعينه ----------
-  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  -- التفعيلُ والإيقافُ من صلاحيات مدير المشروع والمنسقين، لا من حساب
+  -- العضو نفسِه (ملاحظتا ٢١٢ و٢٢٤)
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
   begin
     perform public.set_member_mfa_required(v_tr, true);
-    raise exception 'FAIL: ألزم المنسق حسابًا بالتحقق بخطوتين';
+    raise exception 'FAIL: ألزم المترجمُ حسابًا بالتحقق بخطوتين';
   exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
   end;
 
-  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
   perform public.set_member_mfa_required(v_tr, true);
   if not (select mfa_required from public.profiles where id = v_tr) then
     raise exception 'FAIL: لم يُلزَم الحساب بالتحقق بخطوتين';
   end if;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
   perform public.set_member_mfa_required(v_tr, false);
   if (select mfa_required from public.profiles where id = v_tr) then
     raise exception 'FAIL: لم يُرفع الإلزام عن الحساب';
   end if;
-  raise notice 'PASS: إلزام التحقق بخطوتين يُضبط لحسابٍ بعينه، وبيد مدير المشروع وحده';
+  raise notice 'PASS: إلزام التحقق بخطوتين يُضبط لحسابٍ بعينه، بيد مدير المشروع والمنسقين دون العضو';
 end $$;
 
 do $$
@@ -4058,13 +4065,15 @@ begin
     (v_m1, v_w + 21, 5, 5, 5, 5, 5, 'مشرف الهيئة')
   on conflict (member_id, week_start) do nothing;
 
-  -- ---------- الفتراتُ ثلاثٌ زمنُ كلٍّ ثمانِ ساعات ----------
-  if public.shift_period(time '06:00') <> 'morning'
-     or public.shift_period(time '13:59') <> 'morning'
-     or public.shift_period(time '14:00') <> 'evening'
-     or public.shift_period(time '21:59') <> 'evening'
-     or public.shift_period(time '22:00') <> 'night'
-     or public.shift_period(time '02:00') <> 'night' then
+  -- ---------- الفتراتُ ثلاثٌ زمنُ كلٍّ ثمانِ ساعات، من السابعة صباحًا ----------
+  -- وهي الآن جدولٌ يُحرَّر لا نصٌّ مكتوبٌ في الدالّة (ملاحظة ٢٢٨)
+  if public.shift_period(time '07:00') <> 'morning'
+     or public.shift_period(time '14:59') <> 'morning'
+     or public.shift_period(time '15:00') <> 'evening'
+     or public.shift_period(time '22:59') <> 'evening'
+     or public.shift_period(time '23:00') <> 'night'
+     or public.shift_period(time '02:00') <> 'night'
+     or public.shift_period(time '06:59') <> 'night' then
     raise exception 'FAIL: الفتراتُ التشغيلية لم تُقسَم على ثمانِ ساعات';
   end if;
 
@@ -4072,10 +4081,10 @@ begin
   insert into public.shifts (member_id, shift_date, start_at, end_at, location, status,
                              check_in_at)
   values
-    (v_m1, v_mo + 1, time '06:00', time '14:00', 'المطاف', 'present', now()),
-    (v_m2, v_mo + 1, time '14:00', time '22:00', 'المطاف', 'present', now()),
-    (v_m3, v_mo + 1, time '22:00', time '06:00', 'المطاف', 'present', now()),
-    (v_m4, v_mo + 1, time '06:00', time '13:00', 'المطاف', 'present', now());
+    (v_m1, v_mo + 1, time '07:00', time '15:00', 'المطاف', 'present', now()),
+    (v_m2, v_mo + 1, time '15:00', time '23:00', 'المطاف', 'present', now()),
+    (v_m3, v_mo + 1, time '23:00', time '07:00', 'المطاف', 'present', now()),
+    (v_m4, v_mo + 1, time '07:00', time '14:00', 'المطاف', 'present', now());
   select count(*) into v_n from public.shift_coverage(v_mo + 1, 'makkah', 'field');
   if v_n <> 3 then raise exception 'FAIL: فتراتُ اليوم % لا ثلاث', v_n; end if;
   select * into v_rec from public.shift_coverage(v_mo + 1, 'makkah', 'field')
@@ -4091,7 +4100,7 @@ begin
   -- ---------- الغيابُ والبديلُ المعتمد ----------
   delete from public.shifts where member_id in (v_m1, v_m2, v_m3, v_m4);
   insert into public.shifts (member_id, shift_date, start_at, end_at, location, status)
-  values (v_m1, v_mo + 2, time '06:00', time '14:00', 'المطاف', 'scheduled')
+  values (v_m1, v_mo + 2, time '07:00', time '15:00', 'المطاف', 'scheduled')
   returning id into v_sid;
   v_ab := public.ops_absence(v_mo, 1);
   if (v_ab ->> 'absent')::int <> 1 or (v_ab ->> 'uncovered')::int <> 1 then
@@ -5096,24 +5105,40 @@ begin
      '{"full_name":"قائد الوردية","languages":["en"],"national_id":"1000000221","whatsapp":"+966500000221"}')
     returning id into v_lead;
   update public.profiles set status = 'active', role = 'field_lead' where id = v_lead;
-  perform public.set_lead_scope(v_lead, 'makkah', null);
-  if (select lead_city from public.profiles where id = v_lead) <> 'makkah' then
-    raise exception 'FAIL: لم يُضبط نطاقُ القيادة';
+  -- ٢٢٨: القيادةُ بالأسماء لا بالنطاق — يُعيَّن القائدُ ثم يُسنَد إليه أعضاؤه
+  perform public.set_lead_kind(v_lead, 'field');
+  if (select lead_kind from public.profiles where id = v_lead) <> 'field' then
+    raise exception 'FAIL: لم تُضبط صفةُ القيادة';
   end if;
   update public.profiles set city = 'makkah' where id = v_fld;
+  perform public.set_member_lead(v_fld, v_lead);
   perform set_config('request.jwt.claim.sub', v_lead::text, true);
   if not public.is_field_lead() then raise exception 'FAIL: لم يُعرف قائدُ الفريق'; end if;
   if not public.in_my_lead_scope(v_fld) then
-    raise exception 'FAIL: المرشدُ في مكة خارج نطاق قائدِ مكة';
+    raise exception 'FAIL: المرشدُ المسنَدُ خارج فريق قائده';
   end if;
   if public.in_my_lead_scope(v_yus) then
-    raise exception 'FAIL: المترجمُ دخل نطاقَ قائد الفريق الميداني';
+    raise exception 'FAIL: من لم يُسنَد دخل فريقَ القائد';
   end if;
-  -- ومن خرج من القيادة سقط نطاقُه
+  if (select count(*) from public.my_team_members()) <> 1 then
+    raise exception 'FAIL: فريقُ القائد ليس عضوًا واحدًا';
+  end if;
+  -- ولكلِّ عضوٍ قائدٌ واحد: نقلُه إلى قائدٍ يُخرجه من فريق الأول
   perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_lead(v_fld, null);
+  perform set_config('request.jwt.claim.sub', v_lead::text, true);
+  if public.in_my_lead_scope(v_fld) then
+    raise exception 'FAIL: بقي العضوُ في فريق قائده بعد رفعه';
+  end if;
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_lead(v_fld, v_lead);
+  -- ومن خرج من القيادة تفرّق فريقُه
   update public.profiles set role = 'translator' where id = v_lead;
-  if (select lead_city from public.profiles where id = v_lead) is not null then
-    raise exception 'FAIL: بقي النطاقُ على غير قائد';
+  if (select lead_kind from public.profiles where id = v_lead) is not null then
+    raise exception 'FAIL: بقيت صفةُ القيادة على غير قائد';
+  end if;
+  if (select lead_id from public.profiles where id = v_fld) is not null then
+    raise exception 'FAIL: بقي الفريقُ معلَّقًا بمن خرج من القيادة';
   end if;
 
   -- ========== ٢١٨: المستودع — خارج الحساب، وله رقمُ توثيق ==========
@@ -5193,4 +5218,642 @@ begin
   perform public.set_member_perms(v_crd, '{}'::jsonb);
 
   raise notice 'PASS: الصلاحياتُ بأصولها، ونطاقُ القيادة، والمستودع، والحضورُ بالموقع';
+end $$;
+
+-- =====================================================================
+-- ٥٨) بوابةُ التحقق بخطوتين: علامةُ الجلسة، والإعفاء، والتسجيلُ الواحد
+--     (ملاحظات ٢٢٣ و٢٢٤ و٢٢٥)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        v_tr  uuid := '00000000-0000-0000-0000-00000000000c';
+        v_sid uuid := gen_random_uuid();
+        v_f1 uuid; v_f2 uuid; v_g jsonb;
+begin
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  perform set_config('request.jwt.claim.session_id', v_sid::text, true);
+
+  -- ٢٢٣: لا علامةَ قبل التحقق
+  if public.mfa_session_ok() then raise exception 'FAIL: جلسةٌ مستوفاةٌ بلا تحقق'; end if;
+  if not public.mfa_mark_session() then raise exception 'FAIL: لم تُكتب علامةُ الجلسة'; end if;
+  if not public.mfa_session_ok() then raise exception 'FAIL: لم تُقرأ علامةُ الجلسة'; end if;
+
+  -- وجلسةٌ أخرى لا ترث العلامة
+  perform set_config('request.jwt.claim.session_id', gen_random_uuid()::text, true);
+  if public.mfa_session_ok() then raise exception 'FAIL: ورثت جلسةٌ أخرى العلامة'; end if;
+  perform set_config('request.jwt.claim.session_id', v_sid::text, true);
+
+  -- ٢٢٥: تسجيلٌ واحدٌ للحساب
+  insert into auth.mfa_factors (user_id, status) values (v_tr, 'verified') returning id into v_f1;
+  insert into auth.mfa_factors (user_id, status) values (v_tr, 'verified') returning id into v_f2;
+  if public.mfa_keep_one_factor(v_f2) <> 1 then
+    raise exception 'FAIL: لم يسقط التسجيلُ السابق';
+  end if;
+  if (select count(*) from auth.mfa_factors where user_id = v_tr) <> 1 then
+    raise exception 'FAIL: بقي للحساب أكثرُ من تسجيل';
+  end if;
+
+  -- وحالُ الحساب تُقرأ في طلبٍ واحد
+  v_g := public.my_mfa_gate();
+  if (v_g ->> 'enrolled') <> 'true' or (v_g ->> 'session_ok') <> 'true' then
+    raise exception 'FAIL: بوابةُ التحقق لم تُخبر بالحال (%)', v_g;
+  end if;
+
+  -- ٢٢٤: الإلغاءُ حلًّا جذريًّا — يُسقط كلَّ أثرٍ ويُعفي الحساب
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_mfa_required(v_tr, true);
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  perform public.admin_clear_mfa(v_tr);
+
+  if exists (select 1 from auth.mfa_factors where user_id = v_tr) then
+    raise exception 'FAIL: بقي تسجيلٌ بعد الإلغاء';
+  end if;
+  if exists (select 1 from public.mfa_sessions where user_id = v_tr) then
+    raise exception 'FAIL: بقيت علامةُ جلسةٍ بعد الإلغاء';
+  end if;
+  if not (select mfa_exempt from public.profiles where id = v_tr) then
+    raise exception 'FAIL: لم يُعفَ الحسابُ بعد الإلغاء';
+  end if;
+  if (select mfa_required from public.profiles where id = v_tr) then
+    raise exception 'FAIL: بقي الإلزامُ بعد الإلغاء';
+  end if;
+
+  -- والعلامةُ القديمةُ لا تُغني بعد الإسقاط
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  if public.mfa_session_ok() then
+    raise exception 'FAIL: علامةٌ قديمةٌ أغنت بعد إسقاط التسجيل';
+  end if;
+
+  -- وإعادةُ الإلزام ترفع الإعفاء
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_mfa_required(v_tr, true);
+  if (select mfa_exempt from public.profiles where id = v_tr) then
+    raise exception 'FAIL: بقي الإعفاءُ بعد إعادة الإلزام';
+  end if;
+  perform public.set_member_mfa_required(v_tr, false);
+
+  -- ولا يُلغي التحققَ من لا صلاحيةَ له
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  begin
+    perform public.admin_clear_mfa(v_crd);
+    raise exception 'FAIL: ألغى المترجمُ تحققَ غيره';
+  exception when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  perform set_config('request.jwt.claim.session_id', '', true);
+  raise notice 'PASS: بوابةُ التحقق بعلامة الجلسة، والإلغاءُ الجذريُّ بالإعفاء، وتسجيلٌ واحدٌ للحساب';
+end $$;
+
+-- =====================================================================
+-- ٥٩) فتراتُ الدوام جدولًا، والقيادةُ بالأسماء (ملاحظة ٢٢٨)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        v_tr  uuid := '00000000-0000-0000-0000-00000000000c';
+        v_fld uuid; v_lead uuid; v_pid uuid; v_n int;
+begin
+  select id into v_fld from public.profiles
+   where track = 'field' and status = 'active' limit 1;
+  if v_fld is null then raise exception 'FAIL: لا مرشدَ للاختبار'; end if;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+
+  -- الفتراتُ مبذورةٌ ثلاثًا من السابعة صباحًا
+  if (select count(*) from public.duty_periods where is_active) <> 3 then
+    raise exception 'FAIL: الفتراتُ المبذورة ليست ثلاثًا';
+  end if;
+  if (select start_at from public.duty_periods where code = 'morning') <> time '07:00' then
+    raise exception 'FAIL: الفترةُ الصباحية لا تبدأ من السابعة';
+  end if;
+
+  -- وتُحرَّر أوقاتُها
+  select id into v_pid from public.duty_periods where code = 'morning';
+  perform public.save_duty_period(jsonb_build_object(
+    'id', v_pid, 'name', 'الفترة الصباحية', 'start_at', '08:00', 'end_at', '16:00', 'sort', 1));
+  if public.shift_period(time '07:30') = 'morning' then
+    raise exception 'FAIL: لم يتبع الحسابُ الفترةَ بعد تحريرها';
+  end if;
+  perform public.save_duty_period(jsonb_build_object(
+    'id', v_pid, 'name', 'الفترة الصباحية', 'start_at', '07:00', 'end_at', '15:00', 'sort', 1));
+
+  -- ويُزاد عليها
+  v_pid := public.save_duty_period(jsonb_build_object(
+    'name', 'فترةٌ تجريبية', 'start_at', '09:00', 'end_at', '12:00', 'sort', 9));
+  if v_pid is null then raise exception 'FAIL: لم تُضف الفترة'; end if;
+  perform public.delete_duty_period(v_pid);
+  if exists (select 1 from public.duty_periods where id = v_pid) then
+    raise exception 'FAIL: لم تُحذف فترةٌ لا مناوباتِ لها';
+  end if;
+
+  -- ولا يُحرّرها من لا صلاحيةَ له
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  begin
+    perform public.save_duty_period(jsonb_build_object(
+      'name', 'لا تُقبل', 'start_at', '01:00', 'end_at', '02:00'));
+    raise exception 'FAIL: حرّر المترجمُ الفترات';
+  exception when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  -- ---------- القيادةُ بالأسماء، وقائدٌ واحدٌ لكلِّ عضو ----------
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  insert into auth.users (email, raw_user_meta_data) values
+    ('lead228@example.com',
+     '{"full_name":"قائدُ فريقٍ ثانٍ","languages":["en"],"national_id":"1000000228","whatsapp":"+966500000228"}')
+    returning id into v_lead;
+  update public.profiles set status = 'active', role = 'field_lead' where id = v_lead;
+  perform public.set_lead_kind(v_lead, 'field');
+
+  -- مشرفُ فريق الترجمة يكون من المترجمين
+  perform public.set_lead_kind(v_tr, 'translation');
+  if (select lead_kind from public.profiles where id = v_tr) <> 'translation' then
+    raise exception 'FAIL: لم يُعيَّن مشرفُ فريق الترجمة';
+  end if;
+  begin
+    perform public.set_lead_kind(v_fld, 'translation');
+    raise exception 'FAIL: عُيّن مشرفُ ترجمةٍ من غير المترجمين';
+  exception when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  -- والقادةُ يتعدّدون
+  select count(*) into v_n from public.lead_teams();
+  if v_n < 2 then raise exception 'FAIL: القادةُ لا يتعدّدون (%)', v_n; end if;
+
+  -- والإسنادُ بالاسم، والنقلُ يُخرجه من فريق الأول
+  perform public.set_member_lead(v_fld, v_lead);
+  if (select lead_id from public.profiles where id = v_fld) <> v_lead then
+    raise exception 'FAIL: لم يُسنَد العضوُ إلى قائده';
+  end if;
+  perform public.set_member_lead(v_fld, v_tr);
+  if (select lead_id from public.profiles where id = v_fld) <> v_tr then
+    raise exception 'FAIL: لم يُنقل العضوُ إلى القائد الثاني';
+  end if;
+  perform set_config('request.jwt.claim.sub', v_lead::text, true);
+  if public.in_my_lead_scope(v_fld) then
+    raise exception 'FAIL: بقي العضوُ في فريق قائده الأول';
+  end if;
+
+  -- ولا يقود العضوُ نفسَه، ولا يُسنَد إلى من ليس قائدًا
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  begin
+    perform public.set_member_lead(v_fld, v_fld);
+    raise exception 'FAIL: قاد العضوُ نفسَه';
+  exception when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  begin
+    perform public.set_member_lead(v_fld, v_crd);
+    raise exception 'FAIL: أُسنِد العضوُ إلى من ليس قائدًا';
+  exception when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  -- ومن لا قائدَ له يظهر في كشفه
+  perform public.set_member_lead(v_fld, null);
+  if not exists (select 1 from public.members_without_lead() m where m.id = v_fld) then
+    raise exception 'FAIL: لم يظهر من لا قائدَ له';
+  end if;
+
+  perform public.set_lead_kind(v_tr, null);
+  delete from auth.users where id = v_lead;
+  raise notice 'PASS: الفتراتُ جدولٌ يُحرَّر، والقيادةُ بالأسماء، وقائدٌ واحدٌ لكلِّ عضو';
+end $$;
+
+-- =====================================================================
+-- ٦٠) مواقعُ العمل وجدولةُ الدوام (ملاحظتا ٢٢٧ و٢٣٣)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        v_fld uuid; v_site uuid; v_n int; v_m date := date_trunc('month', current_date)::date;
+begin
+  select id into v_fld from public.profiles
+   where track = 'field' and status = 'active' limit 1;
+  select id into v_site from public.work_sites where is_active limit 1;
+
+  -- ٢٢٧: الإنشاءُ والتحريرُ لمدير المشروع وحدَه
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  if public.may_set_sites() then raise exception 'FAIL: المنسقُ يحرّر المواقع'; end if;
+  if not public.may_see_sites() then raise exception 'FAIL: المنسقُ لا يطّلع على المواقع'; end if;
+  begin
+    perform public.set_member_site(v_fld, v_site);
+    raise exception 'FAIL: أسنَد المنسقُ موقعًا';
+  exception when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  if not public.may_set_sites() then raise exception 'FAIL: مديرُ المشروع لا يحرّر المواقع'; end if;
+
+  -- ٢٣٣: نمطُ العمل والفترةُ وأيامُه ضبطةٌ واحدة
+  perform public.set_member_schedule(jsonb_build_object(
+    'member_id', v_fld, 'work_mode', 'onsite', 'duty_period', 'morning',
+    'site_id', v_site, 'work_days', jsonb_build_array(0, 1, 2, 3, 4)));
+  if (select work_mode from public.profiles where id = v_fld) <> 'onsite' then
+    raise exception 'FAIL: لم يُضبط نمطُ العمل';
+  end if;
+  if (select array_length(work_days, 1) from public.profiles where id = v_fld) <> 5 then
+    raise exception 'FAIL: لم تُضبط أيامُ العمل';
+  end if;
+
+  -- ويظهر في كشف أماكن العمل
+  if not exists (select 1 from public.work_plan() w
+                  where w.id = v_fld and w.work_mode = 'onsite' and w.period_name is not null) then
+    raise exception 'FAIL: لم يظهر العضوُ في كشف أماكن العمل';
+  end if;
+
+  -- ويُولَّد له جدولُ الشهر، ويُعرض قبل الاعتماد
+  delete from public.shifts where member_id = v_fld
+     and shift_date between v_m and (v_m + interval '1 month - 1 day')::date;
+  select count(*) into v_n from public.generate_shifts(v_m, v_fld, false);
+  if v_n < 15 then raise exception 'FAIL: أيامُ التوليد قليلة (%)', v_n; end if;
+  if exists (select 1 from public.shifts where member_id = v_fld and shift_date >= v_m) then
+    raise exception 'FAIL: كُتبت المناوباتُ قبل الاعتماد';
+  end if;
+
+  perform public.generate_shifts(v_m, v_fld, true);
+  select count(*) into v_n from public.shifts
+   where member_id = v_fld and shift_date between v_m and (v_m + interval '1 month - 1 day')::date;
+  if v_n < 15 then raise exception 'FAIL: لم تُعتمد المناوبات (%)', v_n; end if;
+  if (select start_at from public.shifts where member_id = v_fld and shift_date >= v_m limit 1)
+     <> time '07:00' then
+    raise exception 'FAIL: المناوبةُ لم تأخذ وقتَ فترتها';
+  end if;
+
+  -- ولا تُكرَّر مناوبةٌ مسجَّلةٌ من قبل
+  if exists (select 1 from public.generate_shifts(v_m, v_fld, false) g where not g.already) then
+    raise exception 'FAIL: أُعيد توليدُ مناوباتٍ مسجَّلة';
+  end if;
+
+  -- ومن عاد عن بُعدٍ لا موقعَ له ولا فترة
+  perform public.set_member_schedule(jsonb_build_object(
+    'member_id', v_fld, 'work_mode', 'remote'));
+  if (select site_id from public.profiles where id = v_fld) is not null
+     or (select duty_period from public.profiles where id = v_fld) is not null then
+    raise exception 'FAIL: بقي الموقعُ والفترةُ لمن عاد عن بُعد';
+  end if;
+
+  delete from public.shifts where member_id = v_fld and shift_date >= v_m;
+  raise notice 'PASS: مواقعُ العمل بيد مدير المشروع، والمناوباتُ تُولَّد وتُعرض قبل الاعتماد';
+end $$;
+
+-- =====================================================================
+-- ٦١) المستودعُ بأنواعه ورفعُه الجماعي (ملاحظة ٢٢٦)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_tr  uuid := '00000000-0000-0000-0000-00000000000c';
+        v_g jsonb; v_b uuid; v_u1 uuid; v_u2 uuid; v_out jsonb; v_n int;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+
+  -- الاستنباطُ من اسم الملف
+  v_g := public.repo_guess('خطبة الجمعة - الحرم المكي - 2024-03-15 - التقوى.pdf');
+  if (v_g ->> 'material_type') <> 'خطب' or (v_g ->> 'sermon_type') <> 'خطبة جمعة'
+     or (v_g ->> 'mosque') <> 'makkah' or (v_g ->> 'language_code') <> 'ar'
+     or (v_g ->> 'work_date') <> '2024-03-15' then
+    raise exception 'FAIL: الاستنباطُ من اسم الملف (%)', v_g;
+  end if;
+  v_g := public.repo_guess('Friday_Sermon_English_Makkah_2024-03-15.docx');
+  if (v_g ->> 'language_code') <> 'en' or (v_g ->> 'is_source') <> 'false' then
+    raise exception 'FAIL: لغةُ الملف الأجنبي (%)', v_g;
+  end if;
+
+  -- الرفعُ إلى صفِّ الانتظار، ثم الاعتماد
+  insert into public.repo_batches (label) values ('دفعةُ اختبار') returning id into v_b;
+  v_u1 := public.stage_repo_upload(jsonb_build_object(
+    'batch_id', v_b, 'file_name', 'خطبة الجمعة - الحرم المكي - 2024-03-15 - التقوى.pdf',
+    'file_path', 'x/ar.pdf'));
+  v_u2 := public.stage_repo_upload(jsonb_build_object(
+    'batch_id', v_b, 'file_name', 'Friday_Sermon_English_Makkah_2024-03-15.pdf',
+    'file_path', 'x/en.pdf'));
+  if v_u1 is null or v_u2 is null then raise exception 'FAIL: لم يُسجَّل المرفوع'; end if;
+
+  -- ولا يُكتب في المستودع شيءٌ قبل الاعتماد
+  if exists (select 1 from public.repo_works where title = 'خطبة الجمعة الحرم المكي التقوى') then
+    raise exception 'FAIL: كُتب العملُ قبل الاعتماد';
+  end if;
+
+  -- يُصحَّح ما أخطأ الاستنباط، ويُوحَّد المفتاحُ فيجتمعان في عملٍ واحد
+  perform public.save_repo_upload(jsonb_build_object(
+    'id', v_u1, 'title', 'خطبة التقوى', 'work_key', 'خطبة التقوى|2024-03-15'));
+  perform public.save_repo_upload(jsonb_build_object(
+    'id', v_u2, 'title', 'خطبة التقوى', 'work_key', 'خطبة التقوى|2024-03-15',
+    'material_type', 'خطب', 'mosque', 'makkah', 'work_date', '2024-03-15'));
+
+  v_out := public.commit_repo_uploads(v_b);
+  if (v_out ->> 'works')::int <> 1 or (v_out ->> 'items')::int <> 2 then
+    raise exception 'FAIL: الاعتمادُ لم يجمعهما في عملٍ واحدٍ بلغتين (%)', v_out;
+  end if;
+  if exists (select 1 from public.repo_uploads where batch_id = v_b and status = 'pending') then
+    raise exception 'FAIL: بقي في الانتظار ما اعتُمد';
+  end if;
+
+  -- ولكلِّ نسخةٍ رقمُ توثيقها
+  select count(*) into v_n from public.repo_items i
+    join public.repo_works w on w.id = i.work_id
+   where w.title = 'خطبة التقوى' and i.doc_no is not null;
+  if v_n <> 2 then raise exception 'FAIL: أرقامُ التوثيق في المرفوع (%)', v_n; end if;
+
+  -- وما نقصه العنوانُ أو النوعُ أو اللغةُ يُتخطّى
+  v_u1 := public.stage_repo_upload(jsonb_build_object(
+    'batch_id', v_b, 'file_name', 'ملفٌ بلا بيانات.pdf', 'file_path', 'x/none.pdf'));
+  perform public.save_repo_upload(jsonb_build_object('id', v_u1, 'material_type', ''));
+  v_out := public.commit_repo_uploads(v_b);
+  if (v_out ->> 'skipped')::int < 1 then
+    raise exception 'FAIL: لم يُتخطَّ الناقص (%)', v_out;
+  end if;
+
+  -- وعددُ كلِّ نوعٍ لأيقونات الشاشة
+  if not exists (select 1 from public.repo_type_counts() c where c.material_type = 'خطب') then
+    raise exception 'FAIL: لم تُحتسب أنواعُ المستودع';
+  end if;
+
+  -- والرفعُ للإدارة لا لغيرها
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  begin
+    perform public.stage_repo_upload(jsonb_build_object(
+      'file_name', 'a.pdf', 'file_path', 'x/a.pdf'));
+    raise exception 'FAIL: رفع المترجمُ إلى المستودع';
+  exception when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  delete from public.repo_works where title = 'خطبة التقوى';
+  delete from public.repo_batches where id = v_b;
+  raise notice 'PASS: المستودعُ يستنبط من أسماء الملفات، ويُراجَع قبل الاعتماد، ويجمع اللغات في عمل';
+end $$;
+
+-- =====================================================================
+-- ٦٢) مرصدُ المصطلحات، والمعاني بسياقها، وسجلُّ المشاركة (٢٣٤ و٢٣٥)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_tr  uuid := '00000000-0000-0000-0000-00000000000c';
+        v_sup uuid := '00000000-0000-0000-0000-0000000000aa';
+        v_term uuid; v_sense uuid; v_out jsonb; v_n int; v_rec record;
+begin
+  -- تسويةُ الحرف: تُجرَّد الحركاتُ وتُوحَّد الهمزاتُ والتاءُ والياء
+  if public.ar_norm('الهُدَىٰ') <> public.ar_norm('الهدي') then
+    raise exception 'FAIL: لم تُسوَّ صورةُ اللفظ';
+  end if;
+
+  -- ---------- الاقتراحُ من المترجم لا يُعرض حتى يُعتمد ----------
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  v_term := public.propose_glossary_term(jsonb_build_object(
+    'term_ar', 'الوسطية', 'category', 'دعوي', 'explanation', 'شرحٌ مقترح'));
+  if (select status from public.glossary_terms where id = v_term) <> 'مقترح' then
+    raise exception 'FAIL: اقتراحُ المترجم لم يُسجَّل مقترحًا';
+  end if;
+
+  -- ولا يعتمده هو
+  begin
+    perform public.review_glossary_term(v_term, true, null);
+    raise exception 'FAIL: اعتمد المترجمُ مقترحَه';
+  exception when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  -- ومشرفُ الهيئة لا يكتب في الدليل
+  perform set_config('request.jwt.claim.sub', v_sup::text, true);
+  begin
+    perform public.propose_glossary_term(jsonb_build_object('term_ar', 'لفظٌ من المشرف'));
+    raise exception 'FAIL: كتب مشرفُ الهيئة في الدليل';
+  exception when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  -- والردُّ بسببه يُحفظ
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.review_glossary_term(v_term, false, 'يحتاج تحريرَ الشرح');
+  select status, reject_reason into v_rec from public.glossary_terms where id = v_term;
+  if v_rec.status <> 'مردود' or v_rec.reject_reason is null then
+    raise exception 'FAIL: الردُّ لم يُحفظ بسببه';
+  end if;
+  perform public.review_glossary_term(v_term, true, null);
+  if (select status from public.glossary_terms where id = v_term) <> 'معتمد' then
+    raise exception 'FAIL: لم يُعتمد المصطلح';
+  end if;
+
+  -- ---------- المعاني: لكلِّ معنًى ترجمتُه، فلا يُترجَم مجرَّدًا ----------
+  v_sense := public.save_glossary_sense(jsonb_build_object(
+    'term_id', v_term, 'label', 'الوسطية: العدلُ بين طرفين',
+    'explanation', 'المعنى الشرعي',
+    'translations', jsonb_build_array(
+      jsonb_build_object('language_code', 'en', 'term_tr', 'moderation')),
+    'examples', jsonb_build_array(jsonb_build_object('quote', 'شاهدٌ من خطبة'))));
+  if v_sense is null then raise exception 'FAIL: لم يُحفظ المعنى'; end if;
+  if (select term_tr from public.glossary_sense_translations
+       where sense_id = v_sense and language_code = 'en') <> 'moderation' then
+    raise exception 'FAIL: لم تُحفظ ترجمةُ المعنى';
+  end if;
+  if (select count(*) from public.glossary_examples where sense_id = v_sense) <> 1 then
+    raise exception 'FAIL: لم يُحفظ الشاهد';
+  end if;
+
+  -- معنًى ثانٍ للمصطلح نفسِه: فالمصطلحُ يتغيّر معناه بتغيّر الجملة
+  perform public.save_glossary_sense(jsonb_build_object(
+    'term_id', v_term, 'label', 'الوسطية: موضعُ الوسط',
+    'translations', jsonb_build_array(
+      jsonb_build_object('language_code', 'en', 'term_tr', 'middle position'))));
+  select count(*) into v_n from public.glossary_senses where term_id = v_term;
+  if v_n <> 2 then raise exception 'FAIL: لم يحتمل المصطلحُ معنيين (%)', v_n; end if;
+
+  -- وبطاقةُ اللغة تَعدّ ما تمَّ وما نقص
+  if not exists (select 1 from public.glossary_cards() c where c.code = 'en' and c.done >= 1) then
+    raise exception 'FAIL: بطاقةُ اللغة لم تَعدّ المصطلحات';
+  end if;
+  if (select count(*) from public.glossary_cards() c where c.is_core) <> 13 then
+    raise exception 'FAIL: بطاقاتُ اللغات الأساسية ليست ثلاثَ عشرة';
+  end if;
+
+  -- ---------- المرصد ----------
+  if not public.is_admin() then raise exception 'FAIL: سياقُ الاختبار ليس إداريًّا'; end if;
+  v_out := public.scan_terms(1, 60);
+  if v_out is null then raise exception 'FAIL: لم يعمل المرصد'; end if;
+  -- والتجاهلُ يُسقط المرشَّح فلا يعود
+  if exists (select 1 from public.term_candidates where state = 'new') then
+    perform public.ignore_candidate((select norm from public.term_candidates
+                                      where state = 'new' limit 1));
+    if not exists (select 1 from public.term_candidates where state = 'ignored') then
+      raise exception 'FAIL: لم يُتجاهل المرشَّح';
+    end if;
+  end if;
+
+  -- ---------- سجلُّ المشاركة: عدٌّ لا تقييم ----------
+  select * into v_rec from public.glossary_contrib(v_tr);
+  if v_rec.proposed < 1 or v_rec.approved < 1 then
+    raise exception 'FAIL: لم يُحتسب ما قدّمه العضوُ وما اعتُمد له';
+  end if;
+  -- ولا يرى العضوُ سجلَّ غيره
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  if exists (select 1 from public.glossary_contrib(null) g where g.member_id <> v_tr) then
+    raise exception 'FAIL: رأى العضوُ سجلَّ غيره';
+  end if;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  delete from public.glossary_terms where id = v_term;
+  raise notice 'PASS: المرصدُ يرصد، والمعاني بسياقها وترجماتها، وسجلُّ المشاركة عدٌّ لا تقييم';
+end $$;
+
+-- =====================================================================
+-- ٦٣) التدريبُ ومكتبةُ مواده (ملاحظة ٢٣٢)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_tr  uuid := '00000000-0000-0000-0000-00000000000c';
+        v_yus uuid; v_plan uuid; v_mat uuid; v_rec uuid; v_a jsonb; v_n int;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  -- عضوٌ ليس مدرِّبًا ولا إداريًّا، ليصحَّ فحصُ المشاركة
+  select id into v_yus from public.profiles
+   where status = 'active' and role = 'translator' and id <> v_tr
+     and not is_trainer limit 1;
+  if v_yus is null then raise exception 'FAIL: لا عضوَ غيرَ مدرِّبٍ للاختبار'; end if;
+
+  -- المدرِّبُ يُعيَّن من خبراء الفريق
+  perform public.set_member_trainer(v_tr, true);
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  if not public.is_trainer() then raise exception 'FAIL: لم يُعرف المدرِّب'; end if;
+  if not public.may_train() then raise exception 'FAIL: المدرِّبُ لا يُعدّ خططًا'; end if;
+
+  -- وخطةٌ بوحداتها
+  v_plan := public.save_training_plan(jsonb_build_object(
+    'title', 'تأهيلُ المترجم الجديد', 'goal', 'إتقانُ مسار العمل',
+    'level', 'onboarding', 'hours', 12,
+    'units', jsonb_build_array(
+      jsonb_build_object('title', 'المصطلحُ الشرعي', 'hours', 4),
+      jsonb_build_object('title', 'كليشةُ الهيئة', 'hours', 2))));
+  if v_plan is null then raise exception 'FAIL: لم تُحفظ خطةُ التدريب'; end if;
+  select count(*) into v_n from public.training_units where plan_id = v_plan;
+  if v_n <> 2 then raise exception 'FAIL: وحداتُ الخطة (%)', v_n; end if;
+
+  -- ومادةٌ تُرفع ثم تُشارَك للمشاهدة فقط
+  v_mat := public.save_training_material(jsonb_build_object(
+    'plan_id', v_plan, 'title', 'عرضُ المصطلحات', 'kind', 'pdf',
+    'file_path', 'training/a.pdf'));
+  if v_mat is null then raise exception 'FAIL: لم تُسجَّل المادة'; end if;
+
+  perform set_config('request.jwt.claim.sub', v_yus::text, true);
+  v_a := public.my_material_access(v_mat);
+  if (v_a ->> 'read') = 'true' then
+    raise exception 'FAIL: قرأ العضوُ مادةً لم تُشارَك معه';
+  end if;
+
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  perform public.share_training_material(jsonb_build_object(
+    'material_id', v_mat, 'members', jsonb_build_array(v_yus), 'may_download', false));
+
+  perform set_config('request.jwt.claim.sub', v_yus::text, true);
+  v_a := public.my_material_access(v_mat);
+  if (v_a ->> 'read') <> 'true' then raise exception 'FAIL: لم تُفتح المادةُ لمن شُورِكت معه'; end if;
+  if (v_a ->> 'download') = 'true' then raise exception 'FAIL: أُتيح تنزيلُ ما هو للمشاهدة فقط'; end if;
+
+  -- والتنزيلُ يُردّ، والفتحُ يُسجَّل
+  begin
+    perform public.log_material_open(v_mat, true);
+    raise exception 'FAIL: نُزّلت مادةٌ للمشاهدة فقط';
+  exception when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  perform public.log_material_open(v_mat, false);
+  if not exists (select 1 from public.training_views
+                  where material_id = v_mat and member_id = v_yus) then
+    raise exception 'FAIL: لم يُسجَّل فتحُ المادة';
+  end if;
+  if not exists (select 1 from public.my_training_materials() m where m.id = v_mat) then
+    raise exception 'FAIL: لم تظهر المادةُ في موادّ العضو';
+  end if;
+
+  -- ومفتاحُ التنزيل متى فُتح أُتيح
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  perform public.share_training_material(jsonb_build_object(
+    'material_id', v_mat, 'members', jsonb_build_array(v_yus), 'may_download', true));
+  perform set_config('request.jwt.claim.sub', v_yus::text, true);
+  if (public.my_material_access(v_mat) ->> 'download') <> 'true' then
+    raise exception 'FAIL: لم يُتح التنزيلُ بعد فتح مفتاحه';
+  end if;
+
+  -- وسجلُّ التأهيل
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  v_rec := public.save_member_training(jsonb_build_object(
+    'member_id', v_yus, 'plan_id', v_plan, 'status', 'done',
+    'started_at', current_date - 10, 'done_at', current_date));
+  if v_rec is null then raise exception 'FAIL: لم يُسجَّل التأهيل'; end if;
+  if not exists (select 1 from public.training_record(v_yus) r where r.status = 'done') then
+    raise exception 'FAIL: لم يظهر التأهيلُ في السجل';
+  end if;
+
+  -- ومن ليس مدرِّبًا ولا إداريًّا لا يرفع ولا يشارك
+  perform set_config('request.jwt.claim.sub', v_yus::text, true);
+  begin
+    perform public.save_training_material(jsonb_build_object(
+      'title', 'لا تُقبل', 'file_path', 'training/x.pdf'));
+    raise exception 'FAIL: رفع غيرُ المدرِّب مادة';
+  exception when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  delete from public.training_plans where id = v_plan;
+  perform public.set_member_trainer(v_tr, false);
+  raise notice 'PASS: التدريبُ بخططه ومواده، والمشاركةُ بمفتاح التنزيل، وسجلُّ التأهيل';
+end $$;
+
+-- =====================================================================
+-- ٦٤) تسلسلُ الفريق وأيقوناتُ صفحة المبادرة (ملاحظتا ٢٣٠ و٢٣١)
+-- =====================================================================
+do $$
+declare v jsonb; v_roles jsonb; v_names text;
+begin
+  select content into v from public.page_content where key = 'initiative';
+  v_roles := v -> 'roles';
+
+  if jsonb_array_length(v_roles) <> 8 then
+    raise exception 'FAIL: الأدوارُ في صفحة المبادرة (%)', jsonb_array_length(v_roles);
+  end if;
+
+  -- التسلسلُ كما أُقرّ: ولا يتغيّر بهذا شيءٌ من الصلاحيات
+  if (v_roles -> 0 ->> 0) <> 'مدير المشروع'
+     or (v_roles -> 1 ->> 0) <> 'مدير العمليات التشغيلية'
+     or (v_roles -> 2 ->> 0) <> 'مساعد مدير العمليات التشغيلية'
+     or (v_roles -> 3 ->> 0) <> 'المنسق'
+     or (v_roles -> 4 ->> 0) <> 'مشرف فريق الترجمة'
+     or (v_roles -> 5 ->> 0) <> 'المترجم والمراجع والمحرر'
+     or (v_roles -> 6 ->> 0) <> 'المرشد المكاني'
+     or (v_roles -> 7 ->> 0) <> 'قائد الفريق الميداني' then
+    raise exception 'FAIL: تسلسلُ الأدوار غير ما أُقرّ';
+  end if;
+
+  -- ولكلِّ دورٍ أيقونتُه
+  if exists (select 1 from jsonb_array_elements(v_roles) r
+              where nullif(r ->> 2, '') is null) then
+    raise exception 'FAIL: دورٌ بلا أيقونة';
+  end if;
+
+  -- ولا ذكرَ للماليات في صفحة المبادرة
+  v_names := v_roles::text;
+  if v_names ~ 'الرواتب|التسعيرة|المستحقات|ريال' then
+    raise exception 'FAIL: ذكرٌ ماليٌّ في الأدوار';
+  end if;
+  -- والصفةُ التشغيلية على حساب التنسيق لا تزيد عليه
+  if v_names !~ 'صلاحياتُ المنسق' then
+    raise exception 'FAIL: لم يُبيَّن أن الصفةَ التشغيلية بصلاحية التنسيق';
+  end if;
+
+  -- قسمُ التدريب أُضيف بعد القاعات
+  if not exists (select 1 from jsonb_array_elements(v -> 'sections') s
+                  where (s ->> 0) = 'training') then
+    raise exception 'FAIL: لا قسمَ للتدريب في صفحة المبادرة';
+  end if;
+
+  -- وأطولُ الأقسام تتصدّرها بطاقاتٌ موجزةٌ بأيقوناتها
+  if (select s -> 2 -> 0 ->> 0 from jsonb_array_elements(v -> 'sections') s
+       where (s ->> 0) = 'rooms') <> 'cards' then
+    raise exception 'FAIL: لم تتصدّر البطاقاتُ قسمَ القاعات';
+  end if;
+  if exists (
+    select 1 from jsonb_array_elements(v -> 'sections') s,
+                  lateral jsonb_array_elements(s -> 2) b,
+                  lateral jsonb_array_elements(b -> 1) c
+     where (s ->> 0) in ('rooms', 'quality', 'outputs', 'training')
+       and (b ->> 0) = 'cards' and nullif(c ->> 2, '') is null) then
+    raise exception 'FAIL: بطاقةٌ بلا أيقونة';
+  end if;
+
+  raise notice 'PASS: تسلسلُ الفريق بأيقوناته، وقسمُ التدريب، وبطاقاتٌ تتصدّر أطولَ الأقسام';
 end $$;

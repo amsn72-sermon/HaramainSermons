@@ -15,16 +15,38 @@ export const state = {
   mfaOk: true,           // التحقق بخطوتين: مستوفًى أو غير لازم (ملاحظة ١٠٣)
   mfaEnrolled: false,
   mfaRequired: true,     // إلزامه على حسابات الإدارة — مفتاح بيد مدير المشروع
+  mfaExempt: false,      // معفًى صراحةً، يعلو على الإلزام العام (ملاحظة ٢٢٤)
   mfaLoaded: false,
+  periods: [],           // فترات الدوام كما هي في الجدول (ملاحظة ٢٢٨)
   filePattern: null      // نمط تسمية الملفات المسلَّمة (ملاحظة ١٤٤)
 };
 
 export const ROLE_LABEL = { manager: 'مدير المشروع', coordinator: 'منسق', translator: 'مترجم',
   supervisor: 'مدير المشروع من الهيئة', field_lead: 'قائد الفريق الميداني' };
-// وردياتُ الإرشاد الثلاث: عليها يُبنى نطاقُ القائد (ملاحظة ٢٢١)
+// فتراتُ الدوام: أسماؤها من الجدول، وهذه أسماءُ المبذورة منها (ملاحظة ٢٢٨)
 export const PERIOD_LABEL = { morning: 'الصباحية', evening: 'المسائية', night: 'الليلية' };
-export const leadScope = m => (m?.role !== 'field_lead' ? '' :
-  [CITY[m.lead_city] || 'الحرمان', PERIOD_LABEL[m.lead_period] || 'كل الورديات'].join(' — '));
+export const periodName = code =>
+  (state.periods.find(p => p.code === code)?.name) || PERIOD_LABEL[code] || code || '';
+export const periodRange = code => {
+  const p = state.periods.find(x => x.code === code);
+  return p ? `${String(p.start_at).slice(0, 5)} – ${String(p.end_at).slice(0, 5)}` : '';
+};
+// القيادةُ صارت بالأسماء لا بالنطاق: لكلِّ عضوٍ قائدٌ واحد (ملاحظة ٢٢٨)
+export const LEAD_KIND = { field: 'قائد فريق ميداني', translation: 'مشرف فريق الترجمة' };
+export const isTeamLead = () => state.profile?.status === 'active'
+  && (state.profile?.role === 'field_lead' || !!state.profile?.lead_kind);
+export const leadScope = m =>
+  (m?.lead_kind ? LEAD_KIND[m.lead_kind] : (m?.role === 'field_lead' ? LEAD_KIND.field : ''));
+// نمطُ العمل: عن بُعدٍ أو حضوري — والحضوريُّ له موقعٌ وفترةٌ ومناوبات (ملاحظة ٢٢٧)
+export const WORK_MODE = { remote: 'عن بُعد', onsite: 'حضوري' };
+// أيامُ الأسبوع كما تعدّها قاعدة البيانات: ٠ الأحد
+export const WEEK_DAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+export const daysLabel = days => {
+  const d = (days || []).map(Number).sort((a, b) => a - b);
+  if (!d.length) return 'لا أيام';
+  if (d.length === 7) return 'كل الأيام';
+  return d.map(i => WEEK_DAYS[i]).join('، ');
+};
 
 // صفتان تُكتبان على حساب المنسق، وصلاحيتُهما صلاحيتُه نفسُها (ملاحظة ٢٠٠)
 export const ADMIN_TITLE = {
@@ -192,18 +214,45 @@ export async function loadMfaState(force = false) {
   if (state.mfaLoaded && !force) return state.mfaOk;
   let ok = true, enrolled = false;
   try {
-    const [list, rows] = await Promise.all([
-      auth.mfa.factors(),
-      db.select('platform_settings', { select: 'mfa_required_admins' }).catch(() => [])
-    ]);
-    state.mfaRequired = rows[0] ? rows[0].mfa_required_admins !== false : true;
-    enrolled = list.some(f => f.status === 'verified');
-    // يلزمه إن فعّله، أو أُلزم حسابه بعينه، أو كان من الإدارة والإلزام عام (ملاحظة ١٧١)
-    const mine = state.profile?.mfa_required === true;
-    ok = enrolled ? auth.aal === 'aal2' : !(mine || (isAdmin() && state.mfaRequired));
+    // حالُ الحساب كلُّها في طلبٍ واحد: العواملُ والإلزامُ والإعفاءُ وعلامةُ الجلسة
+    const g = await db.rpc('my_mfa_gate').catch(() => null);
+    const d = (Array.isArray(g) ? g[0] : g) || null;
+
+    if (d) {
+      enrolled = d.enrolled === true;
+      state.mfaRequired = d.admins === true;
+      state.mfaExempt = d.exempt === true;
+      // البابُ يُفتح بأحد أمرين: مستوى التوثيق في الرمز، أو علامةُ الجلسة
+      // المكتوبةُ عند التحقق — فلا يرتدُّ العضو بعد أن قيل له «تم التحقق»
+      // (ملاحظة ٢٢٣)
+      const satisfied = auth.aal === 'aal2' || d.session_ok === true;
+      const must = !d.exempt && (d.required === true || (isAdmin() && d.admins === true));
+      ok = enrolled ? satisfied : !must;
+    } else {
+      const [list, rows] = await Promise.all([
+        auth.mfa.factors(),
+        db.select('platform_settings', { select: 'mfa_required_admins' }).catch(() => [])
+      ]);
+      state.mfaRequired = rows[0] ? rows[0].mfa_required_admins !== false : true;
+      state.mfaExempt = state.profile?.mfa_exempt === true;
+      enrolled = list.some(f => f.status === 'verified');
+      const mine = state.profile?.mfa_required === true;
+      ok = enrolled ? auth.aal === 'aal2'
+                    : state.mfaExempt || !(mine || (isAdmin() && state.mfaRequired));
+    }
   } catch { ok = true; }   // تعذّر الفحص لا يُقفل الباب على العضو
   state.mfaEnrolled = enrolled;
   state.mfaOk = ok;
   state.mfaLoaded = true;
   return ok;
+}
+
+// فتراتُ الدوام — تُقرأ مرةً وتُحفظ (ملاحظة ٢٢٨)
+export async function loadPeriods(force = false) {
+  if (state.periods.length && !force) return state.periods;
+  try {
+    state.periods = await db.select('duty_periods',
+      { select: '*', order: 'sort.asc,start_at.asc' });
+  } catch { state.periods = []; }
+  return state.periods;
 }

@@ -83,21 +83,25 @@ const shell = (title, body) => h('div',
 // ---------------------------------------------------------------------
 export async function render(ctx) {
   const st = await mfaState();
-  await loadMfaState();
-  if (st.satisfied && st.enrolled) return shell('التحقق بخطوتين مفعَّل', done(ctx));
+  await loadMfaState(true);
+  // الاستيفاءُ يُؤخذ من البوابة لا من مستوى الرمز وحدَه (ملاحظة ٢٢٣)
+  if (st.enrolled && state.mfaOk) return shell('التحقق بخطوتين مفعَّل', done(ctx));
   if (st.enrolled) return shell('التحقق بخطوتين', await askCode(ctx, st.verified[0]));
   // التفعيلُ بيد الإدارة لا بيد العضو: من لم يُلزَم به لا يفعّله لنفسه (ملاحظة ٢١٢)
   if (!mfaRequiredForMe()) return shell('التحقق بخطوتين', notYours());
   return shell('تفعيل التحقق بخطوتين', await enrollBox(ctx));
 }
 
-// أُلزم حسابُه بعينه، أو كان من الإدارة والإلزامُ عام
+// أُلزم حسابُه بعينه، أو كان من الإدارة والإلزامُ عام — والمعفى لا يُطالَب (ملاحظة ٢٢٤)
 const mfaRequiredForMe = () =>
-  state.profile?.mfa_required === true || (isAdmin() && state.mfaRequired !== false);
+  !state.mfaExempt
+  && (state.profile?.mfa_required === true || (isAdmin() && state.mfaRequired !== false));
 
 function notYours() {
   return h('div.stack',
-    h('p', 'التحقق بخطوتين يُفعَّل لحسابك من إدارة المشروع، لا من هنا.'),
+    h('p', state.mfaExempt
+      ? 'حسابُك معفًى من التحقق بخطوتين، فيُفتح بكلمة المرور وحدها.'
+      : 'التحقق بخطوتين يُفعَّل لحسابك من إدارة المشروع، لا من هنا.'),
     h('p.small.muted', 'فإذا فُعّل لحسابك، طُلب منك تسجيلُ تطبيق المصادقة عند أول دخول، '
       + 'وعُرضت عليك رموزُ الاسترداد مرةً واحدة. وما دام لم يُفعَّل، فحسابُك يُفتح بكلمة المرور وحدها.'),
     h('div.row', h('a.btn.primary', { href: '/app' }, 'متابعة العمل')));
@@ -135,6 +139,9 @@ async function askCode(ctx, factor) {
     try {
       const ch = await auth.mfa.challenge(factor.id);
       await auth.mfa.verify(factor.id, ch.id, code.value);
+      // تُكتب علامةُ الجلسة قبل أيِّ شيء: بها يُفتح البابُ ولو لم يرتفع
+      // مستوى الرمز إلى aal2 (ملاحظة ٢٢٣)
+      await db.rpc('mfa_mark_session').catch(() => {});
       await loadMfaState(true);
       toast('تم التحقق.', 'ok');
       // تحميلٌ كامل لا انتقالٌ داخلي: رمزُ الجلسة تبدّل، والرسمُ الداخلي
@@ -274,6 +281,10 @@ async function enrollBox(ctx) {
       try {
         const ch = await auth.mfa.challenge(f.id);
         await auth.mfa.verify(f.id, ch.id, code.value);
+        // تسجيلٌ واحدٌ للحساب: ما سبق من عوامل يسقط، فلا يجتمع في التطبيق
+        // سجلّانِ لا يُدرى أيُّهما العامل (ملاحظة ٢٢٥)
+        await db.rpc('mfa_keep_one_factor', { p_keep: f.id }).catch(() => {});
+        await db.rpc('mfa_mark_session').catch(() => {});
         await loadMfaState(true);
         await showCodes(ctx, box);        // الرموزُ تُعرض مرةً واحدة قبل المتابعة
       } catch (e) {
@@ -299,8 +310,11 @@ async function enrollBox(ctx) {
         h('li', 'افتح التطبيق واختر «مسح رمز QR»، ثم وجّه الكاميرا إلى الرمز أدناه.'),
         h('li', 'اكتب الرمز السداسي الظاهر في التطبيق هنا، واضغط «تأكيد وتفعيل».')),
       h('p.small.muted',
-        'لكل فتحة لهذه الصفحة رمز جديد: إن حدّثتها أو عدت إليها، فاحذف السجل القديم من التطبيق وامسح الرمز الظاهر الآن، ',
-        'ثم أدخل الرمز فور ظهوره فهو يتغيّر كل ثلاثين ثانية. وتأكّد أن ساعة جوالك مضبوطة تلقائيًّا.'),
+        'لكل فتحةٍ لهذه الصفحة رمزٌ جديد. فإن حدّثتها أو عدت إليها فامسح الرمز الظاهر الآن، ',
+        'وأدخل الرقم فور ظهوره فهو يتغيّر كل ثلاثين ثانية. ',
+        'ومتى نجح التفعيلُ سقط تسجيلُك السابق عندنا، فلحسابك سجلٌّ واحدٌ لا غير — ',
+        'واحذف من التطبيق ما بقي من سجلّاتٍ قديمةٍ لهذا الحساب فهي لا تعمل. ',
+        'وتأكّد أن ساعة جوالك مضبوطة تلقائيًّا.'),
       img,
       secret ? h('details.mfa-secret', h('summary', 'تعذّر مسح الرمز؟ أدخل المفتاح يدويًّا'),
         h('p.small', 'في التطبيق اختر «إدخال مفتاح الإعداد» ثم الصق:'),

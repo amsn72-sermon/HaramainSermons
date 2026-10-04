@@ -1358,3 +1358,71 @@ button.room-tile:hover { border-color: var(--gold); transform: translateY(-2px);
   color: #333; background: rgb(255 255 255 / 75%); padding: 1px 6px; border-radius: 6px; }
 .repo-item { background: var(--surface-2, rgb(255 255 255 / 4%)); }
 .sig-upload input[type="file"] { font-size: .9em; }
+
+/* عدُّ الخروج التلقائي: ظاهرٌ كبيرٌ لا يُخطئه النظر (ملاحظة ٢٢٩) */
+.idle-timer { text-align: center; margin: 0 0 14px; }
+.idle-count { font-size: 2.2rem; font-variant-numeric: tabular-nums;
+  letter-spacing: .04em; color: var(--accent-text); }
+
+/* اختيارُ أيام العمل (ملاحظة ٢٣٣) */
+.day-picker { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; }
+.day-picker .check { gap: 6px; }
+
+/* القادةُ وفِرقُهم (ملاحظة ٢٢٨) */
+.lead-grid { display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.lead-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px;
+  background: var(--card); display: flex; flex-direction: column; gap: 6px; }
+.lead-card p { margin: 0; }
+
+/* عرضُ المادة للمشاهدة فقط، بعلامةٍ مائيةٍ باسم قارئها (ملاحظة ٢٣٢) */
+.doc-view { position: relative; height: min(70vh, 620px); border: 1px solid var(--line);
+  border-radius: 10px; overflow: hidden; background: var(--bg-soft); }
+.doc-view iframe { width: 100%; height: 100%; border: 0; }
+.doc-mark { position: absolute; inset: 0; pointer-events: none;
+  display: flex; flex-wrap: wrap; align-content: space-around;
+  justify-content: space-around; opacity: .14; }
+.doc-mark span { transform: rotate(-24deg); font-size: 1.3rem; font-weight: 700;
+  white-space: nowrap; }
+
+/* أيقوناتٌ مرسومة: تتبع لون النصِّ ومقاسَه (ملاحظة ٢٣١) */
+.ico { display: inline-flex; align-items: center; justify-content: center;
+  color: var(--accent-text); flex: none; }
+
+/* أيقوناتُ أنواع المستودع (ملاحظة ٢٢٦) */
+.repo-types { display: grid; gap: 10px; margin-bottom: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+.repo-tile { display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 14px 8px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--card); color: inherit; cursor: pointer; font: inherit;
+  transition: border-color .15s, background .15s; }
+.repo-tile:hover { border-color: var(--accent); }
+.repo-tile.on { border-color: var(--accent); background: var(--accent-soft, var(--bg-soft)); }
+.repo-tile b { font-size: .95rem; }
+.repo-tile .sub { font-size: .78rem; color: var(--muted); }
+
+/* رؤوسُ الأقسام والبطاقات والأدوار بأيقوناتها (ملاحظتا ٢٣٠ و٢٣١) */
+.ab-sec-head { display: flex; align-items: center; gap: 10px; }
+.ab-sec-head h2 { margin: 0; }
+.ab-sec > .ab-sec-head { margin-bottom: 14px; }
+.ab-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.ab-card-head h3 { margin: 0; }
+.ab-role-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.ab-role-head h3 { margin: 0; }
+.ab-role-num { display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 50%; flex: none;
+  background: var(--accent); color: #fff; font-size: .82rem; font-weight: 700; }
+
+/* بطاقاتُ لغات الدليل المصطلحي (ملاحظة ٢٣٤) */
+.gl-cards { display: grid; gap: 10px; margin-bottom: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.gl-card { display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 14px 10px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--card); color: inherit; cursor: pointer; font: inherit;
+  text-align: center; transition: border-color .15s, background .15s; }
+.gl-card:hover { border-color: var(--accent); }
+.gl-card.on { border-color: var(--accent); background: var(--accent-soft, var(--bg-soft)); }
+.gl-card .gl-native { font-size: .9rem; color: var(--muted); }
+.gl-card .sub { font-size: .76rem; color: var(--muted); }
+.gl-card .sub.warn { color: var(--warn-text, #a15c00); }
+.gl-more { border-style: dashed; }
