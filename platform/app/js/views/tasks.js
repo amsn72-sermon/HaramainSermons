@@ -130,7 +130,31 @@ export async function workspace(ctx) {
 
   // ----- الأصل العربي: صفحة بصفحة، بعلامة مائية، دون رابط أو تنزيل -----
   let sourceEl;
-  if (m.source_pdf_path) {
+  if (m.source_audio_path) {
+    // أصلٌ صوتي: يسمعه المترجم في مكان الأصل ويكتب ترجمته أمامه (ملاحظة ١٥٧)
+    const player = h('audio', { controls: true, preload: 'metadata', style: { width: '100%' } });
+    const info = h('span.small.muted', m.source_audio_seconds
+      ? `مدة المقطع ${Math.floor(m.source_audio_seconds / 60)}:${String(m.source_audio_seconds % 60).padStart(2, '0')}`
+      : 'جارٍ تحميل المقطع…');
+    sourceEl = h('div.card.stack.src-audio',
+      h('div.row.between', h('b', 'الأصل مقطعٌ صوتي'), h('span.badge.gold', 'نص صوتي')),
+      player, info,
+      h('p.small.muted', 'استمع إلى المقطع واكتب ترجمته في مساحة الترجمة. '
+        + 'ويمكنك إبطاء التشغيل أو تسريعه من قائمة المشغّل عند الحاجة.'),
+      m.instructions ? h('p.small', h('b', 'تعليمات المنسق: '), m.instructions) : null);
+    storage.signedUrl('sources', m.source_audio_path, 3600)
+      .then(url => { player.src = url; })
+      .catch(err => info.replaceChildren(h('span.small.bad', err.message)));
+    // مدة المقطع تُقاس أول مرة يُشغَّل فيها، فتُحفظ للمرات القادمة
+    player.onloadedmetadata = () => {
+      const sec = Math.round(player.duration || 0);
+      if (!sec || !Number.isFinite(sec)) return;
+      info.textContent = `مدة المقطع ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+      if (!m.source_audio_seconds) {
+        db.rpc('set_source_audio_seconds', { p_material: m.id, p_seconds: sec }).catch(() => {});
+      }
+    };
+  } else if (m.source_pdf_path) {
     sourceEl = h('div', h('p.muted', 'جارٍ تحميل الأصل…'));
     storage.signedUrl('sources', m.source_pdf_path, 600).then(url => {
       const who = auth.user?.email || state.profile.full_name || '';
@@ -445,7 +469,8 @@ export async function workspace(ctx) {
 
   // في الجوال: تبويبان بدل عمودين متلاصقين، فالشاشة ضيّقة (ملاحظة ١١١)
   function wsBlock() {
-    const srcCol = h('div.ws-col', { 'data-pane': 'src' }, h('h3', 'النص الأصلي — العربية'), sourceEl);
+    const srcCol = h('div.ws-col', { 'data-pane': 'src' },
+      h('h3', m.source_audio_path ? 'الأصل الصوتي — العربية' : 'النص الأصلي — العربية'), sourceEl);
     const trCol = h('div.ws-col', { 'data-pane': 'tr' }, h('h3', `الترجمة — ${langName(t.language_code)}`), editor.el);
     const grid = h('div.workspace', srcCol, trCol);
     const tabSrc = h('button.btn.tab', { type: 'button', role: 'tab' }, 'النص الأصلي');

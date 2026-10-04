@@ -130,3 +130,116 @@ export function downloadBlob(blob, name) {
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
+
+// ---------------------------------------------------------------------
+// قارئ ملف Excel: يفكّ ZIP ويقرأ أول ورقة — بلا مكتبات (ملاحظة ١٥٨)
+// يُستعمل لاستيراد الدليل المصطلحي، ويقبل CSV كذلك.
+// ---------------------------------------------------------------------
+const dec = new TextDecoder();
+
+// إدخالات ZIP من الفهرس المركزي: الاسم ← البايتات (مفكوكة الضغط)
+async function unzip(buf) {
+  const dv = new DataView(buf), u8 = new Uint8Array(buf);
+  // نهاية الفهرس المركزي: توقيعها في آخر ٦٦ كيلوبايت
+  let end = -1;
+  for (let i = dv.byteLength - 22; i >= Math.max(0, dv.byteLength - 66000); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { end = i; break; }
+  }
+  if (end < 0) throw new Error('الملف ليس ملف Excel صالحًا');
+  const count = dv.getUint16(end + 10, true);
+  let p = dv.getUint32(end + 16, true);
+  const out = new Map();
+  for (let n = 0; n < count; n++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const method = dv.getUint16(p + 10, true);
+    const size = dv.getUint32(p + 20, true);
+    const nameLen = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const commentLen = dv.getUint16(p + 32, true);
+    const local = dv.getUint32(p + 42, true);
+    const name = dec.decode(u8.subarray(p + 46, p + 46 + nameLen));
+    // ترويسة السجل المحلي: طولها يختلف عن المركزي
+    const lNameLen = dv.getUint16(local + 26, true);
+    const lExtraLen = dv.getUint16(local + 28, true);
+    const start = local + 30 + lNameLen + lExtraLen;
+    const raw = u8.subarray(start, start + size);
+    out.set(name, { method, raw });
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  const read = async name => {
+    const e = out.get(name);
+    if (!e) return null;
+    if (e.method === 0) return dec.decode(e.raw);
+    if (typeof DecompressionStream === 'undefined') throw new Error('متصفحك لا يفكّ ضغط الملف — احفظ الملف بصيغة CSV وجرّب مرة أخرى');
+    const ds = new DecompressionStream('deflate-raw');
+    const blob = new Blob([e.raw]).stream().pipeThrough(ds);
+    return dec.decode(await new Response(blob).arrayBuffer());
+  };
+  return { names: [...out.keys()], read };
+}
+
+const colIndex = ref => {
+  let n = 0;
+  for (const ch of String(ref).replace(/[0-9]/g, '')) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n - 1;
+};
+
+// نصّ CSV ← صفوف (يحترم علامات الاقتباس)
+export function parseCsv(text) {
+  const rows = [];
+  let row = [], cell = '', q = false;
+  const src = String(text).replace(/^﻿/, '');
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (q) {
+      if (c === '"' && src[i + 1] === '"') { cell += '"'; i++; }
+      else if (c === '"') q = false;
+      else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ',' || c === ';') { row.push(cell); cell = ''; }
+    else if (c === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
+    else if (c !== '\r') cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(v => String(v).trim()));
+}
+
+// ملف ← صفوف نصية. يقبل .xlsx و .csv
+export async function readSheet(file) {
+  const name = String(file.name || '').toLowerCase();
+  if (name.endsWith('.csv') || name.endsWith('.txt')) return parseCsv(await file.text());
+
+  const { names, read } = await unzip(await file.arrayBuffer());
+  const sheetName = names.filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort()[0];
+  if (!sheetName) throw new Error('لم تُوجد ورقة بيانات في الملف');
+  const sharedXml = await read('xl/sharedStrings.xml');
+  const shared = [];
+  if (sharedXml) {
+    const doc = new DOMParser().parseFromString(sharedXml, 'application/xml');
+    for (const si of doc.getElementsByTagName('si')) {
+      shared.push([...si.getElementsByTagName('t')].map(t => t.textContent).join(''));
+    }
+  }
+  const doc = new DOMParser().parseFromString(await read(sheetName), 'application/xml');
+  const rows = [];
+  for (const r of doc.getElementsByTagName('row')) {
+    const cells = [];
+    for (const c of r.getElementsByTagName('c')) {
+      const at = colIndex(c.getAttribute('r') || '');
+      const type = c.getAttribute('t');
+      let v = '';
+      if (type === 's') {
+        const idx = Number(c.getElementsByTagName('v')[0]?.textContent || -1);
+        v = shared[idx] ?? '';
+      } else if (type === 'inlineStr') {
+        v = [...c.getElementsByTagName('t')].map(t => t.textContent).join('');
+      } else {
+        v = c.getElementsByTagName('v')[0]?.textContent || '';
+      }
+      cells[at >= 0 ? at : cells.length] = v;
+    }
+    for (let i = 0; i < cells.length; i++) if (cells[i] === undefined) cells[i] = '';
+    rows.push(cells);
+  }
+  return rows.filter(r => r.some(v => String(v).trim()));
+}

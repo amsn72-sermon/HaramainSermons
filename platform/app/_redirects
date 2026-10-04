@@ -1,1 +1,5 @@
-/*    /index.html   200
+# لكل صفحة ملفُها لتحمل بطاقة رابطها الخاصة عند المشاركة (ملاحظتا ١٣٩ و١٤٠)
+/initiative    /initiative.html   200
+/arafah        /arafah.html       200
+/verify        /verify.html       200
+/*             /index.html        200
