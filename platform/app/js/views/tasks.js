@@ -194,21 +194,41 @@ export async function workspace(ctx) {
   if (saveBtn) saveBtn.onclick = e => busy(e.currentTarget, () => saveDraft().catch(err => toast(err.message, 'bad')));
   // الدليل المصطلحي في متناول اليد: يُفتح فوق العمل ولا يغادره المترجم (ملاحظة ١٥٠)
   const glossarySlot = h('div.row.ws-glossary');
-  const glBtn = h('button.btn.sm', { type: 'button', title: 'الرجوع إليه إلزامي عند لبس المصطلح' }, '📖 الدليل المصطلحي');
+  const glBtn = h('button.btn.sm', { type: 'button', title: 'الرجوع إليه إلزامي عند لبس المصطلح' }, '📖 الدليل الإرشادي');
   glBtn.onclick = () => import('./glossary.js').then(m => m.glossaryPanel()).catch(err => toast(err.message, 'bad'));
   if (editor.tools) editor.tools.append(glBtn);
   else glossarySlot.append(glBtn);
+  // عدّادُ الفقرات: يرى المترجمُ الخللَ وهو يكتب لا بعد شهر (ملاحظة ٢٥٢)
+  //   فالتصديرُ المقابِل يحاذي بالترتيب، واختلافُ العدد يُزيح ما بعده.
+  const parCount = h('span.small.par-count', { title: 'عددُ فقرات الأصل وفقرات ترجمتك — '
+    + 'تساويهما يجعل التصديرَ المقابل مستقيمًا' });
+  let countParas = null;
+  const paintParas = async () => {
+    try {
+      if (!countParas) ({ toParagraphs: countParas } = await import('../aligned.js'));
+      const a = countParas(m.source_html || '').length;
+      const b = countParas(editor.html || '').length;
+      if (!a) { parCount.textContent = ''; return; }
+      parCount.textContent = `الأصل ${a} فقرة · ترجمتُك ${b}`;
+      parCount.className = 'small par-count' + (b === 0 ? '' : (a === b ? ' ok' : ' warn'));
+      parCount.title = a === b ? 'متساويتان — التصديرُ المقابل يستقيم'
+        : 'اختلفَ العدد: لا تدمج فقرتين ولا تقسم فقرة، والسطرُ الفارغُ الزائدُ يصنع فقرةً وهمية';
+    } catch { parCount.textContent = ''; }
+  };
+
   // الحفظ داخل شريط الأدوات لا خارجه، فيبقى الشريط كاملًا أمام المترجم (ملاحظة ٦٨)
-  if (canEdit) editor.tools.append(h('span.tb-save', saveState, saveBtn));
+  if (canEdit) editor.tools.append(h('span.tb-save', parCount, saveState, saveBtn));
 
   // حفظ تلقائي كل ٢٠ ثانية، وبعد ٤ ثوانٍ من توقف الكتابة، ونسخة محلية عند كل تعديل
   let idle = null;
   const onEdit = () => {
     keepLocal();
+    paintParas();
     saveBtn && saveBtn.classList.add('primary');
     clearTimeout(idle);
     idle = setTimeout(() => saveDraft(true).catch(() => {}), 4000);
   };
+  paintParas();
   const autosave = setInterval(() => { if (!editor.el.isConnected) return clearInterval(autosave); saveDraft(true).catch(() => {}); }, 20_000);
   window.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {

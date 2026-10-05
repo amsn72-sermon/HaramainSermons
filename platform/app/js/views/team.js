@@ -1,5 +1,5 @@
 // فريق العمل: طلبات التسجيل، التفعيل، الأدوار، واللغات
-import { h, fill, toast, busy, dialog, emptyState, fmtDate, fmtDateTime, confirm } from '../ui.js';
+import { h, fill, toast, busy, dialog, emptyState, fmtDate, fmtDateTime, confirm, req } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { state, isManager, PERM_LABEL, PERM_KEYS, ROLE_LABEL, STATUS_LABEL,
   TRACK_LABEL, trackOf, CITY, NO_FATWA, langName, stageName, roleLabel, ADMIN_TITLE,
@@ -22,7 +22,7 @@ export async function render(ctx, opts = {}) {
   const group = GROUP_LABEL[opts.group] ? opts.group : (opts.track === 'field' ? 'field' : 'translators');
   const track = group === 'field' ? 'field' : group === 'answers' ? 'answers' : 'translation';
   const [all, priv, perf, rateSum, signed, bank] = await Promise.all([
-    db.select('profiles', { select: '*,member_languages(language_code)', order: 'created_at.desc' }),
+    db.select('profiles', { select: '*,member_languages(language_code,assignable,default_stage,priority)', order: 'created_at.desc' }),
     db.select('profile_private', { select: '*' }),
     db.select('member_performance', { select: '*' }).catch(() => []),
     db.select('member_rating_summary', { select: '*' }).catch(() => []),
@@ -347,6 +347,69 @@ export async function render(ctx, opts = {}) {
     langSelect.addEventListener('change', () => { if (langSelect.value) { chosen.add(langSelect.value); drawLangs(); } });
     drawLangs();
 
+    // ---------------- اللغة الأمّ ولغات الإسناد (ملاحظتا ٢٤٩ و٢٥٠) ----------------
+    //   اللغةُ الأمُّ واحدةٌ وإلزاميّةٌ كالبريد والهوية. واللغاتُ المُتقَنةُ أعلاه
+    //   يعلنها العضو. ولغاتُ الإسنادِ تعتمدها الإدارةُ من بينها، ولكلٍّ منها
+    //   دورٌ افتراضيٌّ وأولويةٌ في الدور.
+    const nativeSel = h('select', { 'aria-label': 'اللغة الأم' },
+      h('option', { value: '' }, '— اختر اللغة الأم —'),
+      state.languages.map(l => h('option', { value: l.code, selected: m.native_lang === l.code }, l.name_ar)));
+    nativeSel.addEventListener('change', () => {
+      if (nativeSel.value) { chosen.add(nativeSel.value); drawLangs(); drawRoles(); }
+    });
+
+    const mlOf = code => (m.member_languages || []).find(x => x.language_code === code) || {};
+    const roleState = new Map();   // رمزُ اللغة ← { assignable, stage, priority }
+    const rolesBox = h('div.stack');
+    const drawRoles = () => {
+      const list = [...chosen];
+      if (!list.length) {
+        rolesBox.replaceChildren(h('p.small.muted', 'سجّل لغاته أولًا.'));
+        return;
+      }
+      rolesBox.replaceChildren(h('div.table-wrap', h('table.responsive',
+        h('thead', h('tr', ['اللغة', 'يُسنَد إليه فيها', 'الدور الافتراضي', 'الأولوية'].map(t => h('th', t)))),
+        h('tbody', list.map(code => {
+          const cur = roleState.get(code) || (() => {
+            const r = mlOf(code);
+            const v = { assignable: r.assignable !== false, stage: r.default_stage || '',
+              priority: r.priority ?? 100 };
+            roleState.set(code, v);
+            return v;
+          })();
+          const ok = h('input', { type: 'checkbox', checked: cur.assignable ? true : null,
+            disabled: adminLangs ? null : true, 'aria-label': `إسناد ${langName(code)}` });
+          ok.onchange = () => { cur.assignable = ok.checked; };
+          const st = h('select', { disabled: adminLangs ? null : true, 'aria-label': `دور ${langName(code)}` },
+            h('option', { value: '' }, '— بلا دورٍ افتراضي —'),
+            (state.stages || []).map(sg => h('option',
+              { value: sg.key, selected: cur.stage === sg.key }, sg.name_ar)));
+          st.onchange = () => { cur.stage = st.value; };
+          const pr = h('input', { type: 'number', min: 1, max: 999, value: String(cur.priority),
+            disabled: adminLangs ? null : true, style: { maxWidth: '5rem' },
+            'aria-label': `أولوية ${langName(code)}` });
+          pr.oninput = () => { cur.priority = Number(pr.value) || 100; };
+          return h('tr',
+            h('td', { 'data-label': 'اللغة' }, h('b', langName(code)),
+              m.native_lang === code ? h('span.badge.gold', { style: { marginInlineStart: '6px' } }, 'أمّ') : null),
+            h('td', { 'data-label': 'يُسنَد إليه فيها' }, ok),
+            h('td', { 'data-label': 'الدور الافتراضي' }, st),
+            h('td', { 'data-label': 'الأولوية' }, pr));
+        })))));
+    };
+    const adminLangs = isManager() || state.profile?.role === 'coordinator';
+    drawRoles();
+    const langsCard = h('fieldset.stack',
+      h('legend', 'اللغة الأمّ ولغات الإسناد'),
+      h('label.field', req('اللغة الأمّ'), nativeSel,
+        h('small', m.native_lang ? 'لسانُه الذي يُترجم به المواد المهمة — وهي واحدةٌ لا غير'
+          : 'لم تُحدَّد بعد — يضعها العضوُ من «بياناتي»، ولك أن تضعها له')),
+      h('p.small.muted', adminLangs
+        ? 'لغاتُ الإسناد تعتمدها الإدارةُ من بين لغاته، ولا يظهر مرشَّحًا إلا فيها. '
+          + 'والأولويةُ الأصغرُ تُسنَد أولًا.'
+        : 'اعتمادُ لغات الإسناد وضبطُ الأدوار بيد مدير المشروع والمنسّقين.'),
+      rolesBox);
+
     // بيانات التواصل قابلة للتعديل من المنسق ومدير المشروع (ملاحظة ٥٢)
     const p = privOf[m.id] || {};
     const fld = {
@@ -410,7 +473,8 @@ export async function render(ctx, opts = {}) {
           h('label.check', trainerBox, h('span', 'مدرِّبٌ من خبراء الفريق')),
           h('p.small.muted', 'المدرِّبُ يُعدّ خططَ التدريب ويرفع موادَّه ويُشارِكها، '
             + 'ويُسجّل تأهيلَ من درّبهم.')) : null,
-        h('fieldset', h('legend', 'اللغات المؤهل فيها'), h('div.stack', { style: { gap: '10px' } }, langSelect, langChips)),
+        h('fieldset', h('legend', 'اللغات التي يُتقنها'), h('div.stack', { style: { gap: '10px' } }, langSelect, langChips)),
+        langsCard,
         mayCard, cityCard, answersCard, permCard, mfaCard),
       buttons: [
         { label: 'حفظ', kind: 'primary', validate: () => {
@@ -422,8 +486,13 @@ export async function render(ctx, opts = {}) {
           if (nid && fld.id_type.value === 'national' && !/^[12][0-9]{9}$/.test(nid)) {
             toast('رقم الهوية أو الإقامة: ١٠ أرقام تبدأ بـ١ أو ٢.', 'bad'); return false; }
           if (fld.full_name.value.trim().length < 3) { toast('اكتب الاسم الكامل.', 'bad'); return false; }
+          // تُطلب اللغةُ الأمُّ ولا يُحجب بها حفظُ من سُجّل قبلها: تُنبَّه ثم تُستكمل
+          if (!nativeSel.value && m.native_lang) {
+            toast('لا تُفرِغ اللغةَ الأمّ — اخترها أو أبقِ ما كان.', 'bad'); return false; }
           return true;
         }, value: () => ({ role: role.value, languages: [...chosen], track: trackSel.value,
+          native: nativeSel.value,
+          langRoles: [...chosen].map(code => ({ code, ...(roleState.get(code) || {}) })),
           may: mayBox.checked,
           city: citySel.value || null,
           perms: Object.fromEntries([...permBoxes].map(([k, c]) => [k, c.checked])),
@@ -436,6 +505,20 @@ export async function render(ctx, opts = {}) {
     if (!result) return;
     try {
       await db.rpc('admin_update_member', { p_member: m.id, p_status: null, p_role: result.role === m.role ? null : result.role, p_languages: result.languages });
+      // اللغةُ الأمُّ ثم لغاتُ الإسناد وأدوارُها (ملاحظتا ٢٤٩ و٢٥٠)
+      if (result.native && result.native !== (m.native_lang || '')) {
+        await db.rpc('set_native_lang', { p_member: m.id, p_lang: result.native })
+          .catch(e => toast(e.message, 'bad'));
+      }
+      if (adminLangs) {
+        const okLangs = (result.langRoles || []).filter(r => r.assignable).map(r => r.code);
+        await db.rpc('set_assignable_langs', { p_member: m.id, p_languages: okLangs })
+          .catch(e => toast(e.message, 'bad'));
+        for (const r of result.langRoles || []) {
+          await db.rpc('set_lang_role', { p_member: m.id, p_lang: r.code,
+            p_stage: r.stage || null, p_priority: r.priority ?? 100 }).catch(() => {});
+        }
+      }
       // وصفةُ القيادة بعد الدور كذلك، ثم قائدُ العضو (ملاحظة ٢٢٨)
       if (isManager()) {
         const wantKind = kindSel.value || null;

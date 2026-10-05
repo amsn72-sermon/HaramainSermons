@@ -24,7 +24,9 @@ const ICONS = {
   redo: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
   trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
   undo: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
-  marks: '<path d="M4 4h16v16H4z"/><path d="M7 9h10M7 13h6"/><path d="M15 17l2 2 4-4"/>'
+  marks: '<path d="M4 4h16v16H4z"/><path d="M7 9h10M7 13h6"/><path d="M15 17l2 2 4-4"/>',
+  // التصديرُ المقابِل: سطرٌ فوق سطر (ملاحظة ٢٥٢)
+  pair: '<path d="M3 5h18"/><path d="M3 9h12"/><path d="M3 15h18"/><path d="M3 19h12"/>'
 };
 function icon(name) {
   const s = h('span.ico', { 'aria-hidden': 'true' });
@@ -447,6 +449,19 @@ export async function render(ctx) {
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
 
+  // التصديرُ المقابِل لعملٍ واحد: كلُّ لغاته التي تُرجمت (ملاحظة ٢٥٢)
+  async function alignedOf(t) {
+    const sibs = rows.filter(x => x.material?.id === t.material?.id && x.translation_html);
+    const work = { title: `${heading(t.material)} (${t.material.title})`,
+      source_html: t.material.source_html || '' };
+    if (!work.source_html) return toast('لا أصلَ عربيًّا محفوظًا لهذا العمل.', 'bad');
+    try {
+      const { exportAligned } = await import('../aligned.js');
+      const out = await exportAligned(work, sibs.length ? sibs : [t], { dialog });
+      if (out && out.ok === false && out.why) toast(out.why, 'bad');
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
   // ----------------------------------------------------------------
   // سطر العمل في القائمة
   // ----------------------------------------------------------------
@@ -470,6 +485,8 @@ export async function render(ctx) {
         iconBtn('print', 'طباعة', () => printTranslation(args) || toast('اسمح بالنوافذ المنبثقة.', 'bad')),
         iconBtn('view', 'استعراض PDF', () => printTranslation(args, { autoPrint: false }) || toast('اسمح بالنوافذ المنبثقة.', 'bad')),
         iconBtn('pdf', 'تنزيل PDF (اختر «حفظ كـ PDF»)', () => printTranslation(args) || toast('اسمح بالنوافذ المنبثقة.', 'bad')),
+        // الأصلُ وترجمتُه تحتَه، فقرةً بفقرة أو جملةً بجملة (ملاحظة ٢٥٢)
+        iconBtn('pair', 'تصديرٌ مقابِل: الأصل وترجمته', e => busy(e.currentTarget, () => alignedOf(t))),
         t.audio_path ? iconBtn('play', 'تشغيل التسجيل', e => play(e.currentTarget, t)) : h('span.icon-btn.off', { title: 'لا تسجيل' }, icon('audio')),
         t.audio_path ? iconBtn('dl', 'تنزيل التسجيل', e => busy(e.currentTarget, () => downloadAudio(t, name).catch(err => toast(err.message, 'bad'))))
           : h('span.icon-btn.off', { 'aria-hidden': 'true' }, icon('dl')),

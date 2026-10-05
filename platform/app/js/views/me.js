@@ -138,9 +138,18 @@ export async function render(ctx) {
   langSel.onchange = () => { if (langSel.value) { picked.add(langSel.value); drawPicked(); } };
   drawPicked();
 
+  // اللغةُ الأمّ: لسانُه الذي يُترجم به المواد المهمة، واحدةٌ لا غير (ملاحظة ٢٤٩)
+  const nativeSel = h('select', { 'aria-label': 'اللغة الأم' },
+    h('option', { value: '' }, '— اختر لغتك الأم —'),
+    state.languages.map(l => h('option',
+      { value: l.code, selected: me.native_lang === l.code }, l.name_ar)));
+  nativeSel.onchange = () => { if (nativeSel.value) { picked.add(nativeSel.value); drawPicked(); } };
+
   const langSave = h('button.btn.sm', { type: 'button' }, 'حفظ اللغات');
   langSave.onclick = () => busy(langSave, async () => {
+    if (!nativeSel.value) return toast('اختر لغتك الأمّ أولًا.', 'bad');
     try {
+      await db.rpc('set_native_lang', { p_member: me.id, p_lang: nativeSel.value });
       await db.rpc('set_my_languages', { p_codes: [...picked] });
       toast('حُفظت لغاتك.', 'ok');
       ctx.navigate('/app/me', { replace: true });
@@ -190,7 +199,11 @@ export async function render(ctx) {
       : h('p.small.ok', 'اكتملت بياناتك — أرسلها للتدقيق.'),
     h('div.card.stack',
       h('b', 'لغاتك'),
-      h('p.small.muted', 'اللغات التي تترجم بها أو ترشد بها — لغةٌ واحدة على الأقل.'),
+      me.native_lang ? null : h('p.small.warn', 'لم تُحدَّد لغتُك الأمّ بعد — وهي مطلوبةٌ كالبريد والهوية.'),
+      h('label.field', 'اللغة الأمّ', nativeSel,
+        h('small', 'لسانُك الذي تُترجم به المواد المهمة — واحدةٌ لا غير')),
+      h('p.small.muted', 'ثم اللغاتُ التي تُتقنها وتترجم بها أو ترشد بها — لغةٌ واحدة على الأقل. '
+        + 'واعتمادُ لغات الإسناد بيد الإدارة.'),
       langSel, langChips, h('div.row', langSave)),
     h('div.card.stack',
       h('b', 'صورة الهوية أو الإقامة'),

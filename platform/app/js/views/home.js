@@ -1,5 +1,5 @@
 // لوحة المتابعة (المنسق والمدير)، والمترجم يُحوَّل إلى مهامه
-import { h, fill, emptyState, fmtSermonDate, fmtDate, toast, busy, dialog, confirm } from '../ui.js';
+import { h, fill, emptyState, fmtSermonDate, fmtDate, fmtDateTime, toast, busy, dialog, confirm } from '../ui.js';
 import { db } from '../sb.js';
 import { state, isAdmin, isManager, MATERIAL_SELECT, MOSQUE, MOSQUE_ANY, CITY, PRIORITY, sortStages, currentStage, trackProgress,
   isLateNow, hadLateness, langName, stageName } from '../store.js';
@@ -446,6 +446,35 @@ export async function render(ctx) {
   const chipBox = h('div');
   import('./stats.js').then(m => m.counterChip()).then(el => el && chipBox.replaceChildren(el)).catch(() => {});
 
+  // بطاقةُ النسخ الاحتياطية: يراها المديرُ كلَّ يومٍ بعينه (ملاحظة ٢٤٧ د)
+  const backupCard = h('div');
+  if (isManager()) {
+    (async () => {
+      try {
+        const out = await db.rpc('backup_state');
+        const b = (Array.isArray(out) ? out[0] : out) || {};
+        if (!b.last_run && !b.last_ok) return;
+        const mb = n => (n ? `${(Number(n) / 1048576).toFixed(1)} م.ب` : '—');
+        const hrs = b.hours == null ? null : Number(b.hours);
+        const stale = hrs == null || hrs > 36;
+        backupCard.replaceChildren(h('section.card.stack.backup-card',
+          { class: stale || b.fails ? 'warn' : 'ok' },
+          h('div.row.between.wrap',
+            h('b', '🛡 النسخة الاحتياطية'),
+            h('span.badge' + (stale || b.fails ? '.warn' : '.ok'),
+              hrs == null ? 'لا نسخةَ ناجحةٍ بعد'
+                : hrs < 1 ? 'منذ أقلَّ من ساعة' : `منذ ${hrs} ساعة`)),
+          h('p.small.muted',
+            b.last_ok ? `آخرُ نسخةٍ ناجحة: ${fmtDateTime(b.last_ok)} — `
+              + `قاعدةُ البيانات ${mb(b.db_bytes)} والملفات ${mb(b.files_bytes)}.`
+              : 'لم تُسجَّل نسخةٌ ناجحةٌ بعد.'),
+          b.fails ? h('p.small.warn', `وفشلت ${b.fails} محاولةً منذ آخر نجاح — راجع سجلَّ الخادم.`) : null,
+          stale ? h('p.small.warn', 'مضى على آخر نسخةٍ أكثرُ من يومٍ ونصف. '
+            + 'والنسخةُ التي تتوقّف صامتةً أسوأُ من عدمها.') : null));
+      } catch { /* لا تمنع الشاشة */ }
+    })();
+  }
+
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'متابعة التنفيذ'), h('h1', 'لوحة أعمال الترجمة'),
       h('p.muted', 'من الإسناد إلى قبول المنسق، ثم اعتماد المدير والنشر.')),
@@ -453,5 +482,6 @@ export async function render(ctx) {
       h('a.btn.primary', { href: '/app/new' }, '＋ إضافة مادة')),
     h('div.grid', { style: { marginBottom: '16px' } }, h('label.field', 'البحث', filters.q), h('label.field', 'الموقع', filters.mosque),
       h('label.field', 'اللغة', filters.lang), h('label.field', 'الحالة', filters.status)),
+    backupCard,
     out);
 }

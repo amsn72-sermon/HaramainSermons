@@ -185,6 +185,55 @@ export const langName = code => state.languages.find(l => l.code === code)?.name
 export const langDir = code => state.languages.find(l => l.code === code)?.dir || 'ltr';
 export const stageName = key => state.stages.find(s => s.key === key)?.name_ar || key;
 
+// ---------------------------------------------------------------------
+// مطابقةُ اسم لغةٍ مكتوبٍ بيد إنسان برمزها (ملاحظة ٢٤٤)
+//   القواميسُ تأتي ورقةً لكلِّ لغة، واسمُ الورقة هو الدليلُ على لسانها:
+//   «اللغة الانجليزية» و«الإنجليزية» و«English» و«en» كلُّها واحد.
+// ---------------------------------------------------------------------
+const normName = s => String(s ?? '')
+  .replace(/[ً-ْـ‏‎]/g, '')
+  .replace(/[أإآٱ]/g, 'ا').replace(/[ةه]/g, 'ه').replace(/[ىي]/g, 'ي')
+  .replace(/ؤ/g, 'و').replace(/ئ/g, 'ي')
+  .toLowerCase()
+  .replace(/\b(اللغه|اللغة|لغه|لغة|language)\b/g, ' ')
+  .replace(/[^\p{L}\p{N}]+/gu, '');
+
+// صيغٌ شائعةٌ تختلف عمّا في جدول اللغات
+const LANG_ALIASES = {
+  ha: ['الهوساويه', 'الهوسا', 'هوسا', 'hausa'],
+  ms: ['الملاويه', 'الملايويه', 'الملايو', 'ملايو', 'malay', 'melayu', 'bahasamelayu'],
+  bn: ['البنغاليه', 'البنغال', 'bangla', 'bengali'],
+  ur: ['الارديه', 'اردو', 'urdu'],
+  fa: ['الفارسيه', 'فارسي', 'farsi', 'persian'],
+  zh: ['الصينيه', 'chinese', 'mandarin'],
+  tr: ['التركيه', 'turkish', 'turkce'],
+  ru: ['الروسيه', 'russian'],
+  fr: ['الفرنسيه', 'french', 'francais'],
+  en: ['الانجليزيه', 'الانكليزيه', 'english'],
+  id: ['الاندونيسيه', 'indonesian', 'bahasaindonesia'],
+  es: ['الاسبانيه', 'spanish', 'espanol'],
+  pt: ['البرتغاليه', 'portuguese', 'portugues']
+};
+
+export function langByName(text) {
+  const k = normName(text);
+  if (!k) return null;
+  for (const l of state.languages) {
+    if (k === normName(l.code) || k === normName(l.name_ar) || k === normName(l.native_name)) return l.code;
+  }
+  for (const [code, list] of Object.entries(LANG_ALIASES)) {
+    if (list.some(a => normName(a) === k)) {
+      return state.languages.some(l => l.code === code) ? code : null;
+    }
+  }
+  // مطابقةٌ جزئيّة: «اللغة الهوساوية» تحوي «الهوسا»
+  for (const l of state.languages) {
+    const n = normName(l.name_ar);
+    if (n.length >= 4 && (k.includes(n) || n.includes(k))) return l.code;
+  }
+  return null;
+}
+
 // استعلام المواد بمساراتها ومراحلها — الصلاحيات في قاعدة البيانات تحدد ما يعود
 export const TRACK_SELECT = '*,language:languages(code,name_ar,dir),stages:track_stages!track_stages_track_id_fkey(*,assignee:profiles(id,full_name))';
 export const MATERIAL_SELECT = `*,khateeb:khateebs(name),tracks(${TRACK_SELECT})`;

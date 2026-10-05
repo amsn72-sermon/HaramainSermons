@@ -85,6 +85,125 @@ export async function exportWord(rows, title = 'فريق الترجمة', opts =
   downloadBlob(await Packer.toBlob(doc), `${name} ${STAMP()}.docx`);
 }
 
+// ---------------------------------------------------------------------
+// الدليل الإرشادي للمصطلحات (ملاحظة ٢٤٥ ج)
+//   المصطلحُ ومقابلُه لا غير، وقسمٌ لكلِّ لغة، وعددُ أعمدةِ الصفحة كما
+//   تُطبع المعاجم — فتختصر الصفحاتِ ويسهل البحثُ بالعين.
+//   parts: [{ code, name, pairs: [[المصطلح, المقابل], …] }]
+// ---------------------------------------------------------------------
+export async function exportGuideDoc(parts, title = 'الدليل الإرشادي للمصطلحات', opts = {}) {
+  const cols = Math.min(3, Math.max(1, Number(opts.cols) || 2));
+  const lines = opts.shape === 'lines';
+  if (opts.pdf) return guidePdf(parts, title, { ...opts, cols, lines });
+  await guideWord(parts, title, { ...opts, cols, lines });
+  return true;
+}
+
+function guidePdf(parts, title, { note = '', cols, lines }) {
+  const w = window.open('', '_blank');
+  if (!w) return false;
+  const sections = parts.map(p => {
+    const items = p.pairs.map(([a, b]) => (lines
+      ? `<div class="ent line"><span class="ar">${escapeHtml(a)}</span><span class="sep"> — </span><span class="tr">${escapeHtml(b)}</span></div>`
+      : `<div class="ent"><span class="ar">${escapeHtml(a)}</span><span class="tr">${escapeHtml(b)}</span></div>`)).join('');
+    return `<section class="lang"><h2>${escapeHtml(p.name)} <small>(${p.pairs.length})</small></h2>`
+      + `<div class="flow">${items}</div></section>`;
+  }).join('');
+  w.document.write(`<!doctype html><html lang="ar" dir="rtl" data-theme="light"><head><meta charset="utf-8"><title></title>
+<style>
+  @page { size: ${PAGE.w}mm ${PAGE.h}mm; margin: 0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Haramain Arabic", "Segoe UI", Tahoma, sans-serif; color: #12202c; background: #fff; }
+  .sheet { position: relative; width: ${PAGE.w}mm; min-height: ${PAGE.h}mm; overflow: hidden; }
+  .sheet img.lh { position: absolute; inset: 0; width: ${PAGE.w}mm; height: ${PAGE.h}mm; object-fit: cover; z-index: 0; }
+  .win { position: relative; z-index: 1; padding: ${PAGE.top}mm ${PAGE.side}mm ${PAGE.bottom + 6}mm; }
+  h1 { font-size: 15pt; text-align: center; margin: 0 0 2mm; }
+  .sub { text-align: center; font-size: 9pt; color: #5a6a78; margin: 0 0 6mm; }
+  h2 { font-size: 11pt; margin: 4mm 0 2mm; padding-bottom: 1mm; border-bottom: 1px solid #c8b591; }
+  h2 small { color: #7a8894; font-weight: 400; }
+  .flow { column-count: ${cols}; column-gap: 6mm; column-rule: 1px solid #e3d9c8; }
+  .ent { break-inside: avoid; display: flex; gap: 2mm; align-items: baseline;
+         font-size: 8.5pt; padding: 1mm 0; border-bottom: 1px dotted #ddd2bd; }
+  .ent .ar { font-weight: 700; flex: 0 0 auto; max-width: 48%; }
+  .ent .tr { color: #334; direction: auto; unicode-bidi: plaintext; margin-inline-start: auto; text-align: start; }
+  .ent.line { border-bottom: none; }
+  .ent.line .tr { margin-inline-start: 0; }
+  .lang { break-inside: auto; }
+  @media print { .sheet { page-break-after: always; } }
+</style></head><body>
+<div class="sheet"><img class="lh" src="${LETTERHEAD}" alt=""><div class="win">
+  <h1>${escapeHtml(title)}</h1>
+  <p class="sub">${escapeHtml(note || `${parts.length} لغة — ${fmtDate(new Date())}`)}</p>
+  ${sections}
+</div></div>
+<script>window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 350); });<\/script>
+</body></html>`);
+  w.document.close();
+  return true;
+}
+
+async function guideWord(parts, title, { note = '', cols, lines }) {
+  const { loadDocx } = await import('./export.js');
+  const docx = await loadDocx();
+  const { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun,
+    AlignmentType, WidthType, HeadingLevel } = docx;
+
+  const txt = (text, bold, rtl = true) => new TextRun({ text: String(text ?? ''), bold: !!bold, rightToLeft: rtl, size: 18 });
+  const cell = (children, width) => new TableCell({
+    width: { size: width, type: WidthType.PERCENTAGE },
+    children: [new Paragraph({ bidirectional: true, children })]
+  });
+
+  // صفوفٌ تُملأ عرضًا: عمودُ صفحةٍ بعد عمود
+  const chunk = (arr, n) => {
+    const per = Math.ceil(arr.length / n) || 1;
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(arr.slice(i * per, (i + 1) * per));
+    return out;
+  };
+
+  const children = [
+    new Paragraph({ alignment: AlignmentType.CENTER, bidirectional: true, heading: HeadingLevel.HEADING_2,
+      children: [new TextRun({ text: title, bold: true, rightToLeft: true })] }),
+    new Paragraph({ alignment: AlignmentType.CENTER, bidirectional: true,
+      children: [txt(note || `${parts.length} لغة — ${fmtDate(new Date())}`)] }),
+    new Paragraph({ text: '' })
+  ];
+
+  for (const p of parts) {
+    children.push(new Paragraph({ bidirectional: true, heading: HeadingLevel.HEADING_3,
+      children: [new TextRun({ text: `${p.name} (${p.pairs.length})`, bold: true, rightToLeft: true })] }));
+    const columns = chunk(p.pairs, cols);
+    const depth = Math.max(...columns.map(c => c.length), 0);
+    const perCol = Math.floor(100 / cols);
+    const rows = [];
+    for (let i = 0; i < depth; i++) {
+      const cells = [];
+      for (const col of columns) {
+        const pair = col[i];
+        if (!pair) { cells.push(cell([txt('')], perCol)); continue; }
+        cells.push(cell(lines
+          ? [txt(pair[0], true), txt(' — '), new TextRun({ text: String(pair[1]), size: 18 })]
+          : [txt(pair[0], true), txt('  '), new TextRun({ text: String(pair[1]), size: 18 })], perCol));
+      }
+      rows.push(new TableRow({ children: cells }));
+    }
+    if (rows.length) {
+      children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE },
+        visuallyRightToLeft: true, rows }));
+    }
+    children.push(new Paragraph({ text: '' }));
+  }
+
+  const doc = new Document({ sections: [{
+    properties: { page: { size: { width: `${PAGE.w}mm`, height: `${PAGE.h}mm` },
+      margin: { top: `${PAGE.top}mm`, bottom: `${PAGE.bottom}mm`, left: `${PAGE.side}mm`, right: `${PAGE.side}mm` } } },
+    children
+  }] });
+  const name = (title || 'الدليل').replace(/[\\/:*?"<>|]/g, ' ').trim().slice(0, 80) || 'الدليل';
+  downloadBlob(await Packer.toBlob(doc), `${name} ${STAMP()}.docx`);
+}
+
 // PDF: نافذة طباعة على كليشة الهيئة — المتصفح يحفظها PDF
 export function exportPdf(rows, title = 'فريق الترجمة', opts = {}) {
   const w = window.open('', '_blank');

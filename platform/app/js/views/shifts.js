@@ -6,6 +6,7 @@ import { isAdmin } from '../store.js';
 import { SHIFT_STATUS, hhmm, lateText, DAY_NAMES, weekStart, addDays, today, monthLabel, monthStart, thisMonth } from '../pay.js';
 import { exportExcel, exportPdf } from '../teamexport.js';
 import { pickColumns, narrowSheet } from '../columns.js';
+import { monthField } from '../monthpicker.js';
 
 const SPOTS = ['المسجد الحرام — المسعى', 'المسجد الحرام — صحن المطاف', 'المسجد الحرام — التوسعة',
   'المسجد النبوي — باب السلام', 'المسجد النبوي — الساحات', 'مكتب الإرشاد'];
@@ -398,7 +399,7 @@ async function todaySection() {
 // ---------------------------------------------------------------------
 async function monthSection() {
   const box = h('div.stack');
-  const month = h('input', { type: 'month', value: thisMonth(), 'aria-label': 'شهر التقرير' });
+  const month = monthField({ value: thisMonth(), label: 'شهر التقرير' });
   const body = h('div.stack');
   month.onchange = () => load();
 

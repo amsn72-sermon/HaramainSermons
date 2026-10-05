@@ -5,6 +5,7 @@ import { db } from './sb.js';
 import { monthStart, thisMonth } from './pay.js';
 import { buildXlsx, downloadBlob } from './xlsx.js';
 import { pickColumns, narrowSheet } from './columns.js';
+import { monthField } from './monthpicker.js';
 
 const VAT = 0.15;          // ضريبة القيمة المضافة كما في الكراسة
 
@@ -27,7 +28,7 @@ export async function opsSection() {
   let lastSheet = null;
   const box = h('div.stack');
 
-  const monthInput = h('input', { type: 'month', value: month, 'aria-label': 'شهر التقرير' });
+  const monthInput = monthField({ value: month, label: 'شهر التقرير' });
   monthInput.onchange = () => { month = monthInput.value || thisMonth(); draw(); };
 
   // التقريرُ موحَّدٌ لا يُفصَل، والاختيارُ عند التصدير وحده (ملاحظة ٢١٦)

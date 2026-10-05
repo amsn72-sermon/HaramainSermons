@@ -2676,11 +2676,12 @@ begin
     jsonb_build_object('term_ar','الإحسان','category','عقدي','explanation','أن تعبد الله كأنك تراه.',
       'translations', jsonb_build_array(jsonb_build_object('language_code','en','term_tr','Ihsan'))),
     jsonb_build_object('term_ar','الصلاة','category','فقهي','explanation','الفريضة المفتتحة بالتكبير.'),
-    jsonb_build_object('term_ar','بلا شرح'),
+    jsonb_build_object('term_ar','بلا شرح'),        -- يدخل الآن: الشرحُ اختياري (ملاحظة ٢٤٤)
+    jsonb_build_object('term_ar',''),                -- وهذا وحدَه يُتخطّى: بلا مصطلح
     jsonb_build_object('term_ar','التقوى','category','عقدي','explanation','شرحٌ محدَّث للتقوى.',
       'translations', jsonb_build_array(jsonb_build_object('language_code','ur','term_tr','تقویٰ')))
   ));
-  if v.added <> 2 then raise exception 'FAIL: المضاف (%)', v.added; end if;
+  if v.added <> 3 then raise exception 'FAIL: المضاف (%)', v.added; end if;
   if v.updated <> 1 then raise exception 'FAIL: المحدَّث (%)', v.updated; end if;
   if v.skipped <> 1 then raise exception 'FAIL: المتخطَّى (%)', v.skipped; end if;
   if (select explanation from public.glossary_terms where term_ar = 'التقوى') <> 'شرحٌ محدَّث للتقوى.' then
@@ -2693,7 +2694,10 @@ begin
         (select id from public.glossary_terms where term_ar = 'التقوى')) <> 2 then
     raise exception 'FAIL: المقابل المستورَد لم يُضف إلى ما سبق';
   end if;
-  raise notice 'PASS: الاستيراد يضيف الجديد ويحدّث الموجود ويتخطّى الناقص، ولا يعتمد شيئًا';
+  if (select explanation from public.glossary_terms where term_ar = 'بلا شرح') is not null then
+    raise exception 'FAIL: اختُلق شرحٌ لمصطلحٍ بلا شرح';
+  end if;
+  raise notice 'PASS: الاستيراد يضيف الجديد ويحدّث الموجود، ويقبل القاموسَ بلا شرح، ولا يتخطّى إلا ما لا مصطلحَ فيه';
 
   -- ومشرف الهيئة لا يستورد
   perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000aa', true);
@@ -6035,4 +6039,158 @@ begin
   end if;
 
   raise notice 'PASS: تفريقُ الفريق بعد التحديث، فلا يصطدم التحديثُ الشاملُ بنفسه';
+end $$;
+
+-- =====================================================================
+-- ٦٨) استيرادُ الدليل: الشرحُ اختياريٌّ والتصنيفاتُ الثمانية (ملاحظة ٢٤٤)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        r record; v_id uuid;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  delete from public.glossary_terms where term_ar in ('المسعى', 'الحطيم', 'يوم التروية');
+
+  -- قاموسٌ بلا شروح: كان يُتخطّى كلُّه
+  select * into r from public.import_glossary('[
+    {"term_ar":"المسعى","category":"مناسك","explanation":"",
+     "translations":[{"language_code":"en","term_tr":"The Sa‘i area"},
+                     {"language_code":"ur","term_tr":"مسعی"}]},
+    {"term_ar":"الحطيم","category":"مناسك","explanation":"",
+     "translations":[{"language_code":"en","term_tr":"al-Hatim"}]},
+    {"term_ar":"","category":"عام","explanation":"","translations":[]}
+  ]'::jsonb, 'add');
+
+  if r.added <> 2 then raise exception 'FAIL: أُضيف % لا اثنان', r.added; end if;
+  if r.skipped <> 1 then raise exception 'FAIL: لم يُتخطَّ الصفُّ بلا مصطلح'; end if;
+  if r.translations <> 3 then raise exception 'FAIL: كُتب % مقابلًا لا ثلاثة', r.translations; end if;
+
+  -- التصنيفُ الثامنُ يُحفظ كما هو، ولا يُحوَّل إلى «عام»
+  if (select category from public.glossary_terms where term_ar = 'المسعى') <> 'مناسك' then
+    raise exception 'FAIL: حُوّل تصنيفُ «مناسك» إلى غيره';
+  end if;
+
+  -- «أضِفْ» لا يمحو مقابلًا قائمًا
+  select * into r from public.import_glossary('[
+    {"term_ar":"المسعى","translations":[{"language_code":"en","term_tr":"Mas‘a"}]}
+  ]'::jsonb, 'add');
+  if (select term_tr from public.glossary_translations t
+        join public.glossary_terms g on g.id = t.term_id
+       where g.term_ar = 'المسعى' and t.language_code = 'en') <> 'The Sa‘i area' then
+    raise exception 'FAIL: محا وضعُ «أضِف» المقابلَ القائم';
+  end if;
+
+  -- و«استبدِلْ» يحلُّ محلَّه
+  select * into r from public.import_glossary('[
+    {"term_ar":"المسعى","translations":[{"language_code":"en","term_tr":"Mas‘a"}]}
+  ]'::jsonb, 'replace');
+  if (select term_tr from public.glossary_translations t
+        join public.glossary_terms g on g.id = t.term_id
+       where g.term_ar = 'المسعى' and t.language_code = 'en') <> 'Mas‘a' then
+    raise exception 'FAIL: لم يستبدل وضعُ «استبدِل» المقابل';
+  end if;
+
+  -- لغةٌ غير مسجَّلة تُعَدّ ولا تُكتب
+  select * into r from public.import_glossary('[
+    {"term_ar":"يوم التروية","translations":[{"language_code":"xx","term_tr":"Zzz"}]}
+  ]'::jsonb, 'add');
+  if r.bad_lang <> 1 then raise exception 'FAIL: لم تُعَدّ اللغةُ غيرُ المسجَّلة'; end if;
+
+  delete from public.glossary_terms where term_ar in ('المسعى', 'الحطيم', 'يوم التروية');
+  raise notice 'PASS: استيرادُ الدليل يقبل القاموسَ بلا شرح، ويحفظ التصنيفاتِ الثمانية، ويفرّق بين الإضافة والاستبدال';
+end $$;
+
+-- =====================================================================
+-- ٦٩) اللغةُ الأمُّ ولغاتُ الإسناد والدورُ الافتراضي (ملاحظتا ٢٤٩ و٢٥٠)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_tr  uuid := '00000000-0000-0000-0000-00000000000c';
+        n int; v_ok boolean;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+
+  perform public.set_native_lang(v_tr, 'en');
+  if (select native_lang from public.profiles where id = v_tr) <> 'en' then
+    raise exception 'FAIL: لم تُحفظ اللغة الأم';
+  end if;
+  -- واللغةُ الأمُّ معتمدةٌ للإسناد من غير إجراء
+  if not public.may_assign_lang(v_tr, 'en') then
+    raise exception 'FAIL: اللغةُ الأمُّ غيرُ معتمدةٍ للإسناد';
+  end if;
+
+  -- لغةٌ يُتقنها ولم تُعتمد له: لا يُسنَد إليه فيها
+  perform public.set_member_langs(v_tr, array['en', 'fr']);
+  perform public.set_assignable_langs(v_tr, array['en']);
+  if public.may_assign_lang(v_tr, 'fr') then
+    raise exception 'FAIL: أُسنِد في لغةٍ لم تُعتمد له';
+  end if;
+
+  -- الدورُ الافتراضيُّ والأولوية
+  perform public.set_lang_role(v_tr, 'en', 'translation', 1);
+  if (select default_stage from public.member_languages
+       where member_id = v_tr and language_code = 'en') <> 'translation' then
+    raise exception 'FAIL: لم يُحفظ الدورُ الافتراضي';
+  end if;
+
+  -- جدولُ اللغة يعرضه بصفته صاحبَ اللسان
+  select count(*) into n from public.lang_roster('en') where member_id = v_tr and native;
+  if n <> 1 then raise exception 'FAIL: لم يظهر في جدول لغته بصفة «أمّ»'; end if;
+
+  -- والاقتراحُ يرشّحه لمرحلته
+  select exists (select 1 from public.suggest_assignees('en')
+                  where stage_key = 'translation' and member_id = v_tr) into v_ok;
+  if not v_ok then raise exception 'FAIL: لم يُرشَّح صاحبُ الدور الافتراضي'; end if;
+
+  -- وحفظُ اللغات من شاشة الفريق لا يمحو الاعتماد ولا الدور
+  perform public.admin_update_member(v_tr, null, null, array['en', 'fr']);
+  if not public.may_assign_lang(v_tr, 'en') then
+    raise exception 'FAIL: محا حفظُ اللغات اعتمادَ الإسناد';
+  end if;
+  if (select default_stage from public.member_languages
+       where member_id = v_tr and language_code = 'en') <> 'translation' then
+    raise exception 'FAIL: محا حفظُ اللغات الدورَ الافتراضي';
+  end if;
+
+  -- والمترجمُ لا يعتمد لنفسه لغةَ إسناد
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  begin
+    perform public.set_assignable_langs(v_tr, array['en', 'fr']);
+    raise exception 'FAIL: اعتمد المترجمُ لنفسه لغةَ إسناد';
+  exception when sqlstate '42501' then null;
+  end;
+  -- ولكنّه يضع لغتَه الأمَّ بنفسه
+  perform public.set_native_lang(v_tr, 'en');
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_assignable_langs(v_tr, array['en', 'fr']);
+  raise notice 'PASS: اللغةُ الأمُّ إلزامُها للعضو، ولغاتُ الإسناد بيد الإدارة، والدورُ الافتراضيُّ يرشّح';
+end $$;
+
+-- =====================================================================
+-- ٧٠) حالُ النسخ الاحتياطية يراه مديرُ المشروع وحدَه (ملاحظة ٢٤٧)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_tr  uuid := '00000000-0000-0000-0000-00000000000c';
+        r record; n int;
+begin
+  delete from public.backup_runs;
+  perform public.log_backup_run(true, 900000, 70000000, 'haramain-backups', null);
+  perform public.log_backup_run(false, null, null, 'haramain-backups', 'انقطع الرفع');
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select * into r from public.backup_state();
+  if r.last_ok is null then raise exception 'FAIL: لم تُقرأ آخرُ نسخةٍ ناجحة'; end if;
+  if r.db_bytes <> 900000 then raise exception 'FAIL: حجمُ قاعدة البيانات غيرُ صحيح'; end if;
+  if r.fails <> 1 then raise exception 'FAIL: لم تُعَدّ المحاولةُ الفاشلة'; end if;
+  if r.last_run_ok then raise exception 'FAIL: آخرُ تشغيلٍ كان فاشلًا ولم يُعلَم'; end if;
+
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  select count(*) into n from public.backup_state();
+  if n <> 0 then raise exception 'FAIL: رأى المترجمُ حالَ النسخ'; end if;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  delete from public.backup_runs;
+  raise notice 'PASS: حالُ النسخ الاحتياطية بيّنٌ لمدير المشروع، محجوبٌ عن غيره';
 end $$;

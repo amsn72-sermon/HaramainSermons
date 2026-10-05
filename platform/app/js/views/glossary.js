@@ -3,9 +3,9 @@
 //   الرجوع إليه إلزامي عند لبس المصطلح.
 import { h, dialog, toast, busy, fmtDate, req, markBad } from '../ui.js';
 import { db } from '../sb.js';
-import { state, langName, isAdmin, isManager } from '../store.js';
+import { state, langName, langByName, isAdmin, isManager } from '../store.js';
 import { icon } from '../icons.js';
-import { buildXlsx, downloadBlob, readSheet } from '../xlsx.js';
+import { buildXlsx, buildXlsxBook, downloadBlob, readWorkbook } from '../xlsx.js';
 
 // أقسامٌ أوسعُ ممّا كان: المصطلحُ الشرعي، وتوجيهاتُ الإرشاد، والمناسك،
 // والأعلامُ التي تُنقل ولا تُترجم، والتعبيرُ القرآني (ملاحظة ٢٣٤)
@@ -290,6 +290,191 @@ export async function contribCard({ own = false } = {}) {
       : h('p.muted', 'لا مشاركاتٍ بعد.'));
 }
 
+// ---------------------------------------------------------------------
+// الاستيراد من ملف (ملاحظة ٢٤٤)
+//   يقرأ شكلين: ورقةً واحدةً أعمدتُها اللغات، أو ورقةً لكلِّ لغةٍ يدلُّ
+//   اسمُها على لسانها — وهو شكلُ القواميس. ويعرض ما فهمه قبل أن يُدخله.
+// ---------------------------------------------------------------------
+const arKey = s => String(s ?? '')
+  .replace(/[ً-ْـ‏‎]/g, '')
+  .replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
+  .replace(/[^ء-ي\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+const cell = v => String(v ?? '').replace(/[‏‎]/g, '').replace(/\s+/g, ' ').trim();
+
+// رأسُ الورقة: يُبحث عنه في أول ستة صفوف، فالقواميسُ تضع عنوانًا فوقه
+function findHead(rows) {
+  for (let i = 0; i < Math.min(6, rows.length); i++) {
+    const cells = (rows[i] || []).map(cell);
+    const has = t => cells.some(c => c === t || c.includes(t));
+    if (has('المصطلح') || (has('العربية') && has('الترجمة'))) {
+      return { at: i, cells };
+    }
+  }
+  return null;
+}
+
+export function parseGlossaryBook(book) {
+  const sheets = [];        // تقريرٌ لكلِّ ورقة
+  const terms = new Map();  // مفتاحُ المصطلح ← صفُّه
+
+  const put = (termRaw, { category = '', explanation = '', code = null, tr = '' }) => {
+    const term = cell(termRaw);
+    if (!term) return false;
+    const k = arKey(term);
+    if (!k) return false;
+    let row = terms.get(k);
+    if (!row) { row = { term_ar: term, category: '', explanation: '', tr: {} }; terms.set(k, row); }
+    if (category && !row.category) row.category = category;
+    if (explanation && !row.explanation) row.explanation = explanation;
+    if (code && tr) {
+      const list = row.tr[code] || (row.tr[code] = []);
+      if (!list.includes(tr)) list.push(tr);     // صياغتان للمصطلح نفسِه: تُجمعان
+    }
+    return true;
+  };
+
+  for (const sh of book) {
+    const head = findHead(sh.rows);
+    if (!head) { sheets.push({ name: sh.name, kind: 'skip', why: 'بلا رأسٍ معروف', count: 0 }); continue; }
+    const body = sh.rows.slice(head.at + 1);
+    const idx = t => head.cells.findIndex(c => c === t);
+
+    const iTerm = idx('المصطلح');
+    if (iTerm >= 0) {
+      // الشكل أ: ورقةٌ واحدة، عمودٌ لكلِّ لغة
+      const iCat = idx('التصنيف'), iExp = idx('الشرح');
+      const cols = [];
+      head.cells.forEach((c, i) => {
+        if (i === iTerm || i === iCat || i === iExp) return;
+        const code = langByName(c);
+        if (code) cols.push([i, code]);
+      });
+      let n = 0;
+      for (const r of body) {
+        const t = cell(r[iTerm]);
+        if (!t) continue;
+        let ok = put(t, { category: iCat >= 0 ? cell(r[iCat]) : '',
+          explanation: iExp >= 0 ? cell(r[iExp]) : '' });
+        for (const [i, code] of cols) {
+          const v = cell(r[i]);
+          if (v) put(t, { code, tr: v });
+        }
+        if (ok) n++;
+      }
+      sheets.push({ name: sh.name, kind: 'cols', codes: cols.map(c => c[1]), count: n });
+      continue;
+    }
+
+    // الشكل ب: ورقةٌ للغةٍ واحدة — «العربية» و«الترجمة»، واللغةُ من اسم الورقة
+    const iAr = head.cells.findIndex(c => c.includes('العربية') || c.includes('العربي'));
+    const iTr = head.cells.findIndex(c => c.includes('الترجمة') || c.includes('المقابل'));
+    const code = langByName(sh.name);
+    if (iAr < 0 || iTr < 0) {
+      sheets.push({ name: sh.name, kind: 'skip', why: 'لم يُعرف عمودا العربية والترجمة', count: 0 });
+      continue;
+    }
+    if (!code) {
+      sheets.push({ name: sh.name, kind: 'nolang', why: 'لم يُعرف لسانُ الورقة من اسمها', count: 0 });
+      continue;
+    }
+    let n = 0;
+    for (const r of body) {
+      const t = cell(r[iAr]);
+      if (!t) continue;
+      put(t, { code, tr: cell(r[iTr]) });
+      n++;
+    }
+    sheets.push({ name: sh.name, kind: 'lang', codes: [code], count: n });
+  }
+
+  const codes = [...new Set(sheets.flatMap(s => s.codes || []))];
+  return { sheets, codes, terms: [...terms.values()] };
+}
+
+async function importFile(file, reload) {
+  const book = await readWorkbook(file);
+  if (!book.length) return toast('الملف فارغ.', 'bad');
+  const parsed = parseGlossaryBook(book);
+  if (!parsed.terms.length) {
+    return toast('لم يُعثر على مصطلحات — راجع رؤوس الأعمدة، أو نزّل النموذج.', 'bad');
+  }
+
+  // اختيارُ اللغات المرفوعة (ملاحظة ٢٤٤ ط)
+  const boxes = parsed.codes.map(code => {
+    const cb = h('input', { type: 'checkbox', value: code, checked: true, 'aria-label': langName(code) });
+    const n = parsed.terms.filter(t => t.tr[code]?.length).length;
+    return { code, cb, el: h('label.check.col-pick', cb, h('span', langName(code)), h('span.badge', String(n))) };
+  });
+  const modeAdd = h('input', { type: 'radio', name: 'gl-imp-mode', value: 'add', checked: true, 'aria-label': 'إضافة' });
+  const modeRep = h('input', { type: 'radio', name: 'gl-imp-mode', value: 'replace', 'aria-label': 'استبدال' });
+
+  const kindLabel = s => (s.kind === 'cols' ? `أعمدةُ لغات (${s.codes.length})`
+    : s.kind === 'lang' ? langName(s.codes[0])
+      : s.kind === 'nolang' ? 'لم يُعرف لسانُها' : 'تُخطّيت');
+
+  const ok = await dialog({
+    title: 'استيراد المصطلحات',
+    body: h('div.stack',
+      h('p', h('b', `${parsed.terms.length} مصطلحًا`), ` من ${book.length} ورقة، وفيها `,
+        h('b', `${parsed.codes.length} لغة`), '.'),
+      h('div.table-wrap', h('table.responsive',
+        h('thead', h('tr', ['الورقة', 'ما فُهم منها', 'صفوف'].map(t => h('th', t)))),
+        h('tbody', parsed.sheets.map(s => h('tr',
+          h('td', { 'data-label': 'الورقة' }, s.name),
+          h('td', { 'data-label': 'ما فُهم منها' },
+            s.kind === 'skip' || s.kind === 'nolang'
+              ? h('span.badge.warn', s.why) : kindLabel(s)),
+          h('td', { 'data-label': 'صفوف' }, String(s.count))))))),
+      h('fieldset.stack', h('legend', 'اللغات التي تُرفع'),
+        h('div.col-picker', boxes.map(b => b.el))),
+      h('fieldset.stack', h('legend', 'المقابلُ الموجودُ سلفًا'),
+        h('label.check', modeAdd, h('span', 'أضِفْ ولا تمحُ — يبقى المقابلُ القديمُ حيث وُجد')),
+        h('label.check', modeRep, h('span', 'استبدِلْ — يحلُّ مقابلُ الملفِ محلَّ القديم'))),
+      h('p.small.muted', 'الجديدُ يُضاف بحال «مقترح» حتى تعتمده الإدارة. '
+        + 'والمصطلحُ المكرَّرُ بصياغتين تُجمع صياغتاه بينهما فاصلة.'),
+      h('ul.small', parsed.terms.slice(0, 5).map(t => h('li', h('b', t.term_ar), ' — ',
+        h('span.muted', Object.keys(t.tr).slice(0, 3).map(c => langName(c)).join(' · ') || 'بلا مقابل')))),
+      parsed.terms.length > 5 ? h('p.small.muted', `… و${parsed.terms.length - 5} غيرها`) : null),
+    buttons: [{ label: 'إلغاء', value: false }, { label: 'استيراد', kind: 'primary', value: true }]
+  });
+  if (!ok) return;
+
+  const keep = boxes.filter(b => b.cb.checked).map(b => b.code);
+  const rows = parsed.terms.map(t => ({
+    term_ar: t.term_ar,
+    category: t.category || '',
+    explanation: t.explanation || '',
+    translations: keep.filter(c => t.tr[c]?.length)
+      .map(c => ({ language_code: c, term_tr: t.tr[c].join(' / ') }))
+  }));
+
+  // دفعاتٌ لئلّا ينقطع الطلبُ في منتصفه (ملاحظة ٢٤٤ هـ)
+  const mode = modeRep.checked ? 'replace' : 'add';
+  const sum = { added: 0, updated: 0, skipped: 0, translations: 0, bad_lang: 0 };
+  const SIZE = 300;
+  for (let i = 0; i < rows.length; i += SIZE) {
+    const res = await db.rpc('import_glossary', { p_rows: rows.slice(i, i + SIZE), p_mode: mode });
+    const r = (Array.isArray(res) ? res[0] : res) || {};
+    for (const k of Object.keys(sum)) sum[k] += Number(r[k] || 0);
+  }
+
+  // تُحدَّث الشاشةُ قبل عرض التقرير، فيرى المستخدمُ أثرَه خلفَه لا بعدَه
+  if (reload) await reload();
+
+  await dialog({
+    title: 'تقريرُ الاستيراد',
+    body: h('div.stack',
+      h('ul', h('li', `أُضيف: `, h('b', String(sum.added))),
+        h('li', `حُدِّث: `, h('b', String(sum.updated))),
+        h('li', `مقابلاتٌ كُتبت: `, h('b', String(sum.translations))),
+        sum.skipped ? h('li', `تُخطّي: `, h('b', String(sum.skipped)), ' — صفوفٌ بلا مصطلحٍ عربي') : null,
+        sum.bad_lang ? h('li', `لغاتٌ غيرُ مسجَّلة: `, h('b', String(sum.bad_lang))) : null),
+      h('p.small.muted', 'الجديدُ بحال «مقترح» — يظهر في «مقترحاتٌ تنتظر النظر».')),
+    buttons: [{ label: 'تمام', kind: 'primary', value: true }]
+  });
+}
+
 export async function render() {
   const admin = isAdmin();
   let terms = await loadTerms();
@@ -385,7 +570,7 @@ export async function render() {
         ...state.languages.map(l => (l.code === 'en' ? 'Taqwa (God-consciousness)' : ''))],
       ['الصلاة', 'فقهي', 'الفريضة ذات الأقوال والأفعال المفتتحة بالتكبير المختتمة بالتسليم.',
         ...state.languages.map(() => '')]];
-    downloadBlob(buildXlsx(rows, { sheetName: 'المصطلحات', allText: true }), 'نموذج الدليل المصطلحي.xlsx');
+    downloadBlob(buildXlsx(rows, { sheetName: 'المصطلحات', allText: true }), 'نموذج الدليل الإرشادي للمصطلحات.xlsx');
     toast('نُزِّل النموذج — املأه ثم استورده.', 'ok');
   };
 
@@ -396,106 +581,148 @@ export async function render() {
     const file = fileIn.files[0];
     fileIn.value = '';
     if (!file) return;
-    try {
-      const sheet = await readSheet(file);
-      if (sheet.length < 2) return toast('الملف فارغ أو بلا صفوف بعد العناوين.', 'bad');
-      const head = sheet[0].map(v => String(v).trim());
-      const at = name => head.findIndex(x => x === name);
-      const iTerm = at('المصطلح'), iCat = at('التصنيف'), iExp = at('الشرح');
-      if (iTerm < 0 || iExp < 0) {
-        return toast('لم يُعثر على عمودي «المصطلح» و«الشرح» — نزّل النموذج والتزم عناوينه.', 'bad');
-      }
-      // أعمدة اللغات: تُطابَق باسم اللغة في العنوان
-      const langCols = [];
-      state.languages.forEach(l => { const i = at(langName(l.code)); if (i >= 0) langCols.push([i, l.code]); });
-
-      const rowsIn = sheet.slice(1).map(r => ({
-        term_ar: String(r[iTerm] ?? '').trim(),
-        category: iCat >= 0 ? String(r[iCat] ?? '').trim() : '',
-        explanation: String(r[iExp] ?? '').trim(),
-        translations: langCols.map(([i, code]) => ({ language_code: code, term_tr: String(r[i] ?? '').trim() }))
-          .filter(x => x.term_tr)
-      })).filter(x => x.term_ar);
-      if (!rowsIn.length) return toast('لا مصطلحات في الملف.', 'bad');
-
-      const ok = await dialog({
-        title: 'استيراد المصطلحات',
-        body: h('div.stack',
-          h('p', `في الملف ${rowsIn.length} مصطلحًا، و${langCols.length} عمود لغة.`),
-          h('p.small.muted', 'الموجود يُحدَّث شرحُه ومقابلاته، والجديد يُضاف بحال «مقترح» حتى تعتمده الإدارة.'),
-          h('ul.small', rowsIn.slice(0, 5).map(x => h('li', h('b', x.term_ar), ` — ${x.explanation.slice(0, 60)}`))),
-          rowsIn.length > 5 ? h('p.small.muted', `… و${rowsIn.length - 5} غيرها`) : null),
-        buttons: [{ label: 'إلغاء', value: false }, { label: 'استيراد', kind: 'primary', value: true }]
-      });
-      if (!ok) return;
-
-      const res = await db.rpc('import_glossary', { p_rows: rowsIn });
-      const r = Array.isArray(res) ? res[0] : res;
-      toast(`أُضيف ${r?.added ?? 0}، وحُدِّث ${r?.updated ?? 0}${r?.skipped ? `، وتُخطّي ${r.skipped} ناقصًا` : ''}.`, 'ok');
-      await reload();
-    } catch (err) { toast(err.message, 'bad'); }
+    try { await importFile(file, reload); } catch (err) { toast(err.message, 'bad'); }
   });
 
-  const fmtSel = h('select', { 'aria-label': 'صيغة التصدير' },
-    h('option', { value: 'xlsx' }, 'Excel — جدول بيانات'),
-    h('option', { value: 'pdf' }, 'PDF على كليشة الهيئة'));
-  const expBtn = h('button.btn.sm', { type: 'button' }, 'تصدير الدليل');
-  expBtn.onclick = () => busy(expBtn, async () => {
-    const l = filtered();
-    const codes = state.languages.map(x => x.code);
-    const out = [['المصطلح', 'التصنيف', 'الشرح', 'الحال', ...codes.map(c => langName(c))]];
-    for (const r of l) {
-      out.push([r.term_ar, r.category, r.explanation, r.status,
-        ...codes.map(c => r.translations.find(t => t.language_code === c)?.term_tr || '')]);
-    }
-    const title = 'الدليل المصطلحي الشرعي الموحَّد';
+  // ---------------- التصدير (ملاحظة ٢٤٥ ج) ----------------
+  //   المصطلحُ ومقابلُه لا غير — فالدليلُ يُقرأ لا يُدار. ولغةٌ أو بعضٌ
+  //   أو الكلُّ، وورقةٌ لكلِّ لغة، وجدولٌ أو سطور، وعددُ أعمدةِ الصفحة.
+  const expBtn = h('button.btn.sm', { type: 'button' }, '⤓ تصدير الدليل');
+  expBtn.onclick = () => busy(expBtn, () => exportGuide(filtered()));
+  const exportGuide = async (rows) => {
+    const avail = state.languages.filter(l => rows.some(r =>
+      r.translations.some(t => t.language_code === l.code && t.term_tr)));
+    if (!avail.length) return toast('لا مقابلاتٍ في المعروض لتُصدَّر.', 'bad');
+
+    const boxes = avail.map(l => {
+      const n = rows.filter(r => r.translations.some(t => t.language_code === l.code && t.term_tr)).length;
+      const cb = h('input', { type: 'checkbox', value: l.code,
+        checked: (!f.lang.value || f.lang.value === l.code) ? true : null, 'aria-label': l.name_ar });
+      return { code: l.code, cb, el: h('label.check.col-pick', cb, h('span', l.name_ar), h('span.badge', String(n))) };
+    });
+    const all = h('button.btn.xs', { type: 'button', onclick: () => boxes.forEach(b => { b.cb.checked = true; }) }, 'كل اللغات');
+    const none = h('button.btn.xs.ghost', { type: 'button', onclick: () => boxes.forEach(b => { b.cb.checked = false; }) }, 'ألغِ');
+
+    const shape = h('select', { 'aria-label': 'شكل العرض' },
+      h('option', { value: 'table' }, 'جدول — عمودان: العربية والمقابل'),
+      h('option', { value: 'lines' }, 'سطور — المصطلح — المقابل'));
+    const cols = h('select', { 'aria-label': 'أعمدة الصفحة' },
+      h('option', { value: '1' }, 'عمودٌ واحد'),
+      h('option', { value: '2', selected: true }, 'عمودان'),
+      h('option', { value: '3' }, 'ثلاثة أعمدة'));
+    const fmt = h('select', { 'aria-label': 'الصيغة' },
+      h('option', { value: 'xlsx' }, 'Excel — ورقةٌ لكلِّ لغة'),
+      h('option', { value: 'docx' }, 'Word — مستند'),
+      h('option', { value: 'pdf' }, 'PDF على كليشة الهيئة'));
+
+    const res = await dialog({
+      title: 'تصدير الدليل الإرشادي',
+      body: h('div.stack',
+        h('p.small.muted', 'يخرج المصطلحُ ومقابلُه لا غير — بلا تصنيفٍ ولا شرحٍ ولا حال.'),
+        h('fieldset.stack', h('legend', 'اللغات'),
+          h('div.row.between', h('span.small.muted', `${avail.length} لغةً فيها مقابلات`),
+            h('div.row', all, none)),
+          h('div.col-picker', boxes.map(b => b.el))),
+        h('div.grid-2',
+          h('label.field', 'شكل العرض', shape),
+          h('label.field', 'أعمدة الصفحة', cols),
+          h('label.field', 'الصيغة', fmt))),
+      buttons: [
+        { label: 'صدّر', kind: 'primary',
+          validate: () => (boxes.some(b => b.cb.checked) ? true : 'اختر لغةً واحدةً على الأقل'),
+          value: () => ({ codes: boxes.filter(b => b.cb.checked).map(b => b.code),
+            shape: shape.value, cols: Number(cols.value), fmt: fmt.value }) },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
+
+    const title = 'الدليل الإرشادي للمصطلحات';
+    const note = 'الرجوع إليه إلزامي عند لبس المصطلح — كما في العقد.';
+    const pairs = code => rows
+      .map(r => [r.term_ar, r.translations.find(t => t.language_code === code)?.term_tr || ''])
+      .filter(p => p[1]);
+
     try {
-      if (fmtSel.value === 'xlsx') downloadBlob(buildXlsx(out, { sheetName: 'المصطلحات', allText: true }), `${title}.xlsx`);
-      else {
-        const { exportPdf } = await import('../teamexport.js');
-        if (!exportPdf(out, title, { note: 'الرجوع إليه إلزامي عند لبس المصطلح — كما في العقد.' })) {
-          return toast('اسمح بالنوافذ المنبثقة.', 'bad');
-        }
+      if (res.fmt === 'xlsx') {
+        const sheets = res.codes.map(c => ({
+          name: langName(c),
+          rows: [['المصطلح', langName(c)], ...pairs(c)]
+        }));
+        downloadBlob(buildXlsxBook(sheets, { allText: true }),
+          `${title}${res.codes.length === 1 ? ` — ${langName(res.codes[0])}` : ''}.xlsx`);
+      } else {
+        const { exportGuideDoc } = await import('../teamexport.js');
+        const parts = res.codes.map(c => ({ code: c, name: langName(c), pairs: pairs(c) }));
+        const done = await exportGuideDoc(parts, title,
+          { note, shape: res.shape, cols: res.cols, pdf: res.fmt === 'pdf' });
+        if (!done) return toast('اسمح بالنوافذ المنبثقة للطباعة.', 'bad');
       }
       toast('جرى التصدير.', 'ok');
     } catch (err) { toast(err.message, 'bad'); }
-  });
-
-  // ---------------- بطاقاتُ اللغات (ملاحظة ٢٣٤) ----------------
-  // عند الدخول: بطاقةٌ لكلِّ لغةٍ أساسية، وفي كلٍّ ما تمَّ وما نقص.
-  // وتُضاف بطاقاتُ ما سواها متى احتيج إليها.
-  const cards = h('div.gl-cards');
-  const drawCards = (rows) => {
-    const core = rows.filter(r => r.is_core);
-    const rest = rows.filter(r => !r.is_core && (r.done || r.missing === 0));
-    const mk = (r) => {
-      const b = h('button.gl-card' + (f.lang.value === r.code ? '.on' : ''), { type: 'button' },
-        h('b', r.name_ar), h('span.gl-native', { dir: r.dir || 'ltr' }, r.native_name),
-        h('span.sub', `${r.done} مصطلحًا`),
-        r.missing ? h('span.sub.warn', `ينقص ${r.missing}`) : h('span.sub', 'مكتملة'));
-      b.onclick = () => {
-        f.lang.value = f.lang.value === r.code ? '' : r.code;
-        drawCards(rows); draw();
-      };
-      return b;
-    };
-    const more = h('button.gl-card.gl-more', { type: 'button' },
-      icon('globe', { size: 22 }), h('b', '＋ لغة أخرى'),
-      h('span.sub', 'من اللغات المسجَّلة'));
-    more.onclick = async () => {
-      const sel = h('select', { 'aria-label': 'اللغة' },
-        rows.filter(r => !r.is_core).map(r => h('option', { value: r.code }, r.name_ar)));
-      const ok = await dialog({ title: 'بطاقةُ لغةٍ أخرى',
-        body: h('div.stack', h('p.small.muted', 'تُفتح بطاقةُ اللغة فتُملأ مصطلحاتُها.'),
-          h('label.field', 'اللغة', sel)),
-        buttons: [{ label: 'افتح', kind: 'primary', value: () => sel.value },
-          { label: 'إلغاء', value: null }] });
-      if (!ok) return;
-      f.lang.value = ok; drawCards(rows); draw();
-    };
-    cards.replaceChildren(...core.map(mk), ...rest.map(mk), more);
   };
-  db.rpc('glossary_cards').then(drawCards).catch(() => {});
+
+  // ---------------- بطاقاتُ اللغات (ملاحظتا ٢٣٤ و٢٤٥) ----------------
+  // الأساسيةُ ظاهرةٌ دائمًا، وما سواها لا يظهر إلا بمصطلحاته. وبتصميم
+  // شاشة «اللغات» نفسِه: الاسمُ بالعربية وتحتَه اسمُها بلسانها.
+  const cards = h('div.lang-grid.gl-grid');
+  const cardsBar = h('div.row.between.gl-bar');
+  let langRows = [];
+  let showEmpty = false;
+
+  const mkCard = (r) => {
+    const on = f.lang.value === r.code;
+    const el = h('button.lang-card', {
+      type: 'button',
+      class: [r.is_core ? 'core' : '', on ? 'on' : '', (!r.done && !r.is_core) ? 'off' : ''].filter(Boolean).join(' '),
+      title: on ? 'اضغط لإلغاء التصفية' : `اعرض مصطلحات ${r.name_ar}`
+    },
+      h('div.row.between', h('b', r.name_ar), h('span.lang-code', { dir: 'ltr' }, r.code)),
+      h('span.lang-native', { dir: r.dir || 'ltr' }, r.native_name || ''),
+      h('div.row.between',
+        r.done ? h('span.small.muted', `${r.done} مصطلحًا`) : h('span.small.muted', 'لا مصطلح بعد'),
+        r.missing ? h('span.badge.warn', `ينقص ${r.missing}`)
+          : h('span.badge' + (r.done ? '.ok' : ''), r.done ? 'مكتملة' : '—')));
+    el.onclick = () => {
+      f.lang.value = on ? '' : r.code;
+      drawCards(); draw();
+    };
+    return el;
+  };
+
+  const drawCards = () => {
+    const core = langRows.filter(r => r.is_core);
+    const rest = langRows.filter(r => !r.is_core && (showEmpty || r.done > 0 || f.lang.value === r.code));
+    const hidden = langRows.filter(r => !r.is_core).length - rest.length;
+
+    const toggle = h('button.btn.xs' + (showEmpty ? '.primary' : '.ghost'), { type: 'button' },
+      showEmpty ? 'أخفِ اللغات الفارغة' : `أظهر اللغات الفارغة${hidden ? ` (${hidden})` : ''}`);
+    toggle.onclick = () => { showEmpty = !showEmpty; drawCards(); };
+
+    const add = h('button.btn.xs', { type: 'button' }, '＋ إضافة لغة');
+    add.onclick = async () => {
+      const sel = h('select', { 'aria-label': 'اللغة' },
+        langRows.filter(r => !r.is_core && !r.done).map(r => h('option', { value: r.code }, r.name_ar)));
+      const ok = await dialog({
+        title: 'افتح بطاقةَ لغة',
+        body: h('div.stack',
+          h('p.small.muted', 'تُفتح بطاقةُ اللغة فتُملأ مصطلحاتُها، وتبقى ظاهرةً بعد أول مصطلح. '
+            + 'وإضافةُ لغةٍ جديدةٍ إلى المنصة من شاشة «اللغات».'),
+          h('label.field', 'اللغة', sel)),
+        buttons: [{ label: 'افتح', kind: 'primary', value: () => sel.value }, { label: 'إلغاء', value: null }]
+      });
+      if (!ok) return;
+      f.lang.value = ok; showEmpty = true; drawCards(); draw();
+    };
+
+    cardsBar.replaceChildren(
+      h('span.small.muted', `${core.length + rest.length} لغةً معروضة`
+        + (f.lang.value ? ` — التصفيةُ على ${langName(f.lang.value)}` : '')),
+      h('div.row', toggle, add));
+    cards.replaceChildren(...core.map(mkCard), ...rest.map(mkCard));
+  };
+
+  db.rpc('glossary_cards').then(rows => { langRows = rows || []; drawCards(); }).catch(() => {});
 
   // ---------------- ما ينتظر الاعتماد ----------------
   const queue = h('div.stack');
@@ -548,15 +775,17 @@ export async function render() {
   return h('div',
     h('div.page-head',
       h('div.row.wrap', { style: { marginInlineStart: 'auto', order: 2 } },
-        fmtSel, expBtn, tmplBtn, impBtn, fileIn, addBtn),
-      h('div.grow', h('div.eyebrow', 'المرجع'), h('h1', 'الدليل المصطلحي الشرعي'),
+        expBtn, tmplBtn, impBtn, fileIn, addBtn),
+      h('div.grow', h('div.eyebrow', 'المرجع'), h('h1', 'الدليل الإرشادي للمصطلحات'),
         h('p.muted', 'مصطلحٌ واحد ومقابلٌ واحد في كل لغة، فلا يختلف المترجمون في لفظٍ شرعي. '
           + 'والرجوع إليه إلزامي عند لبس المصطلح.'))),
     h('div.card.stack.gl-open',
       h('b', 'الدليل يُبنى بالفريق كله'),
       h('p.small.muted', 'لكل عضو أن يضيف مصطلحًا أو يستورد ملفًّا، ويُحفظ بحال «مقترح» '
         + 'حتى يعتمده المنسق أو مدير المشروع فيصير هو المعتمد. '
-        + 'وللاستيراد نزّل النموذج، واكتب في أعمدته: المصطلح · التصنيف · الشرح · ثم عمودًا لكل لغة باسمها.')),
+        + 'والاستيرادُ يقبل شكلين: ورقةً واحدةً أعمدتُها اللغات، أو ورقةً لكلِّ لغةٍ '
+        + 'يدلُّ اسمُها على لسانها — وهو شكلُ القواميس.')),
+    cardsBar,
     cards,
     queue,
     h('div.card.stack',
@@ -590,7 +819,7 @@ export async function glossaryPanel() {
   q.addEventListener('input', draw);
   draw();
   return dialog({
-    title: 'الدليل المصطلحي الشرعي',
+    title: 'الدليل الإرشادي للمصطلحات',
     body: h('div.stack', q, out,
       h('p.small.muted', 'الرجوع إلى الدليل إلزامي عند لبس المصطلح، كما في العقد.')),
     buttons: [{ label: 'إغلاق', value: null }]

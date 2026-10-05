@@ -210,6 +210,37 @@ export async function render(ctx) {
   };
   const selected = () => rows.filter(r => picked.has(r.id));
 
+  // بطاقةٌ مستطيلةٌ لكلِّ عمل، والأعمالُ مجموعةٌ بالنوع (ملاحظة ٢٥٣)
+  function workCard(r) {
+    const cb = h('input', { type: 'checkbox', checked: picked.has(r.id) ? true : null,
+      'aria-label': `تحديد ${r.title}` });
+    cb.onchange = () => { cb.checked ? picked.add(r.id) : picked.delete(r.id); drawBar(); drawHeads(); };
+    const langs = (r.languages || '').split(',').filter(Boolean).map(c => langName(c) || c);
+    return h('article.repo-card' + (picked.has(r.id) ? '.on' : ''),
+      h('label.repo-pick', cb),
+      h('span.repo-ico', typeIcon(r.sermon_type && r.material_type === 'خطب' ? 'خطب' : r.material_type, { size: 22 })),
+      h('div.repo-main',
+        h('b.repo-title', r.title || '—'),
+        h('div.repo-meta',
+          h('span', r.sermon_type || r.material_type),
+          h('span', MOSQUE[r.mosque] || '—'),
+          r.work_date ? h('span', fmtHijri(r.work_date), ' · ', fmtDate(r.work_date)) : null,
+          r.khateeb_name ? h('span', r.khateeb_name) : null),
+        langs.length ? h('div.repo-langs', langs.map(n => h('span.badge', n)))
+          : h('span.small.muted', 'بلا لغاتٍ مسجَّلة')),
+      mayEdit ? h('div.row.repo-acts',
+        h('button.btn.xs', { type: 'button', onclick: () => workDialog(r) }, 'تعديل'),
+        h('button.btn.xs.ghost', { type: 'button', onclick: () => removeWork(r) }, 'حذف')) : null);
+  }
+
+  const heads = new Map();          // النوع ← مربّعُ تحديدِ مجموعته
+  const drawHeads = () => {
+    for (const [type, box] of heads) {
+      const g = shown().filter(r => (r.material_type || 'غير ذلك') === type);
+      box.checked = g.length > 0 && g.every(r => picked.has(r.id));
+    }
+  };
+
   function draw() {
     const list = shown();
     const allOn = list.length > 0 && list.every(r => picked.has(r.id));
@@ -220,26 +251,40 @@ export async function render(ctx) {
       draw(); drawBar();
     };
 
+    // الترتيبُ بالنوع كما في بطاقات الأنواع، ثم ما خرج عنها
+    const order = [...MATERIAL_TYPES, 'غير ذلك'];
+    const groups = new Map();
+    for (const r of list) {
+      const t = MATERIAL_TYPES.includes(r.material_type) ? r.material_type : 'غير ذلك';
+      if (!groups.has(t)) groups.set(t, []);
+      groups.get(t).push(r);
+    }
+    heads.clear();
+
+    const sections = order.filter(t => groups.has(t)).map(t => {
+      const g = groups.get(t);
+      const box = h('input', { type: 'checkbox',
+        checked: g.every(r => picked.has(r.id)) ? true : null,
+        'aria-label': `حدّد ${t}` });
+      box.onchange = () => {
+        g.forEach(r => (box.checked ? picked.add(r.id) : picked.delete(r.id)));
+        draw(); drawBar();
+      };
+      heads.set(t, box);
+      return h('section.repo-group',
+        h('div.repo-group-head',
+          h('label.repo-pick', box),
+          typeIcon(t, { size: 20 }), h('b', t),
+          h('span.badge', `${g.length} عملًا`)),
+        h('div.repo-cards', g.map(workCard)));
+    });
+
     table.replaceChildren(
-      h('p.small.muted', `${list.length} عملًا من ${rows.length}`),
-      list.length ? h('div.table-wrap', h('table.responsive',
-        h('thead', h('tr', h('th', head),
-          ...['العنوان', 'النوع', 'المسجد', 'التاريخ', 'اللغات', ''].map(t => h('th', t)))),
-        h('tbody', list.map(r => h('tr',
-          h('td', h('input', { type: 'checkbox', checked: picked.has(r.id) ? true : null,
-            'aria-label': `تحديد ${r.title}`,
-            onchange: e => { e.target.checked ? picked.add(r.id) : picked.delete(r.id); drawBar(); } })),
-          h('td', { 'data-label': 'العنوان' }, h('b', r.title),
-            r.khateeb_name ? h('span.sub', r.khateeb_name) : null),
-          h('td', { 'data-label': 'النوع' }, r.sermon_type || r.material_type),
-          h('td', { 'data-label': 'المسجد' }, MOSQUE[r.mosque] || '—'),
-          h('td', { 'data-label': 'التاريخ' },
-            r.work_date ? h('span', fmtHijri(r.work_date), h('span.sub', fmtDate(r.work_date))) : '—'),
-          h('td', { 'data-label': 'اللغات' },
-            (r.languages || '').split(',').filter(Boolean).map(c => langName(c) || c).join('، ') || '—'),
-          h('td', mayEdit ? h('div.row',
-            h('button.btn.sm', { type: 'button', onclick: () => workDialog(r) }, 'تعديل'),
-            h('button.btn.sm.ghost', { type: 'button', onclick: () => removeWork(r) }, 'حذف')) : null))))))
+      list.length ? h('div.stack',
+        h('div.row.between.wrap',
+          h('label.check', head, h('span', `حدّد المعروض — ${list.length} عملًا من ${rows.length}`)),
+          h('span.small.muted', `${picked.size} محدَّدًا`)),
+        ...sections)
         : emptyState('لا أعمال في المستودع',
             mayEdit ? 'ابدأ بإضافة عمل، أو استورد دفعةً من أعمال السنوات الماضية.'
                     : 'لم يُضَف إلى المستودع شيءٌ بعد.'));
@@ -418,6 +463,35 @@ export async function render(ctx) {
     } catch (e) { toast(e.message, 'bad'); }
   }
 
+  // زرُّ تصديرٍ ظاهرٌ دائمًا: فميزةٌ لا تُرى إلا بعد فعلٍ لا يعرفه
+  // المستخدمُ ميزةٌ مفقودة (ملاحظة ٢٥١)
+  async function exportAsk() {
+    const list = shown();
+    const sel = selected();
+    const scope = h('select', { 'aria-label': 'ما يُصدَّر' },
+      sel.length ? h('option', { value: 'picked' }, `المحدَّد — ${sel.length} عملًا`) : null,
+      h('option', { value: 'shown' }, `المعروض بعد التصفية — ${list.length} عملًا`),
+      h('option', { value: 'all' }, `كلُّ المستودع — ${rows.length} عملًا`));
+    const kind = h('select', { 'aria-label': 'شكل التصدير' },
+      h('option', { value: 'list' }, 'كشف — Excel أو Word أو PDF'),
+      h('option', { value: 'book' }, 'كتابٌ مجمَّع — النصوص في مستندٍ واحد'),
+      h('option', { value: 'files' }, 'حزمةُ ملفات — الأصول المرفوعة'));
+    const res = await dialog({
+      title: 'تصدير من المستودع',
+      body: h('div.stack',
+        h('p.small.muted', 'اختر ما يُصدَّر وشكلَه. والتحديدُ من مربّعات الجدول يُقدَّم على غيره.'),
+        h('div.grid-2', h('label.field', 'ما يُصدَّر', scope), h('label.field', 'الشكل', kind))),
+      buttons: [{ label: 'تابِع', kind: 'primary', value: () => ({ scope: scope.value, kind: kind.value }) },
+        { label: 'إلغاء', value: null }]
+    });
+    if (!res) return;
+    const what = res.scope === 'picked' ? sel : (res.scope === 'shown' ? list : rows);
+    if (!what.length) return toast('لا أعمال في هذا النطاق.', 'bad');
+    if (res.kind === 'list') return exportList(what);
+    if (res.kind === 'book') return exportBook(what);
+    return exportFiles(what);
+  }
+
   const bar = h('div.pick-bar', { hidden: true });
   const drawBar = () => {
     const n = picked.size;
@@ -584,10 +658,11 @@ export async function render(ctx) {
 
   return h('div',
     h('div.page-head',
-      mayEdit ? h('div.row', { style: { marginInlineStart: 'auto', order: 2 } },
-        h('button.btn.sm', { type: 'button', onclick: () => bulkUpload() }, '⤒ رفعٌ جماعي'),
-        h('button.btn.sm.ghost', { type: 'button', onclick: () => reviewBatch(null) }, 'ما ينتظر المراجعة'),
-        h('button.btn.sm.primary', { type: 'button', onclick: () => workDialog(null) }, '＋ أضف عملًا')) : null,
+      h('div.row.wrap', { style: { marginInlineStart: 'auto', order: 2 } },
+        h('button.btn.sm', { type: 'button', onclick: () => exportAsk() }, '⤓ تصدير'),
+        mayEdit ? h('button.btn.sm', { type: 'button', onclick: () => bulkUpload() }, '⤒ رفعٌ جماعي') : null,
+        mayEdit ? h('button.btn.sm.ghost', { type: 'button', onclick: () => reviewBatch(null) }, 'ما ينتظر المراجعة') : null,
+        mayEdit ? h('button.btn.sm.primary', { type: 'button', onclick: () => workDialog(null) }, '＋ أضف عملًا') : null),
       h('div.grow', h('div.eyebrow', 'الأرشيف'), h('h1', 'مستودع الترجمة'),
         h('p.muted', 'أعمالُ السنوات الماضية من خطبٍ ودروسٍ وكتب. '
           + 'وهي خارج حساب العقد: تُحفظ ويُبحَث فيها ويُصدَّر منها، ولا تدخل في المستخلص ولا الأجور.'))),

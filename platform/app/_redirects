@@ -1,5 +1,9 @@
 # لكل صفحة ملفُها لتحمل بطاقة رابطها الخاصة عند المشاركة (ملاحظتا ١٣٩ و١٤٠)
-/initiative    /initiative.html   200
-/arafah        /arafah.html       200
-/verify        /verify.html       200
+#
+# ولا سطر توجيه لها هنا (ملاحظة ٢٥٤): فـ Cloudflare Pages يخدم /initiative
+# من initiative.html بنفسه، ويحوّل /initiative.html إلى /initiative تلقائيًّا.
+# فسطرُ «/initiative → /initiative.html» كان يصنع حلقةً مفرغةً بين التحويلين،
+# فيعجز المتصفّحُ عن الفتح ويعلن: «عدد كبير من عمليات إعادة التوجيه».
+#
+# ويبقى سطرُ الالتقاط الأخير وحده، ليخدم مسارات التطبيق ذات الصفحة الواحدة.
 /*             /index.html        200

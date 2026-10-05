@@ -11,15 +11,27 @@ const DRAFT = 'hs.material-draft';
 const PRIORITY_DAYS = { emergency: 1, urgent: 2, normal: 3 };
 
 export async function render(ctx) {
-  const everyone = await db.select('profiles', {
-    select: 'id,full_name,role,track,may_translate,member_languages(language_code)',
-    status: 'eq.active', order: 'full_name.asc'
-  });
+  // الاقتراحُ يُجلب مع الأعضاء قبل الرسم، فلا يصل متأخّرًا بعد اختيار
+  // المنسّق فيُزيحه (ملاحظة ٢٥٠)
+  const sugOf = new Map();   // «lang|stage» ← معرّفُ العضو
+  const [everyone, sugRows] = await Promise.all([
+    db.select('profiles', {
+      select: 'id,full_name,role,track,may_translate,native_lang,member_languages(language_code,assignable,default_stage,priority)',
+      status: 'eq.active', order: 'full_name.asc'
+    }),
+    db.rpc('suggest_assignees_all').catch(() => [])
+  ]);
+  for (const r of (Array.isArray(sugRows) ? sugRows : [])) {
+    sugOf.set(`${r.language_code}|${r.stage_key}`, r.member_id);
+  }
   // فريق الإرشاد المكاني لا تُسنَد إليه أعمال ترجمة (ملاحظة ٩٩)
   // فريق الإرشاد المكاني لا تُسنَد إليه ترجمة، إلا المتميّز فبلغته (ملاحظة ١٧٣)
   // ولا يظهر في الإسناد إلا من حُدِّد له «يترجم» (ملاحظة ٢٠٦)
   const members = everyone.filter(m => m.may_translate);
   const langsOf = m => new Set((m.member_languages || []).map(x => x.language_code));
+  // لا يُسنَد إلا في لغةٍ اعتمدتها الإدارة (ملاحظة ٢٤٩)
+  const assignOf = m => new Set((m.member_languages || [])
+    .filter(x => x.assignable !== false).map(x => x.language_code));
   const activeStages = state.stages.filter(s => s.is_active);
   const slaStages = activeStages.filter(s => !s.outside_sla);
 
@@ -323,19 +335,27 @@ export async function render(ctx) {
   function candidates(stage, code) {
     if (stage.assignee_role === 'manager') return members.filter(m => m.role === 'manager');
     if (stage.assignee_role === 'coordinator') return members.filter(m => m.role === 'coordinator' || m.role === 'manager');
-    // والمرشد المتميّز لا يظهر إلا في لغته المسجَّلة (ملاحظة ١٧٣)
-    return members.filter(m => langsOf(m).has(code));
+    // ولا يظهر إلا من اعتُمدت له هذه اللغةُ للإسناد (ملاحظتا ١٧٣ و٢٤٩)
+    return members.filter(m => assignOf(m).has(code));
   }
   function suggest(code) {
     const entry = picked.get(code); const used = new Set();
     for (const s of activeStages) {
       if (!entry.stages.has(s.key)) continue;
       const c = candidates(s, code);
-      const choice = c.find(m => !used.has(m.id) && s.assignee_role === 'translator') || c[0];
+      // صاحبُ الدور الافتراضيِّ في هذه اللغة أولًا، ثم الأولوية، ثم أقلُّهم حملًا
+      const want = sugOf.get(`${code}|${s.key}`);
+      const byRole = want && c.find(m => m.id === want);
+      const choice = byRole
+        || c.find(m => !used.has(m.id) && s.assignee_role === 'translator') || c[0];
       entry.stages.set(s.key, choice?.id || '');
       if (choice && s.assignee_role === 'translator') used.add(choice.id);
     }
   }
+
+  // اقتراحُ الإسناد من المنصة: لكلِّ مرحلةٍ صاحبُ دورها الافتراضيِّ في هذه
+  // اللغة، فإن تعدّدوا فبالأولوية، فإن استووا فأقلُّهم حملًا (ملاحظة ٢٥٠).
+  // والمنصةُ تقترح ولا تعتمد: الكلمةُ الأخيرةُ للمنسّق.
   function addLang(code) {
     if (picked.has(code)) return;
     picked.set(code, { stages: new Map(activeStages.map(s => [s.key, ''])), audio: 'translation' });
@@ -364,7 +384,7 @@ export async function render(ctx) {
       : `لم تُحدَّد لغة بعد — ${activeLangs().length} لغة متاحة، منها ${core} رئيسية`;
     langPills.replaceChildren(...state.languages.filter(l => l.is_active && (!q || l.name_ar.includes(q) || l.native_name.toLowerCase().includes(q.toLowerCase())))
       .map(l => {
-        const n = members.filter(m => langsOf(m).has(l.code)).length;
+        const n = members.filter(m => assignOf(m).has(l.code)).length;
         const on = picked.has(l.code);
         return h('button', { type: 'button', 'aria-pressed': String(on), title: n ? `${n} عضو مؤهل` : 'لا يوجد عضو مؤهل',
           onclick: () => toggleLang(l.code) },
@@ -379,7 +399,7 @@ export async function render(ctx) {
       const warnings = [];
       const tr = entry.stages.get('translation');
       if (tr && ['sharia_review', 'linguistic_review'].some(k => entry.stages.get(k) === tr)) warnings.push('المترجم نفسه يراجع ترجمته — يُفضَّل مراجع مستقل');
-      if (!members.some(m => langsOf(m).has(code))) warnings.push('لا يوجد عضو مؤهل في هذه اللغة — حدّث لغات الفريق');
+      if (!members.some(m => assignOf(m).has(code))) warnings.push('لا عضوَ معتمدًا للإسناد في هذه اللغة — اعتمد لغات الإسناد في شاشة الفريق');
       return h('fieldset',
         h('legend', langName(code)),
         h('div.row', { style: { marginBottom: '8px' } },

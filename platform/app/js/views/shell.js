@@ -103,7 +103,7 @@ export function staffShell(view, path) {
          link('/app/languages', 'اللغات'),
          link('/app/khateebs', 'الخطباء'),
          link('/app/workflow', 'إعداد سير العمل'),
-         link('/app/glossary', 'الدليل المصطلحي'),
+         link('/app/glossary', 'الدليل الإرشادي'),
          link('/app/audio-guide', 'دليل التسجيل الصوتي')]),
        broadcast,
        group('حسابي', [mine, link('/app/attend', 'حضوري'), link('/about', 'عن المنصة')])]
@@ -135,7 +135,7 @@ export function staffShell(view, path) {
          link('/app/languages', 'اللغات'),
          link('/app/khateebs', 'الخطباء'),
          link('/app/workflow', 'إعداد سير العمل'),
-         link('/app/glossary', 'الدليل المصطلحي'),
+         link('/app/glossary', 'الدليل الإرشادي'),
          link('/app/audio-guide', 'دليل التسجيل الصوتي')]),
        broadcast,
        group('حسابي', [mine, link('/app/attend', 'حضوري'), link('/about', 'عن المنصة')])]
@@ -150,7 +150,7 @@ export function staffShell(view, path) {
            link('/app/rooms', 'القاعات واللقاءات'),
            link('/app/training', 'التدريب والتأهيل'),
            isTeamLead() ? link('/app/sites', 'فريقي ومواقعه') : null,
-           link('/app/glossary', 'الدليل المصطلحي'),
+           link('/app/glossary', 'الدليل الإرشادي'),
            link('/app/audio-guide', 'دليل التسجيل الصوتي')]),
          broadcast,
          group('حسابي', [mine, link('/app/attend', 'حضوري'), link('/about', 'عن المنصة')])];

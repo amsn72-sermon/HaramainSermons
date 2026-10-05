@@ -1467,3 +1467,81 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
   border-radius: 12px; background: var(--card);
   box-shadow: 0 -4px 18px rgb(0 0 0 / .18); }
 .pick-bar b { color: var(--accent-text); }
+
+/* الدليل الإرشادي: بطاقاتُ اللغات بتصميم شاشة «اللغات» (ملاحظة ٢٤٥) */
+.gl-bar { margin: 0 0 8px; flex-wrap: wrap; gap: 8px; }
+.gl-grid { margin-bottom: 14px; }
+.lang-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+
+/* ترتيبُ أعمدة التصدير بالسحب، وعمودٌ يُضاف (ملاحظة ٢٤٣) */
+.col-sort { grid-template-columns: 1fr !important; max-height: 46vh; overflow: auto; }
+.col-sort .col-pick { display: flex; gap: 8px; align-items: center;
+  border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; background: var(--surface); }
+.col-sort .col-pick.dragging { opacity: .5; }
+.col-sort .col-pick.over { border-color: var(--accent); }
+.col-grip { cursor: grab; color: var(--muted); font-size: 1rem; line-height: 1; }
+.col-sort .col-pick .btn.xs { padding: 1px 6px; line-height: 1.2; }
+
+/* منتقي الشهر من تقويم (ملاحظة ٢٤٨) */
+.mp-wrap { position: relative; display: inline-block; }
+.mp-pop { position: absolute; z-index: 40; inset-inline-start: 0; top: calc(100% + 6px);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 10px; box-shadow: 0 10px 30px #0004; min-width: 260px; }
+.mp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.mp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.mp-m { font: inherit; cursor: pointer; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-soft, transparent); color: inherit; padding: 7px 4px; font-size: .85rem; }
+.mp-m:hover:not(:disabled) { border-color: var(--gold); }
+.mp-m.on { border-color: var(--accent); background: var(--accent); color: #fff; }
+.mp-m.has { font-weight: 700; }
+.mp-m.has::after { content: '•'; margin-inline-start: 4px; color: var(--gold); }
+.mp-m.on.has::after { color: #fff; }
+.mp-m:disabled { opacity: .35; cursor: not-allowed; }
+
+/* بطاقاتٌ مستطيلةٌ عرضيّة، ثلاثٌ في الصف (ملاحظة ٢٤٦ ز)
+   الأيقونةُ والعنوانُ في جهة، والرقمُ في الأخرى، والشريطُ أسفلَها بعرضها. */
+.kpi-tile { display: grid; gap: 4px 12px; padding: 12px 14px; min-height: 92px;
+  grid-template-columns: 1fr auto; grid-template-areas: "head num" "bar bar" "sub sub" "extra extra";
+  align-items: center; border-top-width: 1px; border-inline-start: 3px solid var(--line); }
+.kpi-tile.is-ok   { border-top-color: var(--line); border-inline-start-color: var(--ok, #2e7d52); }
+.kpi-tile.is-warn { border-top-color: var(--line); border-inline-start-color: var(--accent); }
+.kpi-tile.is-bad  { border-top-color: var(--line); border-inline-start-color: var(--bad, #b3261e); }
+.kpi-tile > .kpi-head { grid-area: head; }
+.kpi-tile > .kpi-num  { grid-area: num; text-align: end; white-space: nowrap; font-size: 1.6rem; }
+.kpi-tile > .qbar     { grid-area: bar; width: 100%; margin-top: 2px; }
+.kpi-tile > p.small.muted { grid-area: sub; }
+.kpi-tile > p.small.gold  { grid-area: extra; }
+.kpi-gold .kpi-tile { border-top-color: var(--line); border-inline-start-color: var(--accent); }
+@media (max-width: 560px) { .kpi-tile > .kpi-num { font-size: 1.35rem; } }
+
+/* أعمالُ المستودع ببطاقاتٍ مستطيلةٍ مجموعةٍ بالنوع (ملاحظة ٢٥٣) */
+.repo-group { margin-bottom: 16px; }
+.repo-group-head { display: flex; align-items: center; gap: 8px; margin: 0 0 8px;
+  padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.repo-group-head b { font-size: .98rem; }
+.repo-cards { display: grid; gap: 8px; }
+.repo-card { display: grid; grid-template-columns: auto auto 1fr auto; gap: 10px; align-items: center;
+  border: 1px solid var(--line); border-inline-start: 3px solid var(--line); border-radius: 12px;
+  padding: 10px 12px; background: var(--card); }
+.repo-card.on { border-inline-start-color: var(--accent); background: var(--accent-soft, var(--card)); }
+.repo-pick { display: flex; align-items: center; margin: 0; }
+.repo-ico { color: var(--muted); display: flex; }
+.repo-main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.repo-title { font-size: .96rem; overflow: hidden; text-overflow: ellipsis; }
+.repo-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .78rem; color: var(--muted); }
+.repo-langs { display: flex; flex-wrap: wrap; gap: 4px; }
+.repo-langs .badge { font-size: .68rem; }
+.repo-acts { gap: 6px; }
+@media (max-width: 640px) {
+  .repo-card { grid-template-columns: auto auto 1fr; }
+  .repo-acts { grid-column: 1 / -1; justify-content: flex-end; }
+}
+
+/* عدّادُ الفقرات في شاشة الترجمة (ملاحظة ٢٥٢) */
+.par-count { color: var(--muted); margin-inline-end: 10px; white-space: nowrap; }
+.par-count.ok   { color: var(--ok, #2e7d52); }
+.par-count.warn { color: var(--warn-text, #a15c00); font-weight: 600; }
+
+/* بطاقةُ النسخة الاحتياطية في لوحة الأعمال (ملاحظة ٢٤٧ د) */
+.backup-card { border-inline-start: 3px solid var(--ok, #2e7d52); }
+.backup-card.warn { border-inline-start-color: var(--warn-text, #a15c00); }

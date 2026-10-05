@@ -43,6 +43,15 @@ OUT="$PROJECT/../backups"
 mkdir -p "$OUT"; chmod 700 "$OUT"
 PGPASS=$(grep '^POSTGRES_PASSWORD=' "$PROJECT/.env" | cut -d= -f2-)
 
+# أثرُ التشغيل في قاعدة البيانات، لتعرضه بطاقةُ المنصة (ملاحظة ٢٤٧)
+log_run() {   # log_run ok|fail db_bytes files_bytes note
+    docker exec -i -e PGPASSWORD="$PGPASS" supabase-db \
+        psql -h 127.0.0.1 -U supabase_admin -d postgres -q -v ON_ERROR_STOP=1 \
+        -c "select public.log_backup_run($1, nullif('$2','')::bigint, nullif('$3','')::bigint, '$BUCKET', nullif('$4',''))" \
+        >/dev/null 2>&1 || true
+}
+trap 'log_run false "" "" "توقّف النسخُ قبل تمامه"' EXIT
+
 echo "[$STAMP] بدء النسخ"
 # قاعدة البيانات كاملة (يشمل auth و storage و public) بصيغة custom
 docker exec -e PGPASSWORD="$PGPASS" supabase-db \
@@ -59,4 +68,9 @@ for f in "$OUT/db-$STAMP.dump.enc" "$OUT/storage-$STAMP.tgz.enc"; do
 done
 
 find "$OUT" -name '*.enc' -mtime +$KEEP_LOCAL_DAYS -delete
+
+DB_B=$(wc -c < "$OUT/db-$STAMP.dump.enc" 2>/dev/null || echo '')
+FL_B=$(wc -c < "$OUT/storage-$STAMP.tgz.enc" 2>/dev/null || echo '')
+trap - EXIT
+log_run true "$DB_B" "$FL_B" ""
 echo "[$STAMP] تم: $(du -ch "$OUT"/*-"$STAMP".* | tail -1 | cut -f1) إلى $BUCKET في الرياض"

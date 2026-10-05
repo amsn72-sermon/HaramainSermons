@@ -66,8 +66,8 @@ function zip(files) {
 const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 const colName = i => { let s = '', n = i; do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0); return s; };
 
-// rows: مصفوفة صفوف، كل صف مصفوفة قيم نصية. أول صف رؤوس الأعمدة.
-export function buildXlsx(rows, { sheetName = 'البيانات', rtl = true, allText = false } = {}) {
+// ورقةٌ واحدة ← جسدُ الصفوف وأعمدتُها
+function sheetXml(rows, { rtl = true, allText = false } = {}) {
   const body = rows.map((row, r) => {
     const cells = row.map((v, c) => {
       const ref = `${colName(c)}${r + 1}`;
@@ -85,42 +85,72 @@ export function buildXlsx(rows, { sheetName = 'البيانات', rtl = true, al
     return `<col min="${c + 1}" max="${c + 1}" width="${w}" customWidth="1"/>`;
   }).join('');
 
+  return `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`
+    + `<sheetViews><sheetView workbookViewId="0"${rtl ? ' rightToLeft="1"' : ''}/></sheetViews>`
+    + (widths ? `<cols>${widths}</cols>` : '')
+    + `<sheetData>${body}</sheetData></worksheet>`;
+}
+
+const STYLES_XML =
+  `<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`
+  + `<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>`
+  + `<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>`
+  + `<fill><patternFill patternType="solid"><fgColor rgb="FFF1E9DD"/><bgColor indexed="64"/></patternFill></fill></fills>`
+  + `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>`
+  + `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>`
+  + `<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>`
+  + `<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>`
+  + `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+
+// اسمُ ورقةٍ مقبولٌ في Excel: ٣١ محرفًا، وبلا المحارف الممنوعة
+const sheetSafe = (name, i) => (String(name || '').replace(/[\\/?*[\]:]/g, ' ').trim()
+  .slice(0, 31) || `ورقة ${i + 1}`);
+
+// مصنَّفٌ بعدّة أوراق (ملاحظة ٢٤٥): [{ name, rows }]
+export function buildXlsxBook(sheets, { rtl = true, allText = false } = {}) {
+  const list = (sheets || []).filter(s => s && Array.isArray(s.rows));
+  if (!list.length) throw new Error('لا أوراق في المصنَّف');
+  const names = [];
+  list.forEach((s, i) => {
+    let n = sheetSafe(s.name, i);
+    let k = 2;
+    while (names.includes(n)) n = `${n.slice(0, 28)} ${k++}`;
+    names.push(n);
+  });
+
   const files = [
     ['[Content_Types].xml',
       `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`
       + `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>`
       + `<Default Extension="xml" ContentType="application/xml"/>`
       + `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>`
-      + `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`
+      + list.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" `
+        + `ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')
       + `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`],
     ['_rels/.rels',
       `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
       + `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
     ['xl/workbook.xml',
       `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" `
-      + `xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`
-      + `<sheets><sheet name="${esc(sheetName).slice(0, 30)}" sheetId="1" r:id="rId1"/></sheets></workbook>`],
+      + `xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>`
+      + names.map((n, i) => `<sheet name="${esc(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')
+      + `</sheets></workbook>`],
     ['xl/_rels/workbook.xml.rels',
       `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
-      + `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>`
-      + `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
-    ['xl/styles.xml',
-      `<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`
-      + `<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>`
-      + `<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>`
-      + `<fill><patternFill patternType="solid"><fgColor rgb="FFF1E9DD"/><bgColor indexed="64"/></patternFill></fill></fills>`
-      + `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>`
-      + `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>`
-      + `<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>`
-      + `<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>`
-      + `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`],
-    ['xl/worksheets/sheet1.xml',
-      `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`
-      + `<sheetViews><sheetView workbookViewId="0"${rtl ? ' rightToLeft="1"' : ''}/></sheetViews>`
-      + (widths ? `<cols>${widths}</cols>` : '')
-      + `<sheetData>${body}</sheetData></worksheet>`]
+      + list.map((_, i) => `<Relationship Id="rId${i + 1}" `
+        + `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" `
+        + `Target="worksheets/sheet${i + 1}.xml"/>`).join('')
+      + `<Relationship Id="rId${list.length + 1}" `
+      + `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+    ['xl/styles.xml', STYLES_XML],
+    ...list.map((s, i) => [`xl/worksheets/sheet${i + 1}.xml`, sheetXml(s.rows, { rtl, allText })])
   ];
   return zip(files);
+}
+
+// rows: مصفوفة صفوف، كل صف مصفوفة قيم نصية. أول صف رؤوس الأعمدة.
+export function buildXlsx(rows, { sheetName = 'البيانات', rtl = true, allText = false } = {}) {
+  return buildXlsxBook([{ name: sheetName, rows }], { rtl, allText });
 }
 
 
@@ -247,23 +277,8 @@ export function parseCsv(text) {
   return rows.filter(r => r.some(v => String(v).trim()));
 }
 
-// ملف ← صفوف نصية. يقبل .xlsx و .csv
-export async function readSheet(file) {
-  const name = String(file.name || '').toLowerCase();
-  if (name.endsWith('.csv') || name.endsWith('.txt')) return parseCsv(await file.text());
-
-  const { names, read } = await unzip(await file.arrayBuffer());
-  const sheetName = names.filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort()[0];
-  if (!sheetName) throw new Error('لم تُوجد ورقة بيانات في الملف');
-  const sharedXml = await read('xl/sharedStrings.xml');
-  const shared = [];
-  if (sharedXml) {
-    const doc = new DOMParser().parseFromString(sharedXml, 'application/xml');
-    for (const si of doc.getElementsByTagName('si')) {
-      shared.push([...si.getElementsByTagName('t')].map(t => t.textContent).join(''));
-    }
-  }
-  const doc = new DOMParser().parseFromString(await read(sheetName), 'application/xml');
+const rowsOf = (xml, shared) => {
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
   const rows = [];
   for (const r of doc.getElementsByTagName('row')) {
     const cells = [];
@@ -274,8 +289,9 @@ export async function readSheet(file) {
       if (type === 's') {
         const idx = Number(c.getElementsByTagName('v')[0]?.textContent || -1);
         v = shared[idx] ?? '';
-      } else if (type === 'inlineStr') {
-        v = [...c.getElementsByTagName('t')].map(t => t.textContent).join('');
+      } else if (type === 'inlineStr' || type === 'str') {
+        v = [...c.getElementsByTagName('t')].map(t => t.textContent).join('')
+          || c.getElementsByTagName('v')[0]?.textContent || '';
       } else {
         v = c.getElementsByTagName('v')[0]?.textContent || '';
       }
@@ -285,4 +301,58 @@ export async function readSheet(file) {
     rows.push(cells);
   }
   return rows.filter(r => r.some(v => String(v).trim()));
+};
+
+// ملف ← أوراقُه كلُّها بأسمائها (ملاحظة ٢٤٤): [{ name, rows }]
+//   فالقواميسُ تأتي ورقةً لكلِّ لغة، واسمُ الورقة هو ما يدلّ على لسانها.
+export async function readWorkbook(file) {
+  const fname = String(file.name || '').toLowerCase();
+  if (fname.endsWith('.csv') || fname.endsWith('.txt')) {
+    return [{ name: String(file.name || 'CSV').replace(/\.[^.]+$/, ''), rows: parseCsv(await file.text()) }];
+  }
+
+  const { names, read } = await unzip(await file.arrayBuffer());
+  const parts = names.filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n))
+    .sort((a, b) => (Number(a.match(/(\d+)/)[1]) - Number(b.match(/(\d+)/)[1])));
+  if (!parts.length) throw new Error('لم تُوجد ورقة بيانات في الملف');
+
+  const sharedXml = await read('xl/sharedStrings.xml');
+  const shared = [];
+  if (sharedXml) {
+    const doc = new DOMParser().parseFromString(sharedXml, 'application/xml');
+    for (const si of doc.getElementsByTagName('si')) {
+      shared.push([...si.getElementsByTagName('t')].map(t => t.textContent).join(''));
+    }
+  }
+
+  // أسماءُ الأوراق: workbook.xml يربط الاسمَ بـ rId، والعلاقاتُ تربط rId بالملف
+  const titles = new Map();           // اسمُ ملفِ الورقة ← اسمُها المعروض
+  try {
+    const wb = new DOMParser().parseFromString(await read('xl/workbook.xml'), 'application/xml');
+    const rels = new DOMParser().parseFromString(await read('xl/_rels/workbook.xml.rels'), 'application/xml');
+    const target = new Map();
+    for (const rel of rels.getElementsByTagName('Relationship')) {
+      target.set(rel.getAttribute('Id'), String(rel.getAttribute('Target') || '').replace(/^\/?xl\//, ''));
+    }
+    for (const sh of wb.getElementsByTagName('sheet')) {
+      const rid = sh.getAttribute('r:id') || sh.getAttributeNS?.(
+        'http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+      const t = target.get(rid);
+      if (t) titles.set(`xl/${t.replace(/^\.?\//, '')}`, sh.getAttribute('name') || '');
+    }
+  } catch { /* بلا أسماء: نُسمّيها بالترتيب */ }
+
+  const out = [];
+  for (let i = 0; i < parts.length; i++) {
+    const xml = await read(parts[i]);
+    if (!xml) continue;
+    out.push({ name: titles.get(parts[i]) || `ورقة ${i + 1}`, rows: rowsOf(xml, shared) });
+  }
+  return out.filter(s => s.rows.length);
+}
+
+// ملف ← صفوف أول ورقة. يقبل .xlsx و .csv
+export async function readSheet(file) {
+  const book = await readWorkbook(file);
+  return book[0]?.rows || [];
 }

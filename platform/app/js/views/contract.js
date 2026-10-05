@@ -5,15 +5,22 @@ import { h, toast, busy, fmtDate } from '../ui.js';
 import { db } from '../sb.js';
 import { isManager } from '../store.js';
 import { buildXlsx, downloadBlob } from '../xlsx.js';
-import { pickColumns, narrowSheet } from '../columns.js';
+import { pickColumns, narrowSheet, isExtra, extraLabel } from '../columns.js';
 import { icon } from '../icons.js';
+import { monthField } from '../monthpicker.js';
 import { scopeSection } from './scope.js';
 import { opsSection } from '../opsreport.js';
 import { penaltySection } from '../penalties.js';
 
 const ar = n => Number(n || 0).toLocaleString('en-US');
 const money = n => Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const qty = n => (Number(n || 0) % 1 === 0 ? ar(n) : Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 }));
+// الكمياتُ أعدادٌ لا كسور: ما جاوز الألفَ يُقرَّب، والصغيرُ يحتمل كسرين
+const qty = (n) => {
+  const v = Number(n || 0);
+  if (v % 1 === 0) return ar(v);
+  if (Math.abs(v) >= 1000) return ar(Math.round(v));
+  return v.toLocaleString('en-US', { maximumFractionDigits: 2 });
+};
 const pct = (a, b) => (Number(b) > 0 ? Math.min(100, (Number(a) / Number(b)) * 100) : 0);
 
 const MONTHS = 24;      // مدة العقد
@@ -40,7 +47,7 @@ export async function render(ctx) {
   const admin = isManager();
 
   // ---------------- شريط الكميات ----------------
-  const started = h('input', { type: 'month', 'aria-label': 'بداية العقد' });
+  const started = monthField({ value: '', label: 'شهر بداية العقد' });
   const savedStart = (() => { try { return localStorage.getItem('hs.contractStart') || ''; } catch { return ''; } })();
   started.value = savedStart;
   const elapsed = h('p.small.muted');
@@ -55,27 +62,8 @@ export async function render(ctx) {
   started.onchange = () => { try { localStorage.setItem('hs.contractStart', started.value); } catch { /* */ } paintElapsed(); };
   paintElapsed();
 
-  const quantities = h('div.stack',
-    items.map(it => {
-      const done = Number(it.qty_done || 0), total = Number(it.qty_contracted || 0);
-      return h('div.card.qitem',
-        h('div.row.between',
-          h('b', `${it.code}) ${it.name}`),
-          h('span.badge', it.unit)),
-        total > 0 ? bar(done, total) : null,
-        h('div.row.between.small',
-          h('span', total > 0 ? `المنجَز ${qty(done)} من ${qty(total)}` : `المنجَز ${qty(done)}`),
-          h('span.muted', total > 0 ? `${pct(done, total).toFixed(1)}٪ · المتبقي ${qty(Math.max(0, total - done))}` : 'كميته تُحدَّد إداريًّا')),
-        // المتطوَّع به يُعرض ولا يدخل الكمية المحتسَبة (ملاحظة ١٩٤)
-        Number(it.qty_initiative) > 0
-          ? h('p.small.gold', `وزيادةً ${qty(it.qty_initiative)} من مبادرة المتعاقد — بلا مقابل، `
-              + 'فلا تدخل الكمية المحتسَبة.')
-          : null,
-        it.note ? h('p.small.muted', it.note) : null);
-    }));
-
   // ---------------- مسودّة المستخلص ----------------
-  const monthIn = h('input', { type: 'month', value: new Date().toISOString().slice(0, 7), 'aria-label': 'شهر المستخلص' });
+  const monthIn = monthField({ value: new Date().toISOString().slice(0, 7), label: 'شهر المستخلص' });
   const withPrices = h('input', { type: 'checkbox', id: 'claim-prices' });
   const claimBox = h('div.stack');
   let claim = [];
@@ -135,14 +123,16 @@ export async function render(ctx) {
     }
   };
 
+  // الأعمدةُ بترتيب الاختيار، والمضافُ منها يخرج باسمه وفارغًا (ملاحظة ٢٤٣)
   function claimRows(keys) {
     const cols = claimCols();
-    const use = (keys && keys.length ? cols.filter(c => keys.includes(c.key)) : cols);
-    const head = use.map(c => c.label);
-    const body = claim.map(r => use.map(c => cellOf(r, c.key)));
-    if (withPrices.checked && use.some(c => c.key === 'amount')) {
+    const byKey = new Map(cols.map(c => [c.key, c]));
+    const list = (keys && keys.length) ? keys : cols.map(c => c.key);
+    const head = list.map(k => (isExtra(k) ? extraLabel(k) : (byKey.get(k)?.label ?? k)));
+    const body = claim.map(r => list.map(k => (isExtra(k) || !byKey.has(k) ? '' : cellOf(r, k))));
+    if (withPrices.checked && list.includes('amount')) {
       const sum = claim.reduce((s, r) => s + Number(r.amount || 0), 0);
-      const row = v => use.map((c, i) => (i === 0 ? v[0] : c.key === 'amount' ? v[1] : ''));
+      const row = v => list.map((k, i) => (i === 0 ? v[0] : k === 'amount' ? v[1] : ''));
       body.push(row(['الإجمالي قبل الضريبة', money(sum)]));
       body.push(row(['ضريبة القيمة المضافة ١٥٪', money(sum * 0.15)]));
       body.push(row(['الإجمالي المطالَب به', money(sum * 1.15)]));
@@ -359,6 +349,14 @@ export async function render(ctx) {
     return 'bad';
   };
 
+  const trendPct = (p) => {
+    const e = elapsedPct();
+    if (e === null) return '';
+    if (p >= e) return 'ok';
+    if (p >= e - 10) return 'warn';
+    return 'bad';
+  };
+
   const kpiTile = ({ ico, label, value, unit, sub, extra, state, done, total }) =>
     h(`article.kpi-tile${state ? '.is-' + state : ''}`,
       h('div.kpi-head', icon(ico, { size: 20 }), h('b', label)),
@@ -370,23 +368,23 @@ export async function render(ctx) {
   const kpiBoard = h('div.stack');
   const drawKpi = () => {
     const e = elapsedPct();
-    const doneAll = items.reduce((a, r) => a + Number(r.qty_done || 0), 0);
-    const totalAll = items.reduce((a, r) => a + Number(r.qty_contracted || 0), 0);
+    // لا تُجمع الخطبُ إلى الكلمات إلى الساعات: وحداتٌ لا تُجمع (ملاحظة ٢٤٦ ج).
+    // فالإنجازُ الإجماليُّ متوسّطُ نسبِ البنود، ومعه عددُ ما بدأ منها.
+    const rated = items.filter(r => Number(r.qty_contracted) > 0);
+    const overall = rated.length
+      ? rated.reduce((a, r) => a + pct(r.qty_done, r.qty_contracted), 0) / rated.length : 0;
+    const begun = items.filter(r => Number(r.qty_done) > 0).length;
     const initAll = items.reduce((a, r) => a + Number(r.qty_initiative || 0), 0);
-    const overall = totalAll > 0 ? pct(doneAll, totalAll) : 0;
 
     kpiBoard.replaceChildren(
       h('div.kpi-grid',
         kpiTile({ ico: 'chart', label: 'الإنجاز الإجمالي',
           value: `${overall.toFixed(1)}٪`,
-          sub: totalAll > 0 ? `${qty(doneAll)} من ${qty(totalAll)}` : 'الكمياتُ تُحدَّد إداريًّا',
-          done: doneAll, total: totalAll, state: trend(doneAll, totalAll) }),
+          sub: `${ar(begun)} من ${ar(items.length)} بنودٍ بدأ العملُ فيها`,
+          done: Math.round(overall), total: 100, state: trendPct(overall) }),
         kpiTile({ ico: 'clock', label: 'ما مضى من المدة',
           value: e === null ? '—' : `${e.toFixed(1)}٪`,
-          sub: e === null ? 'حدّد شهر بداية العقد' : `من ${ar(MONTHS)} شهرًا` }),
-        kpiTile({ ico: 'layers', label: 'بنودُ العقد',
-          value: ar(items.length), unit: 'بندًا',
-          sub: `${items.filter(r => Number(r.qty_done) > 0).length} بندًا بدأ العملُ فيه` }),
+          sub: e === null ? 'حدّد شهر بداية العقد أعلاه' : `من ${ar(MONTHS)} شهرًا` }),
         kpiTile({ ico: 'star', label: 'مبادرةُ المتعاقد',
           value: qty(initAll), unit: 'عملًا',
           sub: 'بلا مقابل — لا تدخل الكمية المحتسَبة' })),
@@ -410,28 +408,24 @@ export async function render(ctx) {
   started.addEventListener('change', drawKpi);
 
   // ---------------- لوحةُ المبادرة ----------------
+  // ثلاثُ بطاقاتٍ ملخِّصةٌ لا ست: وما عداها تفصيلُه في الجدول تحتَها،
+  // فلا يتكرّر الشيءُ مرتين (ملاحظة ٢٤٦ و)
+  const initSince = inits.map(r => r.since).filter(Boolean).sort()[0] || null;
   const initKpi = inits.length ? h('div.kpi-grid.kpi-gold',
     kpiTile({ ico: 'globe', label: 'لغاتٌ بلا مقابل', value: ar(inits.length), unit: 'لغة',
       sub: inits.map(r => r.name_ar).join('، ') }),
     kpiTile({ ico: 'mic', label: 'الخطب',
-      value: qty(inits.reduce((a, r) => a + Number(r.sermons || 0), 0)) }),
+      value: qty(inits.reduce((a, r) => a + Number(r.sermons || 0), 0)), unit: 'خطبة' }),
     kpiTile({ ico: 'doc', label: 'النصوص',
-      value: qty(inits.reduce((a, r) => a + Number(r.texts || 0), 0)) }),
-    kpiTile({ ico: 'pen', label: 'كلماتُ الأصل',
-      value: qty(inits.reduce((a, r) => a + Number(r.words || 0), 0)) }),
-    kpiTile({ ico: 'layers', label: 'مجموعُ الأعمال',
-      value: qty(inits.reduce((a, r) => a + Number(r.tracks || 0), 0)) }),
-    kpiTile({ ico: 'calendar', label: 'من تاريخ',
-      value: (() => {
-        const d = inits.map(r => r.since).filter(Boolean).sort()[0];
-        return d ? fmtDate(d) : '—';
-      })() })) : null;
+      value: qty(inits.reduce((a, r) => a + Number(r.texts || 0), 0)), unit: 'نصًّا' })) : null;
 
   // ---------------- مبادرةُ المتعاقد: لغاتٌ بلا مقابل (ملاحظة ١٩٤) ----------------
   const initCard = inits.length ? h('section.card.stack.init-card',
     h('div.row.between',
       h('h3', 'مبادرةُ المتعاقد — لغاتٌ بلا مقابل'),
-      h('span.badge.gold', `${ar(inits.length)} لغة`)),
+      h('div.row',
+        initSince ? h('span.small.muted', `من ${fmtDate(initSince)}`) : null,
+        h('span.badge.gold', `${ar(inits.length)} لغة`))),
     h('p.small.muted', 'العقد يطلب إحدى عشرة لغةً بالخطبة الأسبوعية. وهذه لغاتٌ زادها المتعاقد '
       + 'من عنده ولا يأخذ عليها شيئًا: تُنجز أعمالُها في المنصة كما تُنجز غيرها، '
       + 'وتُستثنى من كميات المستخلص.'),
@@ -447,13 +441,13 @@ export async function render(ctx) {
         h('td', { 'data-label': 'كلمات الأصل' }, qty(r.words)),
         h('td', { 'data-label': 'مجموع الأعمال' }, h('b', qty(r.tracks))),
         h('td', { 'data-label': 'من تاريخ' }, r.since ? fmtDate(r.since) : '—')))),
-      h('tfoot', h('tr.total-row',
-        h('td', 'المجموع'),
-        h('td', qty(inits.reduce((a, r) => a + Number(r.sermons || 0), 0))),
-        h('td', qty(inits.reduce((a, r) => a + Number(r.texts || 0), 0))),
-        h('td', qty(inits.reduce((a, r) => a + Number(r.words || 0), 0))),
-        h('td', qty(inits.reduce((a, r) => a + Number(r.tracks || 0), 0))),
-        h('td', ''))))),
+      )),
+    // مجموعٌ في سطرٍ واحد لا صفًّا يكرّر البطاقات أعلاه (ملاحظة ٢٤٦ و)
+    h('p.small.muted', 'المجموع: ',
+      h('b', qty(inits.reduce((a, r) => a + Number(r.sermons || 0), 0))), ' خطبة · ',
+      h('b', qty(inits.reduce((a, r) => a + Number(r.texts || 0), 0))), ' نصًّا · ',
+      h('b', qty(inits.reduce((a, r) => a + Number(r.words || 0), 0))), ' كلمة · ',
+      h('b', qty(inits.reduce((a, r) => a + Number(r.tracks || 0), 0))), ' عملًا.'),
     h('p.small.muted', 'تُضمّ اللغة إلى المبادرة أو تُخرج منها من شاشة «اللغات».')) : null;
 
   // ---------------- التبويبات: النطاق أولًا، ثم الكميات والمستخلص والتقرير ----------------
@@ -464,7 +458,6 @@ export async function render(ctx) {
       h('label.field', { style: { maxWidth: '18rem' } }, 'شهر بداية العقد', started),
       elapsed),
     kpiBoard,
-    quantities,
     initCard,
     h('section.card.stack',
       h('h3', 'جدول الكميات والأسعار كما في كراسة المواصفات'),
