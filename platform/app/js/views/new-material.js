@@ -1,7 +1,7 @@
 // إضافة مادة وإسنادها — على ثلاث خطوات مع حفظ مسودة محلية
 import { h, fill, toast, busy, fmtMinutes, confirm, req, markBad } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, MATERIAL_TYPES, SERMON_TYPES, MOSQUE, PRIORITY, langName, stageName, needsMosque, GENERAL_MOSQUE } from '../store.js';
+import { state, isManager, can, MATERIAL_TYPES, SERMON_TYPES, MOSQUE, PRIORITY, langName, stageName, needsMosque, GENERAL_MOSQUE } from '../store.js';
 import { createEditor } from '../editor.js';
 import { plainText } from '../sanitize.js';
 import { AUDIO_EXTS, isAllowedAudio, audioInfo, specLine } from '../audiofile.js';
@@ -334,7 +334,15 @@ export async function render(ctx) {
 
   function candidates(stage, code) {
     if (stage.assignee_role === 'manager') return members.filter(m => m.role === 'manager');
-    if (stage.assignee_role === 'coordinator') return members.filter(m => m.role === 'coordinator' || m.role === 'manager');
+    // من أنشأ تَبِع: المنسقُ المسؤولُ عن المادة هو مُنشئُها، ولا يُلقيها
+    // على غيره. ومديرُ المشروع — ومن مُنح مفتاحَ الإسناد — يختار من
+    // يشاء (ملاحظة ٢٦٩)
+    if (stage.assignee_role === 'coordinator') {
+      if (!isManager() && !can('mat_assign_coord')) {
+        return members.filter(m => m.id === state.profile?.id);
+      }
+      return members.filter(m => m.role === 'coordinator' || m.role === 'manager');
+    }
     // ولا يظهر إلا من اعتُمدت له هذه اللغةُ للإسناد (ملاحظتا ١٧٣ و٢٤٩)
     return members.filter(m => assignOf(m).has(code));
   }

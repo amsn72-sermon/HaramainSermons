@@ -1,6 +1,6 @@
 import { auth, configured, db } from './sb.js';
 import { h, toast } from './ui.js';
-import { state, loadProfile, loadReference, loadPolicyState, loadCircularState, loadMfaState, isAdmin, isManager, isActive, isSupervisor, can, isTeamLead } from './store.js';
+import { state, loadProfile, loadReference, loadPolicyState, loadCircularState, loadMfaState, isAdmin, isManager, isActive, isSupervisor, isWatcher, can, isTeamLead } from './store.js';
 import { staffShell } from './views/shell.js';
 import { start as idleStart, stop as idleStop } from './idle.js';
 
@@ -12,6 +12,7 @@ const routes = [
   ['/arafah', () => import('./views/public.js').then(m => ({ render: m.arafah })), false],
   ['/about', () => import('./views/about.js'), false],
   ['/verify', () => import('./views/verify.js'), false],
+  ['/verify-cert', () => import('./views/certverify.js'), false],
   ['/initiative', () => import('./views/about.js').then(m => ({ render: m.initiative })), false],
   ['/policy', () => import('./views/policy.js'), true],
   ['/mfa', () => import('./views/mfa.js'), true],
@@ -50,6 +51,10 @@ const routes = [
   ['/app/contract', () => import('./views/contract.js'), true, 'manager'],
   ['/app/evaluation', () => import('./views/evaluation.js'), true, 'reports'],
   ['/app/glossary', () => import('./views/glossary.js'), true],
+  ['/app/glossary/watch', () => import('./views/glossary.js').then(m => ({ render: m.watch })), true],
+  ['/app/certificates', () => import('./views/certificates.js'), true, true],
+  ['/app/my-certificates', () => import('./views/certificates.js').then(m => ({ render: m.mine })), true],
+  ['/app/roles', () => import('./views/roles.js'), true, 'manager'],
   ['/app/rooms', () => import('./views/rooms.js'), true],
   ['/app/meet/:kind/:id', () => import('./views/meet.js'), true],
   ['/app/revise/:material', () => import('./views/revise.js'), true, true]
@@ -57,17 +62,20 @@ const routes = [
 
 // مسارُ كل شاشةٍ وصلاحيتُها (ملاحظة ١٧٢)
 const PERM_OF = {
-  '/app/new': 'materials',
-  '/app/staff': 'team', '/app/staff/admins': 'team', '/app/team': 'team', '/app/field': 'team',
-  '/app/answers': 'team', '/app/repo': 'archive',
+  '/app/new': 'mat_add',
+  '/app/staff': 'tm_view', '/app/staff/admins': 'tm_view', '/app/team': 'tm_view',
+  '/app/field': 'tm_view', '/app/answers': 'tm_view', '/app/repo': 'rp_archive',
   '/app/cards': 'cards',
-  '/app/payroll': 'payroll',
-  '/app/bank-accounts': 'banks',
-  '/app/shifts': 'shifts', '/app/sites': 'shifts',
+  '/app/payroll': 'pay_view',
+  '/app/bank-accounts': 'bank_view',
+  '/app/shifts': 'sh_view', '/app/sites': 'sh_sites',
   '/app/evaluation': 'evaluation',
   '/app/interpretation': 'interpretation',
-  '/app/languages': 'settings', '/app/khateebs': 'settings', '/app/workflow': 'settings',
-  '/app/stats': 'reports', '/app/archive': 'reports'
+  '/app/certificates': 'certs',
+  '/app/contract': 'ctr_view',
+  '/app/languages': 'st_languages', '/app/khateebs': 'st_khateebs',
+  '/app/workflow': 'st_workflow',
+  '/app/stats': 'rp_stats', '/app/archive': 'rp_archive'
 };
 
 function match(path) {
@@ -157,8 +165,9 @@ async function render() {
       }
       // مدير المشروع من الهيئة يرى شاشات المنسق كلها اطّلاعًا، إلا ما يُنشئ أو يمسّ
       // الأجور والحسابات المصرفية، وإلا بنود العقد فهي لمدير المشروع (ملاحظتا ١٥٥ و١٦٤)
+      // وحساباتُ المتابعة مثلُه: ترى ولا تفعل (ملاحظة ٢٧١)
       const NOT_FOR_SUPERVISOR = ['/app/new', '/app/payroll', '/app/bank-accounts', '/app/circulars'];
-      const supervisorMay = isSupervisor()
+      const supervisorMay = isWatcher()
         && !NOT_FOR_SUPERVISOR.includes(path) && !path.startsWith('/app/revise');
       // مواقعُ العمل يفتحها القائدُ ليرى فريقَه، ولا يحرّر (ملاحظة ٢٢٧)
       const mayView = route.adminOnly === 'manager' ? isManager()
@@ -166,12 +175,12 @@ async function render() {
         : isAdmin() || supervisorMay;
       if (route.adminOnly && !mayView) return navigate('/app', { replace: true });
       // قائمة الصلاحيات: ما أُغلق على الحساب لا يُفتح ولو كُتب مساره (ملاحظة ١٧٢)
-      const need = PERM_OF[path] || (path.startsWith('/app/revise') ? 'materials' : null);
+      const need = PERM_OF[path] || (path.startsWith('/app/revise') ? 'mat_edit' : null);
       if (need && !can(need)) {
         toast('هذه الشاشة مغلقة على حسابك — راجع مدير المشروع.', 'bad');
         return navigate('/app', { replace: true });
       }
-      if (isSupervisor() && NOT_FOR_SUPERVISOR.includes(path)) return navigate('/app', { replace: true });
+      if (isWatcher() && NOT_FOR_SUPERVISOR.includes(path)) return navigate('/app', { replace: true });
       if (isSupervisor()) db.rpc('log_supervisor_view', { p_screen: path }).catch(() => {});
     }
     const mod = await route.load();

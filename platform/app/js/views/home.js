@@ -475,6 +475,32 @@ export async function render(ctx) {
     })();
   }
 
+  // حساباتٌ إداريةٌ فُعِّلت بيد غير مدير المشروع: تُعرض عليه ليُقرَّها،
+  // ولا يُعطَّل منها شيءٌ من نفسه فينقطع عملُ أحدٍ فجأة (ملاحظة ٢٧٠ و)
+  const reviewCard = h('div');
+  if (isManager()) {
+    (async () => {
+      try {
+        const rows = await db.rpc('admin_activations_to_review') || [];
+        if (!rows.length) return;
+        reviewCard.replaceChildren(h('section.card.stack.backup-card.warn',
+          h('div.row.between.wrap',
+            h('b', '⚠ حساباتٌ إداريةٌ فُعِّلت بيد غير مدير المشروع'),
+            h('span.badge.warn', String(rows.length))),
+          h('p.small.muted', 'صارت صلاحيةُ تفعيل التسجيلات الإدارية لك وحدَك. '
+            + 'وهذه فُعِّلت قبل ذلك: أقرَّها أو عطّلها من شاشة الحسابات الإدارية.'),
+          h('div.table-wrap', h('table.responsive',
+            h('thead', h('tr', ['العضو', 'الدور', 'فعّله', 'التاريخ'].map(t => h('th', t)))),
+            h('tbody', rows.map(r => h('tr',
+              h('td', { 'data-label': 'العضو' }, h('b', r.full_name)),
+              h('td', { 'data-label': 'الدور' }, r.role),
+              h('td', { 'data-label': 'فعّله' }, r.actor),
+              h('td', { 'data-label': 'التاريخ' }, fmtDateTime(r.at))))))),
+          h('a.btn.sm', { href: '/app/staff/admins' }, 'الحسابات الإدارية')));
+      } catch { /* لا تمنع الشاشة */ }
+    })();
+  }
+
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'متابعة التنفيذ'), h('h1', 'لوحة أعمال الترجمة'),
       h('p.muted', 'من الإسناد إلى قبول المنسق، ثم اعتماد المدير والنشر.')),
@@ -482,6 +508,7 @@ export async function render(ctx) {
       h('a.btn.primary', { href: '/app/new' }, '＋ إضافة مادة')),
     h('div.grid', { style: { marginBottom: '16px' } }, h('label.field', 'البحث', filters.q), h('label.field', 'الموقع', filters.mosque),
       h('label.field', 'اللغة', filters.lang), h('label.field', 'الحالة', filters.status)),
+    reviewCard,
     backupCard,
     out);
 }

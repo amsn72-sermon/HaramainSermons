@@ -123,11 +123,19 @@ async function weekSection(members) {
 
 function chip(s, reload) {
   const [label, kind] = SHIFT_STATUS[s.status] || [s.status, ''];
-  const el = h('button.btn.xs.shift-chip', { type: 'button', class: `st-${s.status}`,
-    title: [s.location, label, s.late_minutes ? 'تأخّر ' + lateText(s.late_minutes) : null].filter(Boolean).join(' · ') },
-    h('b', `${hhmm(s.start_at)}–${hhmm(s.end_at)}`),
+  // الوردةُ المقرَّرةُ هي المعروضة، لا وقتُ البصمة. والتأخيرُ يُعلَن
+  // في البطاقة لا في التلميح وحدَه (ملاحظة ٢٦٤)
+  const late = Number(s.late_minutes) || 0;
+  const early = Number(s.early_minutes) || 0;
+  const el = h('button.btn.xs.shift-chip', { type: 'button',
+    class: [`st-${s.status}`, late ? 'late' : '', s.unscheduled ? 'adhoc' : ''].filter(Boolean).join(' '),
+    title: [s.location, label,
+      s.unscheduled ? 'بصمةٌ خارج الجدول — لم تُحدَّد له وردية' : null,
+      late ? 'تأخّر ' + lateText(late) : null,
+      early ? 'انصرف قبل الوقت بـ ' + lateText(early) : null].filter(Boolean).join(' · ') },
+    h('b', s.unscheduled ? 'خارج الجدول' : `${hhmm(s.start_at)}–${hhmm(s.end_at)}`),
     s.location ? h('span.small', s.location) : null,
-    h('span.badge', { class: kind }, label));
+    late ? h('span.badge.warn', 'متأخّر ' + lateText(late)) : h('span.badge', { class: kind }, label));
   el.onclick = () => view(s, reload);
   return el;
 }
@@ -146,7 +154,12 @@ async function view(s, reload) {
     h('p.small.muted', `الحالة: ${label}`
       + (s.check_in_at ? ` · حضر ${fmtDateTime(s.check_in_at)}` : '')
       + (s.check_out_at ? ` · انصرف ${fmtDateTime(s.check_out_at)}` : '')
-      + (s.late_minutes ? ` · تأخّر ${lateText(s.late_minutes)}` : '')),
+      + (s.late_minutes ? ` · تأخّر ${lateText(s.late_minutes)}` : '')
+      + (s.early_minutes ? ` · انصرف قبل الوقت بـ ${lateText(s.early_minutes)}` : '')
+      + (s.worked_minutes != null ? ` · احتُسب ${lateText(s.worked_minutes)}` : '')),
+    s.unscheduled
+      ? h('p.small.warn', 'بصمةٌ خارج الجدول: لم تُحدَّد له وردةٌ في هذا اليوم، '
+        + 'فلا يُقاس عليها تأخيرٌ ولا متبقٍّ.') : null,
     // البديلُ المعتمد: نصُّ العقد يحسم يومَ الغائب أو عند عدم توفير بديلٍ معتمد،
     // فتسجيلُه هنا هو ما يُفرّق المغطَّى من غيره (ملاحظة ١٩٦)
     s.sub_member_id
@@ -381,7 +394,8 @@ async function todaySection() {
                   ? h('span.sub-badge', `بديله: ${s.sub?.full_name || '—'}`
                       + (s.sub_approved ? ' (معتمد)' : ' (غير معتمد)'))
                   : null),
-              h('td', { 'data-label': 'الوردية' }, `${hhmm(s.start_at)}–${hhmm(s.end_at)}`),
+              h('td', { 'data-label': 'الوردية' },
+                s.unscheduled ? 'خارج الجدول' : `${hhmm(s.start_at)}–${hhmm(s.end_at)}`),
               h('td', { 'data-label': 'الموقع' }, s.location || '—'),
               h('td', { 'data-label': 'الحضور' }, s.check_in_at ? fmtDateTime(s.check_in_at) : '—'),
               h('td', { 'data-label': 'الانصراف' }, s.check_out_at ? fmtDateTime(s.check_out_at) : '—'),

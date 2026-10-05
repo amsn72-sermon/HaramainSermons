@@ -18,11 +18,17 @@ export const state = {
   mfaExempt: false,      // معفًى صراحةً، يعلو على الإلزام العام (ملاحظة ٢٢٤)
   mfaLoaded: false,
   periods: [],           // فترات الدوام كما هي في الجدول (ملاحظة ٢٢٨)
-  filePattern: null      // نمط تسمية الملفات المسلَّمة (ملاحظة ١٤٤)
+  filePattern: null,     // نمط تسمية الملفات المسلَّمة (ملاحظة ١٤٤)
+  perms: null,           // الصلاحياتُ المفصَّلة محسومةً من الخادم (ملاحظة ٢٦٦)
+  roleLabels: null,      // الأسماءُ الظاهرةُ للأدوار (ملاحظة ٢٧٢)
+  roleDescr: null
 };
 
+// الأسماءُ الظاهرةُ للأدوار: أصلُها هنا، ويكتبها مديرُ المشروع فتُحمَّل
+// من الجدول فتعلو على هذه (ملاحظة ٢٧٢)
 export const ROLE_LABEL = { manager: 'مدير المشروع', coordinator: 'منسق', translator: 'مترجم',
-  supervisor: 'مدير المشروع من الهيئة', field_lead: 'قائد الفريق الميداني' };
+  supervisor: 'مدير المشروع من الهيئة', field_lead: 'قائد الفريق الميداني',
+  viewer: 'متابع' };
 // فتراتُ الدوام: أسماؤها من الجدول، وهذه أسماءُ المبذورة منها (ملاحظة ٢٢٨)
 export const PERIOD_LABEL = { morning: 'الصباحية', evening: 'المسائية', night: 'الليلية' };
 export const periodName = code =>
@@ -48,15 +54,20 @@ export const daysLabel = days => {
   return d.map(i => WEEK_DAYS[i]).join('، ');
 };
 
-// صفتان تُكتبان على حساب المنسق، وصلاحيتُهما صلاحيتُه نفسُها (ملاحظة ٢٠٠)
+// صفتان تُكتبان على حساب المنسق — والأمرُ في النظام على حاله بلا إعلان
+// (ملاحظتا ٢٠٠ و٢٦٥)
 export const ADMIN_TITLE = {
   ops_manager: 'مدير العمليات التشغيلية',
-  ops_deputy:  'مساعد مدير العمليات'
+  ops_deputy:  'مساعد مدير العمليات التشغيلية'
 };
-// الصفةُ المكتوبة إن وُجدت، وإلا فاسمُ الدور
+// الصفةُ المكتوبة إن وُجدت، وإلا فاسمُ الدور.
+// وحسابُ المتابعة يُعرَض بمسمّاه الوظيفيِّ لا بدوره، إكرامًا لمقامه
+// (ملاحظة ٢٧١ ح). والأسماءُ المكتوبةُ تعلو على المبذورة (ملاحظة ٢٧٢).
+export const roleName = key => state.roleLabels?.[key] || ROLE_LABEL[key] || key || '';
 export const roleLabel = m =>
-  (m && m.admin_title && ADMIN_TITLE[m.admin_title])
-  || ROLE_LABEL[m?.role] || m?.role || '';
+  (m && m.job_title)
+  || (m && m.admin_title && roleName(m.admin_title))
+  || roleName(m?.role);
 export const STATUS_LABEL = { pending: 'بانتظار التفعيل', active: 'مفعّل', disabled: 'معطّل' };
 export const TRACK_STATUS = {
   awaiting_receipt: ['بانتظار الاستلام', 'warn'],
@@ -98,7 +109,13 @@ export const isManager = () => state.profile?.role === 'manager' && state.profil
 export const isActive = () => state.profile?.status === 'active';
 // مدير المشروع من الهيئة: يرى ما يراه المنسق ولا يعدّل شيئًا (ملاحظتا ١٤٦ و١٦٤)
 export const isSupervisor = () => state.profile?.role === 'supervisor' && state.profile?.status === 'active';
-export const canViewReports = () => isAdmin() || isSupervisor();
+// حسابُ المتابعة: يرى ما يراه المنسق ولا يملك فعلًا، ويُعرَض بمسمّاه
+// الوظيفي. ولا يُكتب في شيءٍ من الشاشة «اطّلاعٌ فقط» (ملاحظة ٢٧١)
+export const isViewer = () => state.profile?.role === 'viewer' && state.profile?.status === 'active'
+  && !(state.profile?.expires_at && new Date(state.profile.expires_at) <= new Date());
+// من يرى ولا يكتب: مديرُ المشروع من الهيئة، وحساباتُ المتابعة
+export const isWatcher = () => isSupervisor() || isViewer();
+export const canViewReports = () => isAdmin() || isWatcher();
 
 // ---------------------------------------------------------------------
 // قائمة الصلاحيات: الأصل الفتح، ويغلق مدير المشروع ما يشاء لحسابٍ بعينه
@@ -124,15 +141,38 @@ export const PERM_LABEL = {
 export const PERM_KEYS = Object.keys(PERM_LABEL);
 // الأصلُ في المفاتيح الفتح، إلا ما لا يُستدرك فأصلُه المنع (ملاحظة ٢١٤)
 export const PERM_CLOSED = ['delete_member'];
-export const can = key => (isManager() ? true
-  : PERM_CLOSED.includes(key) ? state.profile?.perms?.[key] === true
-  : state.profile?.perms?.[key] !== false);
+
+// الصلاحياتُ مفصَّلةٌ الآن: سبعٌ وأربعون مفردةً تحت رؤوسها، يُفصل فيها
+// في الخادم وتُقرأ هنا جاهزةً. وما لم يصل بعدُ يُقاس على الأصل القديم،
+// فلا تنكسر شاشةٌ في أثناء التحميل (ملاحظة ٢٦٦).
+export const can = key => {
+  if (isManager()) return true;
+  const m = state.perms;
+  if (m && key in m) return m[key] === true;
+  if (PERM_CLOSED.includes(key)) return state.profile?.perms?.[key] === true;
+  return state.profile?.perms?.[key] !== false;
+};
+
+// تُحمَّل مرةً مع الملف الشخصي
+export async function loadPerms() {
+  if (!auth.session) { state.perms = null; return; }
+  try { state.perms = await db.rpc('my_perms'); } catch { state.perms = null; }
+}
+
+export async function loadRoleLabels() {
+  try {
+    const rows = await db.select('role_labels', { select: 'key,label,descr' });
+    state.roleLabels = Object.fromEntries((rows || []).map(r => [r.key, r.label]));
+    state.roleDescr = Object.fromEntries((rows || []).map(r => [r.key, r.descr]));
+  } catch { /* تبقى الأسماءُ المبذورة */ }
+}
 
 export async function loadProfile() {
   if (!auth.session) { state.profile = null; return null; }
   const uid = auth.user?.id || (await auth.loadUser())?.id;
   const rows = await db.select('profiles', { select: '*', id: `eq.${uid}` });
   state.profile = rows[0] || null;
+  if (state.profile) await Promise.all([loadPerms(), loadRoleLabels()]);
   return state.profile;
 }
 

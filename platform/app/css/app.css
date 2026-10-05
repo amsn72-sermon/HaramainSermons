@@ -670,16 +670,24 @@ dialog:has(.card-show) { width: min(760px, calc(100vw - 24px)); }
 .prod-chip b { color: var(--accent-text); font-size: 1rem; font-variant-numeric: tabular-nums; }
 .prod-chip .sep { color: var(--muted); }
 
-/* القائمة الجانبية مجموعات مرتَّبة بمسار العمل (ملاحظة ٩٢) */
-.nav-group { display: flex; flex-direction: column; gap: 2px; }
-.nav-group + .nav-group { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
-.nav-head { padding: 0 14px 6px; font-size: .72rem; letter-spacing: .04em; color: var(--muted); }
+/* القائمة الجانبية مجموعاتٌ تُطوى وتُفتح (ملاحظتا ٩٢ و٢٦٨) */
+.nav-group { display: block; }
+.nav-group + .nav-group { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+.nav-head { display: flex; align-items: center; gap: 8px; cursor: pointer;
+  padding: 7px 14px; font-size: .78rem; letter-spacing: .03em; color: var(--muted);
+  border-radius: 10px; list-style: none; user-select: none; }
+.nav-head::-webkit-details-marker { display: none; }
+.nav-head::after { content: '‹'; margin-inline-start: auto; font-size: 1rem; line-height: 1;
+  transition: transform .15s ease; color: var(--muted); }
+.nav-group[open] > .nav-head::after { transform: rotate(-90deg); }
+.nav-head:hover { background: var(--hover, rgba(255, 255, 255, .04)); color: var(--text); }
+.nav-group[open] > .nav-head { color: var(--text); font-weight: 600; }
+/* الوحدةُ الداخلية عنوانٌ باهتٌ لا مفتاحُ طيٍّ ثانٍ — فطبقتان تكفيان */
+.nav-unit { display: block; padding: 8px 14px 3px; font-size: .68rem; color: var(--muted);
+  opacity: .75; letter-spacing: .03em; }
 @media (max-width: 900px) {
-  /* في الجوال يصير الشريط صفًّا: المجموعات تتجاور بفاصل خفيف */
-  .nav-group { flex-direction: row; flex-wrap: wrap; gap: 5px; }
-  .nav-group + .nav-group { margin-top: 0; padding-top: 0; border-top: 0;
-    border-inline-start: 1px solid var(--border); padding-inline-start: 8px; margin-inline-start: 4px; }
-  .nav-head { display: none; }
+  .nav-group + .nav-group { margin-top: 4px; }
+  .nav-head { padding: 9px 12px; }
 }
 
 /* رسوم صفحة التعريف (ملاحظة ٩٣) */
@@ -828,16 +836,14 @@ dialog.idle-dlg b { color: var(--accent-text); font-variant-numeric: tabular-num
   .nav-toggle { display: inline-flex; align-items: center; order: -1; }
   .sidenav { display: none; }
   .sidenav.open { display: block; padding: 12px; border-bottom: 1px solid var(--border); }
-  .sidenav.open .nav-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-  .sidenav.open .nav-head { display: block; grid-column: 1 / -1; padding: 8px 4px 2px; font-weight: 600; }
-  .sidenav.open .nav-group + .nav-group { margin-top: 10px; padding-top: 8px;
+  .sidenav.open .nav-group { display: block; }
+  .sidenav.open .nav-head { display: flex; padding: 10px 6px; font-weight: 600; }
+  .sidenav.open .nav-group + .nav-group { margin-top: 6px; padding-top: 6px;
     border-top: 1px solid var(--border); border-inline-start: 0; padding-inline-start: 0; margin-inline-start: 0; }
   .sidenav.open a { text-align: start; border-inline-start-width: 3px; min-height: 44px; display: flex; align-items: center; }
   .sidenav.open .nav-out { justify-content: space-between; }
 }
-@media (max-width: 480px) {
-  .sidenav.open .nav-group { grid-template-columns: 1fr; }
-}
+
 
 /* ------------------------------------------------------------------
    لوحة المتابعة التفاعلية: مؤشرات تُضغط، ومن عنده العمل الآن (ملاحظة ١٠٧)
@@ -1545,3 +1551,73 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 /* بطاقةُ النسخة الاحتياطية في لوحة الأعمال (ملاحظة ٢٤٧ د) */
 .backup-card { border-inline-start: 3px solid var(--ok, #2e7d52); }
 .backup-card.warn { border-inline-start-color: var(--warn-text, #a15c00); }
+
+/* ------------------------------------------------------------------
+   الدليل معجمًا: المصطلحُ ومقابلُه في صفوفٍ تُقرأ كالمعاجم (ملاحظة ٢٥٦)
+------------------------------------------------------------------- */
+.gl-cols { column-count: 2; column-gap: 28px; column-rule: 1px solid var(--border); }
+@media (max-width: 760px) { .gl-cols { column-count: 1; } }
+.gl-entry { display: flex; align-items: baseline; gap: 6px; width: 100%;
+  break-inside: avoid; text-align: start; font: inherit; cursor: pointer;
+  background: transparent; border: 0; border-radius: 8px; padding: 7px 10px; color: var(--text); }
+.gl-entry.odd { background: var(--row-alt, rgba(255, 255, 255, .035)); }
+.gl-entry:hover { background: var(--hover, rgba(185, 151, 91, .12)); }
+.gl-entry .gl-ar { font-weight: 700; }
+.gl-entry .gl-sep { color: var(--muted); }
+.gl-entry .gl-tr { color: var(--text); unicode-bidi: plaintext; }
+.gl-entry .gl-dot { margin-inline-start: auto; flex: 0 0 auto; font-size: .62rem;
+  color: var(--gold); border: 1px solid var(--gold); border-radius: 999px; padding: 0 6px; }
+.gl-letter-head { break-inside: avoid; column-span: all; margin: 14px 0 6px;
+  font-size: 1.05rem; font-weight: 700; color: var(--gold);
+  border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.gl-letters { display: flex; flex-wrap: wrap; gap: 4px; margin: 10px 0 4px; }
+.gl-letter { font: inherit; cursor: pointer; background: transparent; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 8px; min-width: 30px; padding: 3px 6px; }
+.gl-letter:hover { color: var(--gold); border-color: var(--gold); }
+.gl-grid-table td { unicode-bidi: plaintext; }
+.gl-pick { max-height: 240px; overflow: auto; border: 1px solid var(--border);
+  border-radius: 10px; padding: 8px; }
+.gl-hist { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px; }
+/* عددُ المصطلحات رقمٌ بارز، و«مصطلحًا» صغيرةٌ تحته (ملاحظة ٢٥٨) */
+.lang-count { display: flex; align-items: baseline; gap: 5px; margin-top: 6px; }
+.lang-count b { font-size: 1.6rem; line-height: 1; font-variant-numeric: tabular-nums; color: var(--accent-text, var(--gold)); }
+.lang-count small { font-size: .72rem; color: var(--muted); }
+.lang-card.native { border-color: var(--gold); }
+
+/* ------------------------------------------------------------------
+   لوحةُ الصلاحيات المفصَّلة (ملاحظة ٢٦٦)
+------------------------------------------------------------------- */
+.perm-wrap { display: grid; gap: 14px; max-height: 420px; overflow: auto; padding-inline-end: 4px; }
+.perm-group h4 { margin: 0 0 6px; font-size: .85rem; color: var(--gold); }
+.perm-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; }
+.perm-row.child { padding-inline-start: 18px; }
+.perm-row.head { font-weight: 600; border-top: 1px solid var(--border); padding-top: 8px; }
+.perm-name { flex: 1; }
+.perm-name .warn { color: #c98a2e; }
+.perm-tag { font-size: .68rem; border: 1px solid var(--border); border-radius: 999px;
+  padding: 1px 7px; color: var(--muted); white-space: nowrap; }
+.perm-tag.ok { color: #2e9e6b; border-color: #2e9e6b; }
+.perm-tag.bad { color: #c0564a; border-color: #c0564a; }
+
+/* ------------------------------------------------------------------
+   الشهادات وتسميات الأدوار (ملاحظتا ٢٦٧ و٢٧٢)
+------------------------------------------------------------------- */
+.cert-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 10px 0; border-bottom: 1px solid var(--border); }
+.cert-row:last-child { border-bottom: 0; }
+.role-row { display: grid; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--border);
+  grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr); align-items: end; }
+.role-row:last-child { border-bottom: 0; }
+.role-base { display: flex; flex-direction: column; gap: 2px; }
+@media (max-width: 700px) { .role-row { grid-template-columns: 1fr; } }
+.verify-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 8px 0 0; }
+.verify-grid dt { color: var(--muted); font-size: .85rem; }
+.verify-grid dd { margin: 0; }
+.verify-ok { border-color: #2e9e6b; }
+.verify-bad { border-color: #c0564a; }
+.gl-task input { width: 100%; }
+.gl-save { display: inline-block; min-width: 1em; color: var(--muted); }
+.gl-save.ok { color: #2e9e6b; }
+.gl-save.bad { color: #c0564a; }
+.shift-chip.late { border-color: #c98a2e; }
+.shift-chip.adhoc { border-style: dashed; }

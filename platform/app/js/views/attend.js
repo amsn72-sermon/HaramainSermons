@@ -38,6 +38,14 @@ export async function render() {
   inBtn.onclick = () => mark(false);
   outBtn.onclick = () => mark(true);
 
+  // ساعاتٌ ودقائقُ بعبارةٍ عربيةٍ مختصرة
+  const hrs = min => {
+    const m = Math.max(0, Math.round(Number(min) || 0));
+    const H = Math.floor(m / 60), M = m % 60;
+    if (!H) return `${M} دقيقة`;
+    return M ? `${H} ساعة و${M} دقيقة` : `${H} ساعة`;
+  };
+
   function draw() {
     const site = today.site || null;
     const inAt = today.check_in_at, outAt = today.check_out_at;
@@ -56,6 +64,29 @@ export async function render() {
         map ? map.el : null,
         h('p.small.muted', 'اخرج إلى مكانٍ مكشوفٍ قليلًا إن ضعفت الإشارة داخل المبنى، '
           + 'فالسقفُ يحجب الأقمار فتقلّ الدقّة.')),
+
+      // الوردةُ المقرَّرة هي المرجع: تُعرض كما هي، ويُعلَن التأخيرُ،
+      // والمتبقّي إلى نهايتها لا ثماني ساعاتٍ من البصمة (ملاحظة ٢٦٤)
+      h('section.card.stack',
+        h('h3', 'ورديتك اليوم'),
+        today.scheduled === false
+          ? h('p.small.warn', 'لم تُحدَّد لك وردةٌ اليوم، وما سجّلتَه بصمةٌ خارج الجدول.')
+          : today.shift_start
+            ? h('div.stack',
+                h('p', 'من ', h('b', String(today.shift_start).slice(0, 5)),
+                  ' إلى ', h('b', String(today.shift_end).slice(0, 5)),
+                  today.flex ? h('span.badge', { style: { marginInlineStart: '8px' } }, 'دوامٌ مرن') : null),
+                Number(today.late_minutes) > 0
+                  ? h('p.small.warn', `حضرتَ متأخّرًا ${hrs(today.late_minutes)}.`) : null,
+                inAt && !outAt && today.left_minutes != null
+                  ? h('p.small.muted', Number(today.left_minutes) > 0
+                      ? `بقي من وردتك ${hrs(today.left_minutes)}.`
+                      : 'انتهى وقتُ وردتك.') : null,
+                Number(today.early_minutes) > 0
+                  ? h('p.small.warn', `انصرفتَ قبل نهاية الوردة بـ ${hrs(today.early_minutes)}.`) : null,
+                today.worked_minutes != null
+                  ? h('p.small.muted', `ما احتُسب لك من عمل: ${hrs(today.worked_minutes)}.`) : null)
+            : h('p.muted', 'لا وردةَ مجدولةٌ لك اليوم.')),
 
       h('section.card.stack',
         h('h3', 'التسجيل'),

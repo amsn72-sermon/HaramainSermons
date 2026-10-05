@@ -1,5 +1,5 @@
 // مهامي، ومساحة عمل المهمة لكل الأدوار
-import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDateTime, fmtMinutes, fmtDuration, digitalCountdown } from '../ui.js';
+import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDate, fmtDateTime, fmtMinutes, fmtDuration, digitalCountdown } from '../ui.js';
 import { db, storage, auth } from '../sb.js';
 import { state, isManager, isAdmin, TRACK_SELECT, MOSQUE, MOSQUE_ANY, PRIORITY, EVENT_LABEL, sortStages, currentStage,
   langName, langDir, stageName } from '../store.js';
@@ -37,10 +37,72 @@ export function scoreBadge(score) {
 }
 
 // ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
+// مهامُّ ترجمةِ المصطلحات (ملاحظة ٢٦٠ ب)
+//
+//   جدولٌ بعمودين: المصطلحُ العربيُّ وخانةٌ يكتب فيها، ينتقل بينها
+//   بـ Tab، ويُحفظ كلَّما كتب فلا يُلزَم بإتمامها في جلسة. وما يكتبه
+//   يدخل الدليلَ معتمدًا بلا مراجعة.
+// ---------------------------------------------------------------------
+async function glossaryTaskDialog(task, onDone) {
+  const body = h('div.stack', h('p.muted', 'يُحمَّل…'));
+  const dlg = dialog({
+    title: `ترجمةُ المصطلحات — ${task.language_name}`,
+    body,
+    buttons: [{ label: 'إغلاق', value: null }]
+  });
+
+  let rows = [];
+  try { rows = await db.rpc('glossary_task_rows', { p_task: task.id }) || []; }
+  catch (err) { body.replaceChildren(h('p.bad', err.message)); return dlg; }
+
+  const progress = h('span.badge');
+  const paint = () => {
+    const done = rows.filter(r => r.term_tr).length;
+    progress.textContent = `${done} / ${rows.length}`;
+  };
+
+  const save = async (r, input, mark) => {
+    const text = input.value.trim();
+    if (text === (r.term_tr || '')) return;
+    try {
+      await db.rpc('set_translation', { p_term: r.term_id, p_lang: task.language_code,
+        p_text: text, p_why: null, p_task: task.id });
+      r.term_tr = text;
+      mark.textContent = text ? '✓' : '';
+      mark.className = 'gl-save' + (text ? ' ok' : '');
+      paint();
+      if (onDone) onDone();
+    } catch (err) { toast(err.message, 'bad'); mark.textContent = '✗'; mark.className = 'gl-save bad'; }
+  };
+
+  body.replaceChildren(
+    h('div.row.between', h('span.small.muted', task.note || ''), progress),
+    h('p.small.muted', 'يُحفظ ما تكتبه فور خروجك من الخانة — لا زرَّ حفظ، ولا يلزمك إتمامُها الآن.'),
+    h('div.table-wrap.gl-task',
+      h('table.responsive',
+        h('thead', h('tr', h('th', 'المصطلح'), h('th', 'المقابل'), h('th', ''))),
+        h('tbody', rows.map(r => {
+          const input = h('input', { value: r.term_tr || '', dir: 'auto',
+            'aria-label': `مقابل ${r.term_ar}` });
+          const mark = h('span.gl-save' + (r.term_tr ? ' ok' : ''), r.term_tr ? '✓' : '');
+          input.addEventListener('change', () => save(r, input, mark));
+          input.addEventListener('blur', () => save(r, input, mark));
+          return h('tr',
+            h('td', { 'data-label': 'المصطلح' }, h('b', r.term_ar),
+              r.explanation ? h('div.small.muted', r.explanation) : null),
+            h('td', { 'data-label': 'المقابل' }, input),
+            h('td', mark));
+        })))));
+  paint();
+  return dlg;
+}
+
 export async function list() {
-  const [all, hist] = await Promise.all([
+  const [all, hist, glTasks] = await Promise.all([
     db.select('tracks', { select: FULL, order: 'created_at.desc', limit: 300 }),
-    db.rpc('my_history').catch(() => [])
+    db.rpc('my_history').catch(() => []),
+    db.rpc('my_glossary_tasks').catch(() => [])
   ]);
   const tracks = all.map(sortStages).filter(t => myStages(t).length);
   const now = tracks.filter(needsMe);
@@ -81,12 +143,29 @@ export async function list() {
   const section = (title, count, content, emptyText) => h('section', { style: { marginBottom: '24px' } },
     h('h2', `${title} (${count})`), count ? content : h('p.muted', emptyText));
 
-  const empty = !now.length && !upcoming.length && !done.length;
+  // بطاقةُ مهمّةِ المصطلحات
+  const glCard = t => {
+    const open = h('button.btn.primary', { type: 'button' },
+      t.done >= t.total ? 'مراجعة' : 'ابدأ الترجمة');
+    open.onclick = () => glossaryTaskDialog(t, () => { /* يُحدَّث العدُّ داخل النافذة */ });
+    return h('div.card', h('div.row',
+      h('div', { style: { flex: 1, minWidth: '220px' } },
+        h('b', `${t.total} مصطلحًا تنتظر ترجمتك — ${t.language_name}`),
+        t.note ? h('div.small.muted', t.note) : null,
+        t.due_on ? h('div.small', 'الموعد: ', fmtDate(t.due_on)) : null),
+      h('span.badge' + (t.done >= t.total ? '.ok' : ''), `${t.done} / ${t.total}`),
+      open));
+  };
+
+  const empty = !now.length && !upcoming.length && !done.length && !(glTasks || []).length;
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'مساحة العمل'), h('h1', 'مهامي')),
       avg != null && h('div', { style: { textAlign: 'center' } }, h('div.small.muted', 'متوسط تقييمك'), scoreBadge(avg))),
     empty ? emptyState('لا مهام مسندة إليك بعد', 'ستظهر هنا فور إسناد المنسق مادةً إليك.') : h('div',
       section('تحتاج إجراءً منك الآن', now.length, h('div.stack', now.map(card)), 'لا شيء بانتظارك حاليًا.'),
+      (glTasks || []).length
+        ? section('مصطلحاتٌ تنتظر ترجمتك', glTasks.length, h('div.stack', glTasks.map(glCard)), '')
+        : null,
       section('قادمة', upcoming.length, h('div.stack', upcoming.map(upcomingRow)), 'لا مراحل قادمة مسندة إليك.'),
       section('سجل أعمالي', done.length, doneTable, 'لم تُتم أي مرحلة بعد.'),
       done.length ? h('p.small.muted', 'التقييم 100 عند الإنجاز ضمن الوقت المحدد، وينقص بقدر التأخير. بعد إتمام دورك تُغلق المادة ولا يبقى منها إلا هذا السجل.') : null));

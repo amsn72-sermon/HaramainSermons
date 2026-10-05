@@ -56,14 +56,32 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 .doc-stamp .lbl { font-size: 7.5pt; color: #6b6257; }
 .doc-stamp .no { font-size: 11pt; font-weight: 700; letter-spacing: .6px; direction: ltr; margin: .4mm 0; }
 .doc-stamp .dt { font-size: 7.5pt; color: #3b3630; }
-/* الغلاف: العنوان في وسط صندوق الكتابة، وبياناته تحته */
-.cover { position: absolute; top: ${P.top}mm; inset-inline-start: ${P.side}mm; width: ${BOX_W}mm; height: ${BOX_H - 6}mm;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 6mm; }
-.cover .ct { font-size: 26pt; font-weight: 700; color: #1d1a16; line-height: 1.5; }
-.cover .cs { font-size: 15pt; color: #6b6257; }
-.cover .rule { width: 46mm; height: 0.8mm; background: #b9975b; border-radius: 1mm; }
-.cover .meta { font-size: 11pt; color: #3b3630; line-height: 2; }
-.cover .edition { font-size: 9pt; color: #6b6257; direction: ltr; }
+/* الغلاف: حديثٌ اقتصاديٌّ في الطباعة — أرضيةٌ بيضاء، ولونان لا غير،
+   وشريطٌ رفيعٌ على الحافّة وحدَه ما يحمل لونًا ممتدًّا، وحِليةٌ خطّيّةٌ
+   واحدة. والبناءُ بالفراغ لا بالحلية (ملاحظة ٢٧٣) */
+.cover-sheet { background: #fff; }
+.cover-sheet img.lh { display: none; }
+.cover { position: absolute; inset: 0; padding: 26mm 26mm 20mm; display: flex;
+  flex-direction: column; text-align: start; }
+.cover .spine { position: absolute; inset-inline-end: 0; top: 0; bottom: 0; width: 15mm;
+  background: #b9975b; opacity: .13; }
+.cover .spine::after { content: ''; position: absolute; inset-inline-start: 0; top: 0; bottom: 0;
+  width: 1.1mm; background: #b9975b; }
+.cover .logos { display: flex; align-items: center; gap: 7mm; }
+.cover .logos img { height: 14mm; }
+.cover .org { margin-top: 5mm; font-size: 9.5pt; color: #b9975b; letter-spacing: .02em; line-height: 1.9; }
+.cover .gap { flex: 0 0 26mm; }
+.cover .ct { font-size: 32pt; font-weight: 700; color: #1d2b3a; line-height: 1.35; max-width: 125mm; }
+.cover .orn { display: block; width: 52mm; height: 10mm; margin: 7mm 0 0; }
+.cover .cs { margin-top: 5mm; font-size: 14pt; font-weight: 400; color: #4a5560; }
+.cover .meta { margin-top: 3mm; font-size: 11pt; color: #6b6257; line-height: 2; }
+.cover .foot { margin-top: auto; font-size: 8.5pt; color: #6b6257; letter-spacing: .06em; }
+.cover .edition { direction: ltr; }
+/* ظهرُ الغلاف: صفحةُ الحقوق */
+.colophon { position: absolute; inset: 0; padding: 40mm 30mm; display: flex; flex-direction: column;
+  gap: 6mm; color: #3b3630; font-size: 10.5pt; line-height: 2; background: #fff; }
+.colophon h3 { margin: 0; font-size: 12pt; color: #1d2b3a; }
+.colophon .qr { width: 24mm; height: 24mm; }
 .idx h2 { font-size: 15pt; margin: 0 0 4mm; color: #1d1a16; }
 .idx table { width: 100%; border-collapse: collapse; font-size: 8.5pt; table-layout: fixed; }
 .idx th, .idx td { border-bottom: 1px solid #e7e1d8; padding: 1.1mm 1.4mm; text-align: start;
@@ -181,19 +199,65 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
     const pages = d.getElementById('pages');
     const out = [];
 
-    // ٣) الغلاف
+    // ٣) الغلاف (ملاحظة ٢٧٣)
     const cover = sheet();
+    cover.className = 'sheet cover-sheet';
     const c = el('div', 'cover');
+    c.append(el('div', 'spine'));
+
+    const logos = el('div', 'logos');
+    for (const [src, alt] of [['/assets/alharamain-logo.png', 'الهيئة'],
+                              ['/assets/presidency.png', 'الرئاسة']]) {
+      const im = d.createElement('img'); im.src = new URL(src, location.origin).href; im.alt = alt;
+      logos.append(im);
+    }
+    c.append(logos);
+    const org = el('div', 'org');
+    org.append(el('div', null, 'الهيئةُ العامةُ للعناية بشؤون المسجد الحرام والمسجد النبوي'));
+    org.append(el('div', null, 'مشروعُ خادم الحرمين الشريفين لترجمة خطب الحرمين'));
+    c.append(org);
+
+    c.append(el('div', 'gap'));
     c.append(el('div', 'ct', meta.title));
+
+    // حِليةٌ هندسيةٌ خطّيّةٌ واحدة: نجمةٌ ثمانيةٌ مجرَّدة
+    const orn = d.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    orn.setAttribute('class', 'orn');
+    orn.setAttribute('viewBox', '0 0 140 26');
+    orn.innerHTML = '<line x1="0" y1="13" x2="52" y2="13" stroke="#b9975b" stroke-width="1"/>'
+      + '<line x1="88" y1="13" x2="140" y2="13" stroke="#b9975b" stroke-width="1"/>'
+      + '<g fill="none" stroke="#b9975b" stroke-width="1.1">'
+      + '<rect x="62" y="5" width="16" height="16"/>'
+      + '<rect x="62" y="5" width="16" height="16" transform="rotate(45 70 13)"/></g>';
+    c.append(orn);
+
     if (meta.period) c.append(el('div', 'cs', meta.period));
-    c.append(el('div', 'rule'));
     const m = el('div', 'meta');
     if (meta.language) m.append(el('div', null, `اللغة: ${langName(meta.language)}`));
     m.append(el('div', null, `عدد الأعمال: ${items.length}`));
     c.append(m);
-    c.append(el('div', 'edition', meta.edition || ''));
+
+    const foot = el('div', 'foot');
+    foot.append(el('div', null, 'مشروعُ خادم الحرمين الشريفين لترجمة خطب الحرمين'));
+    foot.append(el('div', 'edition', [meta.edition, fmtHijri(new Date()), String(new Date().getFullYear())]
+      .filter(Boolean).join(' · ')));
+    c.append(foot);
     cover.append(c);
     out.push(cover);
+
+    // ظهرُ الغلاف: نبذةٌ وحفظُ الحقوق ورقمُ الإصدار
+    const back = sheet();
+    back.className = 'sheet cover-sheet';
+    const bk = el('div', 'colophon');
+    bk.append(el('h3', null, meta.title));
+    bk.append(el('p', null, 'إصدارٌ من مشروع خادم الحرمين الشريفين لترجمة خطب الحرمين، '
+      + 'التابع للهيئة العامة للعناية بشؤون المسجد الحرام والمسجد النبوي. '
+      + 'يجمع هذا الكتابُ أعمالًا مترجمةً معتمدةً، وُلّد من المنصة عند طلبه.'));
+    bk.append(el('p', null, 'جميعُ الحقوق محفوظة. ولا يُنسب إلى المشروع ما لم يصدر عنه.'));
+    bk.append(el('p', null, `رقمُ الإصدار: ${meta.edition || '—'} — وُلّد في ${
+      new Date().toISOString().slice(0, 10)}`));
+    back.append(bk);
+    out.push(back);
 
     // ٤) الفهرس
     const mixed = !meta.language;

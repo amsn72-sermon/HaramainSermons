@@ -1,9 +1,9 @@
 // فريق العمل: طلبات التسجيل، التفعيل، الأدوار، واللغات
 import { h, fill, toast, busy, dialog, emptyState, fmtDate, fmtDateTime, confirm, req } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, isManager, PERM_LABEL, PERM_KEYS, ROLE_LABEL, STATUS_LABEL,
+import { state, isManager, ROLE_LABEL, STATUS_LABEL, roleName,
   TRACK_LABEL, trackOf, CITY, NO_FATWA, langName, stageName, roleLabel, ADMIN_TITLE,
-  PERM_CLOSED, leadScope, can, LEAD_KIND } from '../store.js';
+  leadScope, can, LEAD_KIND } from '../store.js';
 import { POLICY_KEY, POLICY_VERSION } from '../policy.js';
 import { TEAM_FIELDS, teamRows, exportExcel, exportWord, exportPdf } from '../teamexport.js';
 import { nationalitySelect } from '../nationalities.js';
@@ -41,7 +41,7 @@ export async function render(ctx, opts = {}) {
       return as !== 'coordinator' && as !== 'field' && trackOf(m) !== 'field';
     }
     // وحساب مشرف الهيئة يُدار مع الحسابات الإدارية (ملاحظة ١٤٦)
-    if (group === 'admins') return ['manager', 'coordinator', 'supervisor'].includes(m.role);
+    if (group === 'admins') return ['manager', 'coordinator', 'supervisor', 'viewer'].includes(m.role);
     if (group === 'field') return trackOf(m) === 'field';
     if (group === 'answers') return trackOf(m) === 'answers';
     return m.role === 'translator' && trackOf(m) === 'translation';
@@ -120,7 +120,8 @@ export async function render(ctx, opts = {}) {
 
   async function edit(m) {
     const role = h('select', { 'aria-label': 'الدور', disabled: !isManager() || m.id === state.profile.id },
-      Object.entries(ROLE_LABEL).map(([k, v]) => h('option', { value: k, selected: m.role === k }, v)));
+      Object.keys(ROLE_LABEL).filter(k => k !== 'viewer' || m.role === 'viewer')
+        .map(k => h('option', { value: k, selected: m.role === k }, roleName(k))));
 
     // صفةُ العمليات: تُكتب على حساب المنسق، وصلاحيتُه لا تتغير بها.
     // ولا تظهر في التسجيل: التحويلُ إليها بيد مدير المشروع (ملاحظة ٢٠٠)
@@ -181,6 +182,26 @@ export async function render(ctx, opts = {}) {
     // مدرِّبٌ من خبراء الفريق (ملاحظة ٢٣٢)
     const trainerBox = h('input', { type: 'checkbox', checked: m.is_trainer ? true : null,
       disabled: !can('team') || null, 'aria-label': 'مدرّب' });
+
+    // الدوامُ المرن: خيارٌ يُفعَّل لمن يُراد له وحدَه، والأصلُ الالتزامُ
+    // بالوقت والمكان المحدَّدَين له (ملاحظة ٢٦٤ ز)
+    const flexBox = h('input', { type: 'checkbox', checked: m.flex_hours ? true : null,
+      disabled: !can('sh_flex') || null, 'aria-label': 'دوام مرن' });
+    const flexCard = (isManager() || can('sh_flex'))
+      ? h('fieldset.stack',
+          h('legend', 'الدوام'),
+          h('label.check', flexBox, h('span', 'دوامٌ مرن')),
+          h('p.small.muted', 'الأصلُ أن يلتزم بالوردية والموقع المحدَّدَين له، فيُحتسب تأخيرُه '
+            + 'وانصرافُه المبكر. والدوامُ المرن يُطالبه بإتمام الساعات لا بالساعة المعيَّنة.'))
+      : null;
+
+    // المسمّى الوظيفيُّ لحساب المتابعة — يُعدَّل متى شاء المدير (ملاحظة ٢٧١ ط)
+    const jobTitle = h('input', { value: m.job_title || '', 'aria-label': 'المسمّى الوظيفي',
+      placeholder: 'مدير إدارة اللغات…' });
+    const jobCard = (isManager() && m.role === 'viewer')
+      ? h('label.field', 'المسمّى الوظيفي', jobTitle,
+          h('small', 'هو الذي يظهر في المنصة مكان الدور، ويُعدَّل متى شئت'))
+      : null;
 
     const syncTitle = () => {
       if (!titleCard) return;
@@ -305,29 +326,80 @@ export async function render(ctx, opts = {}) {
       can('team') ? h('p.small.muted', 'وزرُّ الإلغاء حلٌّ جذريٌّ لأيِّ عطلٍ يقع: '
         + 'يُسقط كلَّ أثرٍ للتحقق ويفتح الحساب، ثم يُعاد إلزامُه متى شئت فيسجّل من جديد.') : null);
 
-    // قائمة صلاحيات الحساب الإداري — لمدير المشروع (ملاحظة ١٧٢)
-    const permBoxes = new Map();
-    // لا تُرسم أصلًا لغير مدير المشروع: لا مقفلةً ولا للاطّلاع (ملاحظة ٢١٣)
+    // ---------------------------------------------------------------
+    // لوحةُ الصلاحيات المفصَّلة — لمدير المشروع وحدَه (ملاحظة ٢٦٦)
+    //
+    //   سبعٌ وأربعون صلاحيةً في عشر وحدات، لكلٍّ أصلُها. وما يُغيَّر
+    //   هنا يُمنع في قاعدة البيانات لا في الشاشة وحدَها، ولا يرى
+    //   العضوُ لوحتَه هذه. ولوحةُ الصلاحيات نفسُها لا تُمنح لأحد.
+    // ---------------------------------------------------------------
+    const PERMED = ['coordinator', 'supervisor', 'field_lead', 'viewer'];
+    const permWant = new Map();          // المفتاح ← true | false | null (أصلُه)
+    const permBody = h('div.perm-wrap', h('p.small.muted', 'يُحمَّل…'));
+    const permUntil = h('input', { type: 'date', 'aria-label': 'أجل المنح' });
     const permCard = !isManager() ? null
-      : h('fieldset.stack', { style: { display: ['coordinator', 'supervisor', 'field_lead'].includes(m.role) ? '' : 'none' } },
+      : h('fieldset.stack', { style: { display: PERMED.includes(m.role) ? '' : 'none' } },
       h('legend', 'صلاحيات الحساب'),
-      h('p.small.muted', 'الأصل أن تكون كلها مفتوحة إلا ما لا يُستدرك كالحذف، فأصلُه المنع. '
-        + 'وما تُغلقه هنا يُحجب من القائمة، ويُمنع في قاعدة البيانات لا في الشاشة وحدها. '
-        + 'ولا يرى العضوُ قائمتَه هذه.'),
-      h('div.perm-grid', PERM_KEYS.map(k => {
-        const open = PERM_CLOSED.includes(k) ? m.perms?.[k] === true : m.perms?.[k] !== false;
-        const cb = h('input', { type: 'checkbox', checked: open ? true : null, 'aria-label': PERM_LABEL[k] });
-        permBoxes.set(k, cb);
-        return h('label.check', cb,
-          h('span', PERM_LABEL[k], PERM_CLOSED.includes(k) ? h('small.muted', ' — أصلُه المنع') : null));
-      })),
-      h('div.row',
-        h('button.btn.xs', { type: 'button', onclick: () => permBoxes.forEach(c => { c.checked = true; }) }, 'فتح الكل'),
-        h('button.btn.xs', { type: 'button', onclick: () => permBoxes.forEach(c => { c.checked = false; }) }, 'إغلاق الكل')));
-    role.addEventListener('change', () => {
-      if (permCard) {
-        permCard.style.display = ['coordinator', 'supervisor', 'field_lead'].includes(role.value) ? '' : 'none';
+      h('p.small.muted', 'لكلِّ صلاحيةٍ أصلُها: مفتوحةٌ ابتداءً أو مغلقةٌ لا تُنال إلا بمنحك. '
+        + 'وما تُغيّره هنا يُحكَم به في قاعدة البيانات لا في الشاشة وحدَها، ولا يرى العضوُ هذه اللوحة.'),
+      permBody,
+      h('label.field', 'أجلُ ما تمنحه الآن (اختياري)', permUntil,
+        h('small', 'يسقط المنحُ عند هذا التاريخ من نفسه، فلا يُنسى مفتوحًا')));
+
+    const PERM_STATE = { yes: ['مُنح', 'ok'], no: ['مُنع', 'bad'] };
+    async function drawPerms() {
+      let rows = [];
+      try { rows = await db.rpc('member_perm_sheet', { p_member: m.id }) || []; }
+      catch { permBody.replaceChildren(h('p.small.muted', 'تعذّر تحميل الصلاحيات.')); return; }
+      permWant.clear();
+      const groups = new Map();
+      for (const r of rows) {
+        if (!groups.has(r.grp || 'أخرى')) groups.set(r.grp || 'أخرى', []);
+        groups.get(r.grp || 'أخرى').push(r);
       }
+      const rowEl = r => {
+        const eff = r.setting === null || r.setting === undefined ? r.default_open : r.setting;
+        const cb = h('input', { type: 'checkbox', checked: eff ? true : null, 'aria-label': r.label });
+        const tag = h('span.perm-tag');
+        const paint = () => {
+          const want = permWant.has(r.key) ? permWant.get(r.key) : (r.setting ?? null);
+          if (want === null) {
+            tag.className = 'perm-tag muted';
+            tag.textContent = r.default_open ? 'أصلُه مفتوح' : 'أصلُه مغلق';
+          } else {
+            const [txt, tone] = PERM_STATE[want ? 'yes' : 'no'];
+            tag.className = 'perm-tag ' + tone;
+            tag.textContent = txt;
+          }
+        };
+        cb.addEventListener('change', () => { permWant.set(r.key, cb.checked); paint(); });
+        const undo = h('button.btn.xs.ghost', { type: 'button', title: 'العودة إلى الأصل' },
+          '↺');
+        undo.onclick = () => {
+          permWant.set(r.key, null); cb.checked = !!r.default_open; paint();
+        };
+        paint();
+        return h('label.check.perm-row', { class: r.parent ? 'child' : 'head' }, cb,
+          h('span.perm-name', r.label,
+            r.sensitive ? h('small.warn', ' ⚠ صلاحيةٌ حسّاسة — تُمنح بتقدير') : null),
+          tag, undo);
+      };
+      permBody.replaceChildren(...[...groups].map(([g, list]) =>
+        h('div.perm-group', h('h4', g), ...list.map(rowEl))));
+    }
+    if (permCard) drawPerms();
+
+    async function savePerms() {
+      for (const [key, want] of permWant) {
+        try {
+          await db.rpc('set_member_perm', { p_member: m.id, p_key: key, p_allowed: want,
+            p_until: want === true && permUntil.value ? permUntil.value : null, p_reason: null });
+        } catch (err) { toast(err.message, 'bad'); }
+      }
+    }
+
+    role.addEventListener('change', () => {
+      if (permCard) permCard.style.display = PERMED.includes(role.value) ? '' : 'none';
     });
 
     // اللغات من قائمة منسدلة مع رقائق تُحذف بضغطة (ملاحظة ٥٢)
@@ -468,6 +540,8 @@ export async function render(ctx, opts = {}) {
           myLeadCard,
           h('label.field', 'الفريق', trackSel,
             h('small', 'ومن هنا يُنقل العضو إلى إجابة السائلين: نقلُ السؤال ونقلُ الجواب، بلا فتوى'))),
+        jobCard,
+        flexCard,
         can('team') ? h('fieldset.stack',
           h('legend', 'التدريب'),
           h('label.check', trainerBox, h('span', 'مدرِّبٌ من خبراء الفريق')),
@@ -495,7 +569,6 @@ export async function render(ctx, opts = {}) {
           langRoles: [...chosen].map(code => ({ code, ...(roleState.get(code) || {}) })),
           may: mayBox.checked,
           city: citySel.value || null,
-          perms: Object.fromEntries([...permBoxes].map(([k, c]) => [k, c.checked])),
           contact: { full_name: fld.full_name.value.trim(), whatsapp: fld.whatsapp.value.trim(),
             nationality: fld.nationality.value.trim(), national_id: fld.national_id.value.trim().toUpperCase(),
             id_type: fld.id_type.value, residence: fld.residence.value.trim() } }) },
@@ -560,11 +633,15 @@ export async function render(ctx, opts = {}) {
       if ((result.city || null) !== (m.city || null)) {
         await db.rpc('set_member_city', { p_member: m.id, p_city: result.city });
       }
-      if (isManager() && ['coordinator', 'supervisor', 'field_lead'].includes(result.role)) {
-        const before = JSON.stringify(m.perms || {});
-        if (before !== JSON.stringify(result.perms)) {
-          await db.rpc('set_member_perms', { p_member: m.id, p_perms: result.perms });
-        }
+      if (isManager() && permWant.size) await savePerms();
+      // الدوامُ المرن، والمسمّى الوظيفيّ (ملاحظتا ٢٦٤ و٢٧١)
+      if (flexCard && !!flexBox.checked !== !!m.flex_hours) {
+        await db.rpc('set_flex_hours', { p_member: m.id, p_on: flexBox.checked })
+          .catch(e => toast(e.message, 'bad'));
+      }
+      if (jobCard && jobTitle.value.trim() !== (m.job_title || '')) {
+        await db.rpc('set_job_title', { p_member: m.id, p_title: jobTitle.value.trim() || null })
+          .catch(e => toast(e.message, 'bad'));
       }
       if (isManager() && mfaBox.checked !== !!m.mfa_required) {
         await db.rpc('set_member_mfa_required', { p_member: m.id, p_on: mfaBox.checked });
@@ -582,7 +659,7 @@ export async function render(ctx, opts = {}) {
       email: h('input', { type: 'email', dir: 'ltr', autocomplete: 'off' }),
       password: h('input', { type: 'text', dir: 'ltr', autocomplete: 'off',
         value: 'Haramain-' + Math.random().toString(36).slice(2, 8) }),
-      role: h('select', Object.entries(ROLE_LABEL).map(([k, v]) =>
+      role: h('select', Object.keys(ROLE_LABEL).filter(k => k !== 'viewer').map(k => [k, roleName(k)]).map(([k, v]) =>
         h('option', { value: k, selected: k === (group === 'admins' ? 'coordinator' : 'translator') ? true : null }, v))),
       whatsapp: h('input', { dir: 'ltr', placeholder: '+9665XXXXXXXX' }),
       nationality: nationalitySelect(h),
@@ -664,7 +741,7 @@ export async function render(ctx, opts = {}) {
       memberBox.replaceChildren(...pool.map(m => {
         const cb = h('input', { type: 'checkbox', checked: picked.has(m.id) ? true : null });
         cb.onchange = () => { cb.checked ? picked.add(m.id) : picked.delete(m.id); allBox.checked = picked.size === pool.length; count(); };
-        return h('label.check', cb, h('span', m.full_name, h('span.small.muted', ` — ${ROLE_LABEL[m.role]}`)));
+        return h('label.check', cb, h('span', m.full_name, h('span.small.muted', ` — ${roleLabel(m)}`)));
       }));
     };
     allBox.onchange = () => { picked.clear(); if (allBox.checked) pool.forEach(m => picked.add(m.id)); drawMembers(); count(); };
@@ -781,6 +858,47 @@ export async function render(ctx, opts = {}) {
         h('fieldset', h('legend', 'سجل التقييمات'), list)),
       buttons: [{ label: 'إغلاق', value: null }]
     });
+  }
+
+  // ---------------------------------------------------------------
+  // تحويلُ تسجيلٍ قائمٍ إلى حساب متابعة (ملاحظة ٢٧١ م)
+  //
+  //   في الهيئة من يَحسُن اطّلاعُه ولا شأنَ له بالعمل. فيُحوَّل تسجيلُه
+  //   بمسمّاه الوظيفيِّ الذي يكتبه المدير، ويبقى بريدُه ودخولُه كما
+  //   هما، فلا يُكلَّف تسجيلًا جديدًا ولا يُشعَر بردّ.
+  // ---------------------------------------------------------------
+  async function toViewer(m) {
+    const name  = h('input', { value: m.full_name, 'aria-label': 'الاسم' });
+    const title = h('input', { placeholder: 'مدير إدارة اللغات، وكيل الرئيس للغات…',
+      'aria-label': 'المسمّى الوظيفي' });
+    const until = h('input', { type: 'date', 'aria-label': 'أجل الحساب' });
+    const res = await dialog({
+      title: 'تحويلٌ إلى حساب متابعة',
+      body: h('div.stack',
+        h('p.small.muted', 'يرى المنصّةَ كما يراها المنسق ولا يملك فيها فعلًا. '
+          + 'ويُعرَض بمسمّاه الوظيفيِّ في كلِّ موضع، ويسقط عنه ما سجّل به.'),
+        h('label.field', 'الاسم', name),
+        h('label.field', 'المسمّى الوظيفي', title,
+          h('small', 'هو الذي يظهر في المنصة، ويُعدَّل متى شئت')),
+        h('label.field', 'أجلُ الحساب (اختياري)', until,
+          h('small', 'ينتهي بنفسه إن كان لغرضٍ مؤقّت'))),
+      buttons: [
+        { label: 'تحويل', kind: 'primary',
+          validate: () => {
+            if (!title.value.trim()) { toast('اكتب المسمّى الوظيفي.', 'bad'); return false; }
+            return true;
+          },
+          value: () => ({ title: title.value.trim(), name: name.value.trim(), until: until.value || null }) },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
+    try {
+      await db.rpc('convert_to_viewer', { p_member: m.id, p_title: res.title,
+        p_full_name: res.name || null, p_until: res.until });
+      toast(`صار ${res.name || m.full_name} حسابَ متابعةٍ بمسمّى «${res.title}».`, 'ok');
+      reload();
+    } catch (err) { toast(err.message, 'bad'); }
   }
 
   async function setStatus(btn, m, status) {
@@ -907,18 +1025,29 @@ export async function render(ctx, opts = {}) {
     isManager() && h('button.btn.sm.primary', { type: 'button', onclick: addMember }, '＋ إضافة عضو'),
     h('button.btn.sm', { type: 'button', onclick: exportTeam }, 'تصدير البيانات'));
 
+  // التسجيلُ الإداريُّ لا يبتّ فيه إلا مديرُ المشروع (ملاحظة ٢٧٠):
+  // فمن يُدخل نظيرًا له يستطيع أن يُدخل من يشاء
+  const adminJoin = m => privOf[m.id]?.applied_as === 'coordinator';
   const joinsCard = h('div.card', h('h3', `طلبات التسجيل (${pending.length})`),
       pending.length ? h('div.stack', pending.map(m => h('div.row', { style: { borderBottom: '1px solid var(--border)', paddingBottom: '10px' } },
         h('div', { style: { flex: 1, minWidth: '200px' } }, h('b', m.full_name), h('div.small.muted', { dir: 'ltr' }, m.email),
           h('div.small', 'تقدّم بصفة: ', h('b', APPLIED_LABEL[privOf[m.id]?.applied_as] || 'غير محددة')),
           h('div.small', 'اللغات: ', langsOf(m).map(langName).join('، ') || '—')),
         h('button.btn.sm', { type: 'button', onclick: () => edit(m) }, 'مراجعة الملف'),
-        h('button.btn.sm.primary', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'active') }, 'تفعيل'),
-        h('button.btn.sm.danger', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'disabled') }, 'رفض'),
+        adminJoin(m) && !isManager()
+          ? h('span.pill.warn', 'بانتظار مدير المشروع')
+          : h('button.btn.sm.primary', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'active') }, 'تفعيل'),
+        adminJoin(m) && !isManager() ? null
+          : h('button.btn.sm.danger', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'disabled') }, 'رفض'),
+        isManager()
+          ? h('button.btn.sm', { type: 'button', title: 'حسابٌ للمتابعة بمسمّى وظيفيٍّ تكتبه',
+              onclick: () => toViewer(m) }, 'تحويلٌ إلى حساب متابعة') : null,
         can('delete_member')
           ? h('button.btn.sm.ghost', { type: 'button', title: 'حذفٌ لا يُستدرك',
               onclick: () => removeMember(m) }, 'حذف') : null)))
         : h('p.muted', 'لا توجد طلبات جديدة.'),
+      pending.some(adminJoin) && !isManager()
+        ? h('p.small.muted', 'ما تقدّم صاحبُه بصفةٍ إدارية يبتّ فيه مديرُ المشروع.') : null,
       h('p.small.muted', 'رابط التسجيل لمشاركته مع المترجمين: ', h('span', { dir: 'ltr' }, location.origin + '/register')));
 
   const filtersRow = h('div.grid', { style: { margin: '16px 0' } },

@@ -3,7 +3,7 @@
 //   الرجوع إليه إلزامي عند لبس المصطلح.
 import { h, dialog, toast, busy, fmtDate, req, markBad } from '../ui.js';
 import { db } from '../sb.js';
-import { state, langName, langByName, isAdmin, isManager } from '../store.js';
+import { state, langName, langByName, isAdmin, isManager, can } from '../store.js';
 import { icon } from '../icons.js';
 import { buildXlsx, buildXlsxBook, downloadBlob, readWorkbook } from '../xlsx.js';
 
@@ -302,16 +302,22 @@ const arKey = s => String(s ?? '')
 
 const cell = v => String(v ?? '').replace(/[‏‎]/g, '').replace(/\s+/g, ' ').trim();
 
-// رأسُ الورقة: يُبحث عنه في أول ستة صفوف، فالقواميسُ تضع عنوانًا فوقه
+// رأسُ الورقة: يُبحث عنه في أول عشرة صفوف، ولا يُقبل إلا بمطابقةٍ
+// تامّة — فالقواميسُ تضع فوق الرأس عنوانًا فيه كلمةُ «المصطلحات»، وكان
+// الاحتواءُ يُوقِفنا عنده فلا نبلغ الرأسَ الحقيقي (ملاحظة ٢٥٧)
 function findHead(rows) {
-  for (let i = 0; i < Math.min(6, rows.length); i++) {
+  const EXACT_TERM = ['المصطلح', 'المصطلح العربي', 'العربية', 'الكلمة', 'الكلمة العربية'];
+  const EXACT_TR   = ['الترجمة', 'المقابل', 'المعنى'];
+  let best = null;
+  for (let i = 0; i < Math.min(10, rows.length); i++) {
     const cells = (rows[i] || []).map(cell);
-    const has = t => cells.some(c => c === t || c.includes(t));
-    if (has('المصطلح') || (has('العربية') && has('الترجمة'))) {
-      return { at: i, cells };
-    }
+    const eq = list => cells.some(c => list.includes(c));
+    // درجةُ المطابقة: الرأسُ الذي فيه العمودان أولى من الذي فيه واحد
+    const score = (eq(EXACT_TERM) ? 2 : 0) + (eq(EXACT_TR) ? 1 : 0);
+    if (score && (!best || score > best.score)) best = { at: i, cells, score };
+    if (score === 3) break;
   }
-  return null;
+  return best;
 }
 
 export function parseGlossaryBook(book) {
@@ -431,8 +437,8 @@ async function importFile(file, reload) {
       h('fieldset.stack', h('legend', 'المقابلُ الموجودُ سلفًا'),
         h('label.check', modeAdd, h('span', 'أضِفْ ولا تمحُ — يبقى المقابلُ القديمُ حيث وُجد')),
         h('label.check', modeRep, h('span', 'استبدِلْ — يحلُّ مقابلُ الملفِ محلَّ القديم'))),
-      h('p.small.muted', 'الجديدُ يُضاف بحال «مقترح» حتى تعتمده الإدارة. '
-        + 'والمصطلحُ المكرَّرُ بصياغتين تُجمع صياغتاه بينهما فاصلة.'),
+      h('p.small.muted', 'ما رُفع بملفٍّ يدخل الدليلَ معتمدًا — فالأصلُ فيه أنه مترجَمٌ مراجَع '
+        + '(ملاحظة ٢٥٩). والمصطلحُ المكرَّرُ بصياغتين تُجمع صياغتاه بينهما فاصلة.'),
       h('ul.small', parsed.terms.slice(0, 5).map(t => h('li', h('b', t.term_ar), ' — ',
         h('span.muted', Object.keys(t.tr).slice(0, 3).map(c => langName(c)).join(' · ') || 'بلا مقابل')))),
       parsed.terms.length > 5 ? h('p.small.muted', `… و${parsed.terms.length - 5} غيرها`) : null),
@@ -470,239 +476,94 @@ async function importFile(file, reload) {
         h('li', `مقابلاتٌ كُتبت: `, h('b', String(sum.translations))),
         sum.skipped ? h('li', `تُخطّي: `, h('b', String(sum.skipped)), ' — صفوفٌ بلا مصطلحٍ عربي') : null,
         sum.bad_lang ? h('li', `لغاتٌ غيرُ مسجَّلة: `, h('b', String(sum.bad_lang))) : null),
-      h('p.small.muted', 'الجديدُ بحال «مقترح» — يظهر في «مقترحاتٌ تنتظر النظر».')),
+      h('p.small.muted', 'دخل الجديدُ معتمدًا، فلا ينتظر اعتمادًا.')),
     buttons: [{ label: 'تمام', kind: 'primary', value: true }]
   });
 }
 
+// ---------------------------------------------------------------------
+// الدليل: معجمٌ لا بطاقات (ملاحظات ٢٥٦ و٢٥٨ و٢٦٢)
+//
+//   الأساسُ المصطلحُ العربيُّ ومقابلُه في كلِّ لغة، يُعرَض صفوفًا
+//   كالمعاجم: عمودان على الحاسب، وعمودٌ على الجوال، بصفٍّ فرديٍّ مميَّز.
+//   ولكلٍّ نطاقُه: المترجمُ يرى لغاتِه وحدَها وأوّلُها لغتُه الأمّ،
+//   والإدارةُ ترى اللغاتِ كلَّها. ولا تُعرض لمترجمٍ لغةٌ لم يسجّلها.
+// ---------------------------------------------------------------------
 export async function render() {
   const admin = isAdmin();
-  let terms = await loadTerms();
+  const guide = await db.rpc('platform_guidance').catch(() => null);
 
-  const f = {
-    q: h('input', { type: 'search', placeholder: 'ابحث في المصطلحات ومقابلاتها…', 'aria-label': 'بحث' }),
-    cat: h('select', { 'aria-label': 'التصنيف' }, h('option', { value: '' }, 'كل التصنيفات'),
-      CATEGORIES.map(c => h('option', { value: c }, c))),
-    lang: h('select', { 'aria-label': 'اللغة' }, h('option', { value: '' }, 'كل اللغات'),
-      state.languages.map(l => h('option', { value: l.code }, langName(l.code)))),
-    status: h('select', { 'aria-label': 'الحال' }, h('option', { value: '' }, 'الكل'),
-      h('option', { value: 'معتمد' }, 'المعتمد'), h('option', { value: 'مقترح' }, 'المقترح'))
+  let langRows = [];
+  try { langRows = await db.rpc('glossary_cards') || []; } catch { langRows = []; }
+
+  // اللغةُ المعروضةُ أوّلَ ما تُفتح: لغتُه الأمُّ، وإلا أوّلُ لغاتِه،
+  // وإلا أكثرُها مصطلحاتٍ للإدارة (ملاحظة ٢٥٦ ز)
+  const firstLang = () => {
+    const native = langRows.find(r => r.native);
+    if (native) return native.code;
+    const mine = langRows.filter(r => r.mine).sort((a, b) => b.done - a.done);
+    if (mine.length) return mine[0].code;
+    const any = [...langRows].sort((a, b) => b.done - a.done);
+    return any.length ? any[0].code : '';
   };
 
-  const list = h('div.stack');
-  const count = h('span.badge');
+  let lang = firstLang();          // '' تعني «كلَّ اللغات»
+  let showEmpty = false;
+  let rows = [];                   // صفوفُ المعجم المعروضة
+  let terms = [];                  // الصفوفُ الكاملةُ لعرض «كل اللغات»
 
-  const reload = async () => { terms = await loadTerms(); draw(); };
+  const q = h('input', { type: 'search', placeholder: 'ابحث في المصطلح ومقابله…',
+    'aria-label': 'بحث في المعجم' });
+  const cat = h('select', { 'aria-label': 'التصنيف' },
+    h('option', { value: '' }, 'كل التصنيفات'),
+    CATEGORIES.map(c => h('option', { value: c }, c)));
+  const onlyMissing = h('input', { type: 'checkbox', 'aria-label': 'ما لا مقابل له' });
 
-  const edit = async row => {
-    const p = await termDialog(row);
-    if (!p) return;
-    try { await db.rpc('save_glossary_term', { p }); toast('حُفظ المصطلح.', 'ok'); await reload(); }
-    catch (err) { toast(err.message, 'bad'); }
-  };
-
-  const approve = async (row, on) => {
-    try {
-      await db.rpc('approve_glossary_term', { p_id: row.id, p_on: on });
-      toast(on ? 'اعتُمد المصطلح.' : 'رُفع الاعتماد.', 'ok');
-      await reload();
-    } catch (err) { toast(err.message, 'bad'); }
-  };
-
-  const remove = async row => {
-    const ok = await dialog({ title: 'حذف المصطلح', body: h('p', `يُحذف «${row.term_ar}» ومقابلاته كلها؟`),
-      buttons: [{ label: 'إلغاء', value: false }, { label: 'حذف', kind: 'bad', value: true }] });
-    if (!ok) return;
-    try { await db.rpc('delete_glossary_term', { p_id: row.id }); toast('حُذف المصطلح.', 'ok'); await reload(); }
-    catch (err) { toast(err.message, 'bad'); }
-  };
-
-  const filtered = () => terms.filter(r => matchTerm(r, f.q.value)
-    && (!f.cat.value || r.category === f.cat.value)
-    && (!f.status.value || r.status === f.status.value)
-    && (!f.lang.value || r.translations.some(t => t.language_code === f.lang.value)));
-
-  function card(r) {
-    const shown = f.lang.value ? r.translations.filter(t => t.language_code === f.lang.value) : r.translations;
-    return h('article.card.stack.term-card',
-      h('div.row.between',
-        h('div', h('b.term-ar', r.term_ar), h('span.badge', { style: { marginInlineStart: '8px' } }, r.category)),
-        h('span.badge', { class: r.status === 'معتمد' ? 'ok' : 'warn' }, r.status)),
-      h('p.small', r.explanation),
-      shown.length
-        ? h('div.table-wrap', h('table.responsive',
-            h('thead', h('tr', ['اللغة', 'المقابل المعتمد', 'ملاحظة'].map(t => h('th', t)))),
-            h('tbody', shown.map(t => h('tr',
-              h('td', { 'data-label': 'اللغة' }, langName(t.language_code)),
-              h('td', { 'data-label': 'المقابل المعتمد' }, h('b', { dir: 'auto' }, t.term_tr)),
-              h('td', { 'data-label': 'ملاحظة' }, h('span.small.muted', t.note || '—')))))))
-        : h('p.small.muted', 'لم يُعتمد له مقابلٌ بعد.'),
-      r.approved_at ? h('p.small.muted', `اعتُمد في ${fmtDate(r.approved_at)}`) : null,
-      h('div.row',
-        h('button.btn.xs', { type: 'button', onclick: () => edit(r) }, 'تعديل'),
-        admin ? h('button.btn.xs', { type: 'button', onclick: () => approve(r, r.status !== 'معتمد') },
-          r.status === 'معتمد' ? 'رفع الاعتماد' : 'اعتماد') : null,
-        h('button.btn.xs', { type: 'button', onclick: () => sensesDialog(r) }, 'المعاني'),
-        admin ? h('button.btn.xs.bad', { type: 'button', onclick: () => remove(r) }, 'حذف') : null));
-  }
-
-  function draw() {
-    const l = filtered();
-    count.textContent = `${l.length} مصطلحًا`;
-    list.replaceChildren(...(l.length ? l.map(card)
-      : [h('p.muted', terms.length ? 'لا مصطلح يطابق البحث.' : 'الدليل فارغ — أضف أول مصطلح.')]));
-  }
-
-  f.q.addEventListener('input', draw);
-  for (const k of ['cat', 'lang', 'status']) f[k].addEventListener('change', draw);
-
-  const addBtn = h('button.btn.sm.primary', { type: 'button' }, '+ إضافة مصطلح');
-  addBtn.onclick = () => edit(null);
-
-  // ---------------- الاستيراد من ملف: يبني الفريق الدليل معًا (ملاحظة ١٥٨) ----------------
-  const codes = () => state.languages.map(l => l.code);
-  const headerRow = () => ['المصطلح', 'التصنيف', 'الشرح', ...state.languages.map(l => langName(l.code))];
-
-  const tmplBtn = h('button.btn.sm', { type: 'button' }, '⤓ نموذج الاستيراد');
-  tmplBtn.onclick = () => {
-    const rows = [headerRow(),
-      ['التقوى', 'عقدي', 'امتثال الأمر واجتناب النهي.',
-        ...state.languages.map(l => (l.code === 'en' ? 'Taqwa (God-consciousness)' : ''))],
-      ['الصلاة', 'فقهي', 'الفريضة ذات الأقوال والأفعال المفتتحة بالتكبير المختتمة بالتسليم.',
-        ...state.languages.map(() => '')]];
-    downloadBlob(buildXlsx(rows, { sheetName: 'المصطلحات', allText: true }), 'نموذج الدليل الإرشادي للمصطلحات.xlsx');
-    toast('نُزِّل النموذج — املأه ثم استورده.', 'ok');
-  };
-
-  const fileIn = h('input', { type: 'file', accept: '.xlsx,.csv', hidden: true, 'aria-label': 'ملف المصطلحات' });
-  const impBtn = h('button.btn.sm', { type: 'button' }, '⤒ استيراد من Excel');
-  impBtn.onclick = () => fileIn.click();
-  fileIn.onchange = () => busy(impBtn, async () => {
-    const file = fileIn.files[0];
-    fileIn.value = '';
-    if (!file) return;
-    try { await importFile(file, reload); } catch (err) { toast(err.message, 'bad'); }
-  });
-
-  // ---------------- التصدير (ملاحظة ٢٤٥ ج) ----------------
-  //   المصطلحُ ومقابلُه لا غير — فالدليلُ يُقرأ لا يُدار. ولغةٌ أو بعضٌ
-  //   أو الكلُّ، وورقةٌ لكلِّ لغة، وجدولٌ أو سطور، وعددُ أعمدةِ الصفحة.
-  const expBtn = h('button.btn.sm', { type: 'button' }, '⤓ تصدير الدليل');
-  expBtn.onclick = () => busy(expBtn, () => exportGuide(filtered()));
-  const exportGuide = async (rows) => {
-    const avail = state.languages.filter(l => rows.some(r =>
-      r.translations.some(t => t.language_code === l.code && t.term_tr)));
-    if (!avail.length) return toast('لا مقابلاتٍ في المعروض لتُصدَّر.', 'bad');
-
-    const boxes = avail.map(l => {
-      const n = rows.filter(r => r.translations.some(t => t.language_code === l.code && t.term_tr)).length;
-      const cb = h('input', { type: 'checkbox', value: l.code,
-        checked: (!f.lang.value || f.lang.value === l.code) ? true : null, 'aria-label': l.name_ar });
-      return { code: l.code, cb, el: h('label.check.col-pick', cb, h('span', l.name_ar), h('span.badge', String(n))) };
-    });
-    const all = h('button.btn.xs', { type: 'button', onclick: () => boxes.forEach(b => { b.cb.checked = true; }) }, 'كل اللغات');
-    const none = h('button.btn.xs.ghost', { type: 'button', onclick: () => boxes.forEach(b => { b.cb.checked = false; }) }, 'ألغِ');
-
-    const shape = h('select', { 'aria-label': 'شكل العرض' },
-      h('option', { value: 'table' }, 'جدول — عمودان: العربية والمقابل'),
-      h('option', { value: 'lines' }, 'سطور — المصطلح — المقابل'));
-    const cols = h('select', { 'aria-label': 'أعمدة الصفحة' },
-      h('option', { value: '1' }, 'عمودٌ واحد'),
-      h('option', { value: '2', selected: true }, 'عمودان'),
-      h('option', { value: '3' }, 'ثلاثة أعمدة'));
-    const fmt = h('select', { 'aria-label': 'الصيغة' },
-      h('option', { value: 'xlsx' }, 'Excel — ورقةٌ لكلِّ لغة'),
-      h('option', { value: 'docx' }, 'Word — مستند'),
-      h('option', { value: 'pdf' }, 'PDF على كليشة الهيئة'));
-
-    const res = await dialog({
-      title: 'تصدير الدليل الإرشادي',
-      body: h('div.stack',
-        h('p.small.muted', 'يخرج المصطلحُ ومقابلُه لا غير — بلا تصنيفٍ ولا شرحٍ ولا حال.'),
-        h('fieldset.stack', h('legend', 'اللغات'),
-          h('div.row.between', h('span.small.muted', `${avail.length} لغةً فيها مقابلات`),
-            h('div.row', all, none)),
-          h('div.col-picker', boxes.map(b => b.el))),
-        h('div.grid-2',
-          h('label.field', 'شكل العرض', shape),
-          h('label.field', 'أعمدة الصفحة', cols),
-          h('label.field', 'الصيغة', fmt))),
-      buttons: [
-        { label: 'صدّر', kind: 'primary',
-          validate: () => (boxes.some(b => b.cb.checked) ? true : 'اختر لغةً واحدةً على الأقل'),
-          value: () => ({ codes: boxes.filter(b => b.cb.checked).map(b => b.code),
-            shape: shape.value, cols: Number(cols.value), fmt: fmt.value }) },
-        { label: 'إلغاء', value: null }
-      ]
-    });
-    if (!res) return;
-
-    const title = 'الدليل الإرشادي للمصطلحات';
-    const note = 'الرجوع إليه إلزامي عند لبس المصطلح — كما في العقد.';
-    const pairs = code => rows
-      .map(r => [r.term_ar, r.translations.find(t => t.language_code === code)?.term_tr || ''])
-      .filter(p => p[1]);
-
-    try {
-      if (res.fmt === 'xlsx') {
-        const sheets = res.codes.map(c => ({
-          name: langName(c),
-          rows: [['المصطلح', langName(c)], ...pairs(c)]
-        }));
-        downloadBlob(buildXlsxBook(sheets, { allText: true }),
-          `${title}${res.codes.length === 1 ? ` — ${langName(res.codes[0])}` : ''}.xlsx`);
-      } else {
-        const { exportGuideDoc } = await import('../teamexport.js');
-        const parts = res.codes.map(c => ({ code: c, name: langName(c), pairs: pairs(c) }));
-        const done = await exportGuideDoc(parts, title,
-          { note, shape: res.shape, cols: res.cols, pdf: res.fmt === 'pdf' });
-        if (!done) return toast('اسمح بالنوافذ المنبثقة للطباعة.', 'bad');
-      }
-      toast('جرى التصدير.', 'ok');
-    } catch (err) { toast(err.message, 'bad'); }
-  };
-
-  // ---------------- بطاقاتُ اللغات (ملاحظتا ٢٣٤ و٢٤٥) ----------------
-  // الأساسيةُ ظاهرةٌ دائمًا، وما سواها لا يظهر إلا بمصطلحاته. وبتصميم
-  // شاشة «اللغات» نفسِه: الاسمُ بالعربية وتحتَه اسمُها بلسانها.
   const cards = h('div.lang-grid.gl-grid');
   const cardsBar = h('div.row.between.gl-bar');
-  let langRows = [];
-  let showEmpty = false;
+  const letters = h('div.gl-letters');
+  const table = h('div.gl-dict');
+  const count = h('span.badge');
 
+  // -------------------------------------------------------------
+  // بطاقاتُ اللغات: العددُ فيها رقمٌ بارز (ملاحظة ٢٥٨)
+  // -------------------------------------------------------------
   const mkCard = (r) => {
-    const on = f.lang.value === r.code;
+    const on = lang === r.code;
     const el = h('button.lang-card', {
       type: 'button',
-      class: [r.is_core ? 'core' : '', on ? 'on' : '', (!r.done && !r.is_core) ? 'off' : ''].filter(Boolean).join(' '),
-      title: on ? 'اضغط لإلغاء التصفية' : `اعرض مصطلحات ${r.name_ar}`
+      class: [r.is_core ? 'core' : '', on ? 'on' : '', (!r.done && !r.is_core) ? 'off' : '',
+        r.native ? 'native' : ''].filter(Boolean).join(' '),
+      title: on ? 'اضغط لعرض كل اللغات' : `اعرض معجم ${r.name_ar}`
     },
-      h('div.row.between', h('b', r.name_ar), h('span.lang-code', { dir: 'ltr' }, r.code)),
+      h('div.row.between', h('b', r.name_ar),
+        r.native ? h('span.badge.ok', 'لغتك الأمّ') : h('span.lang-code', { dir: 'ltr' }, r.code)),
       h('span.lang-native', { dir: r.dir || 'ltr' }, r.native_name || ''),
-      h('div.row.between',
-        r.done ? h('span.small.muted', `${r.done} مصطلحًا`) : h('span.small.muted', 'لا مصطلح بعد'),
-        r.missing ? h('span.badge.warn', `ينقص ${r.missing}`)
-          : h('span.badge' + (r.done ? '.ok' : ''), r.done ? 'مكتملة' : '—')));
-    el.onclick = () => {
-      f.lang.value = on ? '' : r.code;
-      drawCards(); draw();
-    };
+      h('div.lang-count',
+        h('b', r.done ? String(r.done) : '٠'),
+        h('small', 'مصطلحًا')),
+      r.missing ? h('span.badge.warn', `ينقص ${r.missing}`) : h('span.badge.ok', 'مكتملة'));
+    el.onclick = () => { lang = on ? '' : r.code; drawCards(); draw(); };
     return el;
   };
 
   const drawCards = () => {
-    const core = langRows.filter(r => r.is_core);
-    const rest = langRows.filter(r => !r.is_core && (showEmpty || r.done > 0 || f.lang.value === r.code));
-    const hidden = langRows.filter(r => !r.is_core).length - rest.length;
+    const core = langRows.filter(r => r.is_core || r.native);
+    const rest = langRows.filter(r => !(r.is_core || r.native)
+      && (showEmpty || r.done > 0 || lang === r.code));
+    const hidden = langRows.filter(r => !(r.is_core || r.native)).length - rest.length;
 
     const toggle = h('button.btn.xs' + (showEmpty ? '.primary' : '.ghost'), { type: 'button' },
       showEmpty ? 'أخفِ اللغات الفارغة' : `أظهر اللغات الفارغة${hidden ? ` (${hidden})` : ''}`);
     toggle.onclick = () => { showEmpty = !showEmpty; drawCards(); };
 
+    const all = h('button.btn.xs' + (lang ? '' : '.primary'), { type: 'button' }, 'كلُّ اللغات');
+    all.onclick = () => { lang = ''; drawCards(); draw(); };
+
     const add = h('button.btn.xs', { type: 'button' }, '＋ إضافة لغة');
     add.onclick = async () => {
       const sel = h('select', { 'aria-label': 'اللغة' },
-        langRows.filter(r => !r.is_core && !r.done).map(r => h('option', { value: r.code }, r.name_ar)));
+        langRows.filter(r => !r.done).map(r => h('option', { value: r.code }, r.name_ar)));
       const ok = await dialog({
         title: 'افتح بطاقةَ لغة',
         body: h('div.stack',
@@ -712,27 +573,216 @@ export async function render() {
         buttons: [{ label: 'افتح', kind: 'primary', value: () => sel.value }, { label: 'إلغاء', value: null }]
       });
       if (!ok) return;
-      f.lang.value = ok; showEmpty = true; drawCards(); draw();
+      lang = ok; showEmpty = true; drawCards(); draw();
     };
 
     cardsBar.replaceChildren(
-      h('span.small.muted', `${core.length + rest.length} لغةً معروضة`
-        + (f.lang.value ? ` — التصفيةُ على ${langName(f.lang.value)}` : '')),
-      h('div.row', toggle, add));
+      h('span.small.muted', lang ? `معجمُ ${langName(lang)}` : 'المعجمُ بكلِّ اللغات المتاحة لك'),
+      h('div.row', all, toggle, add));
     cards.replaceChildren(...core.map(mkCard), ...rest.map(mkCard));
   };
 
-  db.rpc('glossary_cards').then(rows => { langRows = rows || []; drawCards(); }).catch(() => {});
+  // -------------------------------------------------------------
+  // المعجم: صفُّ مصطلحٍ ومقابلِه، بصفٍّ فرديٍّ مميَّز
+  // -------------------------------------------------------------
+  const dictRow = (r, i) => {
+    const el = h('button.gl-entry', { type: 'button', class: i % 2 ? 'odd' : '' },
+      h('span.gl-ar', r.term_ar),
+      h('span.gl-sep', ':'),
+      h('span.gl-tr', { dir: 'auto' }, r.term_tr || '—'),
+      // «مقترح» علامةٌ صغيرةٌ لا تزاحم المدخل (ملاحظة ٢٥٦)
+      r.status === 'مقترح' ? h('span.gl-dot', { title: 'مقترح — ينتظر الاعتماد' }, 'مقترح') : null);
+    el.onclick = () => entryDialog(r);
+    return el;
+  };
 
-  // ---------------- ما ينتظر الاعتماد ----------------
+  const drawLetters = () => {
+    const seen = [...new Set(rows.map(r => r.letter).filter(Boolean))];
+    letters.replaceChildren(...seen.map(L => {
+      const b = h('button.gl-letter', { type: 'button' }, L);
+      b.onclick = () => {
+        const el = table.querySelector(`[data-letter="${CSS.escape(L)}"]`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+      return b;
+    }));
+  };
+
+  async function draw() {
+    table.replaceChildren(h('p.muted', 'يُحمَّل…'));
+    if (!lang) return drawAll();
+    try {
+      rows = await db.rpc('glossary_dict', { p_lang: lang, p_q: q.value.trim() || null,
+        p_category: cat.value || null, p_only_missing: !!onlyMissing.checked }) || [];
+    } catch (err) { table.replaceChildren(h('p.muted', err.message)); return; }
+
+    count.textContent = `${rows.length} مصطلحًا`;
+    if (!rows.length) {
+      table.replaceChildren(h('p.muted', 'لا مصطلح يطابق البحث.'));
+      letters.replaceChildren();
+      return;
+    }
+    // فواصلُ الحروف كما تفعل المعاجم
+    const out = [];
+    let last = null;
+    rows.forEach((r, i) => {
+      if (r.letter && r.letter !== last) {
+        last = r.letter;
+        out.push(h('div.gl-letter-head', { 'data-letter': r.letter }, r.letter));
+      }
+      out.push(dictRow(r, i));
+    });
+    table.replaceChildren(h('div.gl-cols', ...out));
+    drawLetters();
+  }
+
+  // «كلُّ اللغات»: شبكةٌ كاملةٌ — المصطلحُ وعمودٌ لكلِّ لغةٍ متاحةٍ لك
+  async function drawAll() {
+    if (!terms.length) terms = await loadTerms();
+    const codes = langRows.map(r => r.code);
+    const s = q.value.trim().toLowerCase();
+    const list = terms.filter(r => (!cat.value || r.category === cat.value)
+      && (!s || matchTerm(r, s)));
+    count.textContent = `${list.length} مصطلحًا`;
+    letters.replaceChildren();
+    if (!list.length) { table.replaceChildren(h('p.muted', 'لا مصطلح يطابق البحث.')); return; }
+    const trOf = (r, c) => r.translations.find(t => t.language_code === c)?.term_tr || '';
+    table.replaceChildren(h('div.table-wrap', h('table.responsive.gl-grid-table',
+      h('thead', h('tr', h('th', 'المصطلح'), codes.map(c => h('th', langName(c))))),
+      h('tbody', list.map(r => h('tr',
+        h('td', { 'data-label': 'المصطلح' }, h('b', r.term_ar)),
+        codes.map(c => h('td', { 'data-label': langName(c), dir: 'auto' }, trOf(r, c) || '—'))))))));
+  }
+
+  // -------------------------------------------------------------
+  // نافذةُ المدخل: الشرحُ والتنقيحُ وسجلُّه (ملاحظتا ٢٥٦ و٢٦١)
+  // -------------------------------------------------------------
+  async function entryDialog(r) {
+    const mayWrite = !!lang && langRows.some(x => x.code === lang && (x.mine || admin));
+    const value = h('input', { value: r.term_tr || '', dir: 'auto', 'aria-label': 'المقابل' });
+    const why = h('input', { 'aria-label': 'سببُ التنقيح', placeholder: 'معنًى أدقّ… (اختياري)' });
+    const hist = h('div.stack.gl-hist');
+
+    db.rpc('translation_history', { p_term: r.term_id, p_lang: lang }).then(list => {
+      hist.replaceChildren(...((list || []).length
+        ? [h('b.small', 'سجلُّ التنقيح'),
+           ...list.map(x => h('p.small.muted',
+             `${x.was ? `«${x.was}» ← ` : ''}«${x.became}» — ${x.by_name}، ${fmtDate(x.at)}`
+             + (x.why ? ` (${x.why})` : '')))]
+        : [h('p.small.muted', 'لم يُنقَّح بعد.')]));
+    }).catch(() => {});
+
+    const res = await dialog({
+      title: r.term_ar,
+      body: h('div.stack',
+        r.category ? h('span.badge', r.category) : null,
+        h('p.small', r.has_explanation ? '' : 'بلا شرحٍ مكتوب.'),
+        mayWrite
+          ? h('div.stack',
+              h('label.field', `المقابل في ${langName(lang)}`, value),
+              h('label.field', 'سببُ التنقيح', why),
+              h('p.small.muted', guide || GUIDANCE))
+          : h('p.small.muted', 'لا تُكتب الترجمةُ إلا في لغةٍ سجّلتها ضمن إتقانك.'),
+        hist),
+      buttons: [
+        mayWrite ? { label: 'حفظ', kind: 'primary',
+          value: () => ({ text: value.value.trim(), why: why.value.trim() }) } : null,
+        admin ? { label: 'المعاني', value: 'senses' } : null,
+        { label: 'إغلاق', value: null }
+      ].filter(Boolean)
+    });
+    if (!res) return;
+    if (res === 'senses') { await sensesDialog({ id: r.term_id, term_ar: r.term_ar }); return; }
+    try {
+      await db.rpc('set_translation', { p_term: r.term_id, p_lang: lang,
+        p_text: res.text, p_why: res.why || null, p_task: null });
+      toast('حُفظ المقابل.', 'ok');
+      langRows = await db.rpc('glossary_cards').catch(() => langRows) || langRows;
+      drawCards(); draw();
+    } catch (err) { toast(err.message, 'bad'); }
+  }
+
+  const GUIDANCE = 'نأمل الدقّةَ وتجويدَ الترجمة. وما ظهر لك فيه معنًى أدقُّ فنقّحه، '
+    + 'فالدليلُ يُجوَّد بتعاونكم، وما يُنقَّح محفوظُ الأثر.';
+
+  // -------------------------------------------------------------
+  // الأدوات: الإضافةُ والاستيرادُ والطلبُ والتصدير
+  // -------------------------------------------------------------
+  const reload = async () => {
+    terms = await loadTerms();
+    langRows = await db.rpc('glossary_cards').catch(() => langRows) || langRows;
+    drawCards(); await draw();
+  };
+
+  const edit = async row => {
+    const p = await termDialog(row);
+    if (!p) return;
+    try { await db.rpc('save_glossary_term', { p }); toast('حُفظ المصطلح.', 'ok'); await reload(); }
+    catch (err) { toast(err.message, 'bad'); }
+  };
+
+  const addBtn = h('button.btn.sm.primary', { type: 'button' }, '＋ إضافة مصطلح');
+  addBtn.onclick = () => edit(null);
+
+  const codes = () => state.languages.map(l => l.code);
+  const headerRow = () => ['المصطلح', 'التصنيف', 'الشرح', ...state.languages.map(l => langName(l.code))];
+
+  const tmplBtn = h('button.btn.sm', { type: 'button' }, '⤓ نموذج الاستيراد');
+  tmplBtn.onclick = () => {
+    const sample = [headerRow(),
+      ['التقوى', 'عقدي', 'امتثال الأمر واجتناب النهي.',
+        ...state.languages.map(l => (l.code === 'en' ? 'Taqwa (God-consciousness)' : ''))],
+      ['الصلاة', 'فقهي', 'الفريضة ذات الأقوال والأفعال المفتتحة بالتكبير المختتمة بالتسليم.',
+        ...state.languages.map(() => '')]];
+    downloadBlob(buildXlsx(sample, { sheetName: 'المصطلحات', allText: true }),
+      'نموذج الدليل الإرشادي للمصطلحات.xlsx');
+    toast('نُزِّل النموذج — املأه ثم استورده.', 'ok');
+  };
+
+  const fileIn = h('input#gl-import-file', { type: 'file', accept: '.xlsx,.csv', hidden: true,
+    'aria-label': 'ملف المصطلحات' });
+  const impBtn = can('gl_import')
+    ? h('button.btn.sm', { type: 'button' }, '⤒ استيراد من Excel') : null;
+  if (impBtn) {
+    impBtn.onclick = () => fileIn.click();
+    fileIn.onchange = () => busy(impBtn, async () => {
+      const file = fileIn.files[0];
+      fileIn.value = '';
+      if (!file) return;
+      try { await importFile(file, reload); } catch (err) { toast(err.message, 'bad'); }
+    });
+  }
+
+  // رفعُ كلماتٍ عربيةٍ وإسنادُها للمترجمين (ملاحظة ٢٦٠)
+  const askFile = h('input#gl-ask-file', { type: 'file', accept: '.xlsx,.csv', hidden: true,
+    'aria-label': 'ملف كلمات عربية' });
+  const askBtn = can('gl_request')
+    ? h('button.btn.sm', { type: 'button' }, '✎ طلبُ ترجمة') : null;
+  if (askBtn) {
+    askBtn.onclick = () => dispatchDialog();
+    askFile.onchange = async () => {
+      const file = askFile.files[0];
+      askFile.value = '';
+      if (!file) return;
+      try { await uploadArabic(file); } catch (err) { toast(err.message, 'bad'); }
+    };
+  }
+
+  const expBtn = h('button.btn.sm', { type: 'button' }, '⤓ تصدير الدليل');
+  expBtn.onclick = () => busy(expBtn, () => exportGuide());
+
+  // -------------------------------------------------------------
+  // ما ينتظر الاعتماد
+  // -------------------------------------------------------------
   const queue = h('div.stack');
-  const drawQueue = () => {
+  const drawQueue = async () => {
     if (!admin) { queue.replaceChildren(); return; }
+    if (!terms.length) terms = await loadTerms();
     const pend = terms.filter(r => r.status === 'مقترح');
     queue.replaceChildren(pend.length ? h('section.card.stack',
       h('h3', `مقترحاتٌ تنتظر النظر (${pend.length})`),
-      h('p.small.muted', 'يقترح المترجمُ فيُسجَّل «مقترحًا» ولا يُعرض للفريق حتى يُعتمد. '
-        + 'ولك الاعتمادُ أو الردُّ بسببه أو التعديلُ ثم الاعتماد.'),
+      h('p.small.muted', 'ما اقترحه عضوٌ يدويًّا يُسجَّل «مقترحًا» حتى يُعتمد. '
+        + 'وما رُفع بملفٍّ يدخل معتمدًا، فالأصلُ فيه أنه مترجَمٌ مراجَع.'),
       h('div.table-wrap', h('table.responsive',
         h('thead', h('tr', ['المصطلح', 'القسم', 'الشرح', ''].map(t => h('th', t)))),
         h('tbody', pend.map(r => h('tr',
@@ -760,43 +810,236 @@ export async function render() {
             } }, 'ردّ'))))))))) : null);
   };
 
-  draw();
-  drawQueue();
+  // -------------------------------------------------------------
+  // رفعُ قائمةٍ عربيةٍ وإسنادُها (ملاحظة ٢٦٠)
+  // -------------------------------------------------------------
+  async function uploadArabic(file) {
+    const book = await readWorkbook(file);
+    const words = [];
+    for (const sh of book) {
+      for (const row of sh.rows || []) {
+        const w = cell(row[0]);
+        if (w && arKey(w) && !['المصطلح', 'الكلمة', 'العربية'].includes(w)) words.push(w);
+      }
+    }
+    if (!words.length) return toast('لم يُعثر على كلماتٍ عربية في العمود الأول.', 'bad');
+    const out = await db.rpc('import_arabic_terms', { p_words: words, p_category: 'عام' });
+    const d = (Array.isArray(out) ? out[0] : out) || {};
+    toast(`أُدخل ${d.added || 0} مصطلحًا، و${d.existed || 0} كان موجودًا.`, 'ok');
+    await reload();
+    return dispatchDialog();
+  }
 
-  // المرصدُ وسجلُّ المشاركة يُضافان بعد الرسم فلا يؤخّران الشاشة
-  const extras = h('div.stack');
-  (async () => {
+  async function dispatchDialog() {
+    const all = await loadTerms();
+    const boxes = new Map();
+    const listBox = h('div.stack.gl-pick');
+    const search = h('input', { type: 'search', placeholder: 'صفِّ القائمة…', 'aria-label': 'بحث' });
+
+    const paint = () => {
+      const s = search.value.trim();
+      const shown = all.filter(r => !s || matchTerm(r, s));
+      listBox.replaceChildren(...shown.slice(0, 500).map(r => {
+        const cb = boxes.get(r.id) || h('input', { type: 'checkbox', 'aria-label': r.term_ar });
+        boxes.set(r.id, cb);
+        return h('label.check', cb, h('span', r.term_ar));
+      }));
+    };
+    search.addEventListener('input', paint);
+    paint();
+
+    const pickAll = h('button.btn.xs', { type: 'button' }, 'أشِّر الكلّ');
+    pickAll.onclick = () => { boxes.forEach(c => { c.checked = true; }); };
+    const pickNone = h('button.btn.xs.ghost', { type: 'button' }, 'ألغِ');
+    pickNone.onclick = () => { boxes.forEach(c => { c.checked = false; }); };
+
+    const langBoxes = state.languages.filter(l => l.is_active).map(l => {
+      const cb = h('input', { type: 'checkbox', value: l.code, 'aria-label': l.name_ar });
+      return { code: l.code, cb, el: h('label.check.col-pick', cb, h('span', l.name_ar)) };
+    });
+    const note = h('textarea', { rows: 2, 'aria-label': 'توجيه' }, GUIDANCE);
+    const due = h('input', { type: 'date', 'aria-label': 'الموعد' });
+
+    const upBtn = h('button.btn.sm', { type: 'button' }, '⤒ ارفع قائمةً عربية');
+    upBtn.onclick = () => askFile.click();
+
+    const res = await dialog({
+      title: 'طلبُ ترجمةِ مصطلحات',
+      body: h('div.stack',
+        h('p.small.muted', 'اختر المصطلحاتِ واللغاتِ، فتُنشأ لكلِّ لغةٍ مهمّةٌ تظهر للمترجم '
+          + 'في «مهامي». وما يكتبه يدخل الدليلَ معتمدًا بلا مراجعة.'),
+        h('div.row', upBtn),
+        h('fieldset.stack', h('legend', 'المصطلحات'),
+          h('div.row.between', search, h('div.row', pickAll, pickNone)),
+          listBox),
+        h('fieldset.stack', h('legend', 'اللغات'),
+          h('div.col-picker', langBoxes.map(b => b.el))),
+        h('label.field', 'توجيهٌ يظهر في رأس الجدول', note),
+        h('label.field', 'الموعد (اختياري)', due)),
+      buttons: [
+        { label: 'أرسِل', kind: 'primary',
+          validate: () => {
+            if (![...boxes.values()].some(c => c.checked)) return 'أشِّر مصطلحًا واحدًا على الأقل';
+            if (!langBoxes.some(b => b.cb.checked)) return 'اختر لغةً واحدةً على الأقل';
+            return true;
+          },
+          value: () => ({
+            terms: [...boxes].filter(([, c]) => c.checked).map(([id]) => id),
+            langs: langBoxes.filter(b => b.cb.checked).map(b => b.code),
+            note: note.value.trim(), due: due.value || null }) },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
     try {
-      if (admin) extras.append(await observatoryCard(async () => { await reload(); drawQueue(); }));
-      extras.append(await contribCard());
-    } catch { /* لا تمنع الشاشة */ }
-  })();
+      const out = await db.rpc('dispatch_glossary', { p_terms: res.terms, p_langs: res.langs,
+        p_assignees: {}, p_note: res.note || null, p_due: res.due });
+      const n = (out || []).length;
+      toast(`أُنشئت ${n} مهمّةً — ${res.terms.length} مصطلحًا في كلٍّ منها.`, 'ok');
+    } catch (err) { toast(err.message, 'bad'); }
+  }
+
+  // -------------------------------------------------------------
+  // التصدير بهيئة المعاجم (ملاحظة ٢٦٢)
+  // -------------------------------------------------------------
+  async function exportGuide() {
+    if (!terms.length) terms = await loadTerms();
+    const avail = langRows.filter(l => terms.some(r =>
+      r.translations.some(t => t.language_code === l.code && t.term_tr)));
+    if (!avail.length) return toast('لا مقابلاتٍ لتُصدَّر.', 'bad');
+
+    const boxes = avail.map(l => {
+      const n = terms.filter(r => r.translations.some(t => t.language_code === l.code && t.term_tr)).length;
+      const cb = h('input', { type: 'checkbox', value: l.code,
+        checked: (!lang || lang === l.code) ? true : null, 'aria-label': l.name_ar });
+      return { code: l.code, cb, el: h('label.check.col-pick', cb, h('span', l.name_ar), h('span.badge', String(n))) };
+    });
+    const all = h('button.btn.xs', { type: 'button', onclick: () => boxes.forEach(b => { b.cb.checked = true; }) }, 'كل اللغات');
+    const none = h('button.btn.xs.ghost', { type: 'button', onclick: () => boxes.forEach(b => { b.cb.checked = false; }) }, 'ألغِ');
+
+    const sort = h('select', { 'aria-label': 'الترتيب' },
+      h('option', { value: 'ar' }, 'أبجديًّا بالعربية'),
+      h('option', { value: 'tr' }, 'أبجديًّا بلغة الترجمة'),
+      h('option', { value: 'as' }, 'كما أُدخل'));
+    const cols = h('select', { 'aria-label': 'أعمدة الصفحة' },
+      h('option', { value: '1' }, 'عمودٌ واحد'),
+      h('option', { value: '2' }, 'عمودان'),
+      h('option', { value: '3', selected: true }, 'ثلاثة أعمدة'));
+    const fmt = h('select', { 'aria-label': 'الصيغة' },
+      h('option', { value: 'pdf', selected: true }, 'PDF بهيئة المعاجم'),
+      h('option', { value: 'docx' }, 'Word — مستند'),
+      h('option', { value: 'xlsx' }, 'Excel — ورقةٌ لكلِّ لغة'));
+
+    const res = await dialog({
+      title: 'تصدير الدليل الإرشادي',
+      body: h('div.stack',
+        h('p.small.muted', 'يخرج المصطلحُ ومقابلُه لا غير، على هيئة المعاجم: أعمدةٌ في الصفحة، '
+          + 'ورأسٌ فيه أوّلُ مدخلٍ وآخرُه، وفواصلُ الحروف.'),
+        h('fieldset.stack', h('legend', 'اللغات'),
+          h('div.row.between', h('span.small.muted', `${avail.length} لغةً فيها مقابلات`),
+            h('div.row', all, none)),
+          h('div.col-picker', boxes.map(b => b.el))),
+        h('div.grid-2',
+          h('label.field', 'الترتيب', sort),
+          h('label.field', 'أعمدة الصفحة', cols),
+          h('label.field', 'الصيغة', fmt))),
+      buttons: [
+        { label: 'صدّر', kind: 'primary',
+          validate: () => (boxes.some(b => b.cb.checked) ? true : 'اختر لغةً واحدةً على الأقل'),
+          value: () => ({ codes: boxes.filter(b => b.cb.checked).map(b => b.code),
+            sort: sort.value, cols: Number(cols.value), fmt: fmt.value }) },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
+
+    const title = 'الدليل الإرشادي للمصطلحات';
+    const note = 'الرجوع إليه إلزامي عند لبس المصطلح — كما في العقد.';
+    const pairs = code => {
+      const out = terms
+        .map(r => [r.term_ar, r.translations.find(t => t.language_code === code)?.term_tr || ''])
+        .filter(p => p[1]);
+      if (res.sort === 'ar') out.sort((a, b) => arKey(a[0]).localeCompare(arKey(b[0]), 'ar'));
+      if (res.sort === 'tr') out.sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+      return out;
+    };
+
+    try {
+      if (res.fmt === 'xlsx') {
+        const sheets = res.codes.map(c => ({
+          name: langName(c),
+          rows: [['المصطلح', langName(c)], ...pairs(c)]
+        }));
+        downloadBlob(buildXlsxBook(sheets, { allText: true }),
+          `${title}${res.codes.length === 1 ? ` — ${langName(res.codes[0])}` : ''}.xlsx`);
+      } else {
+        const { exportDictionary } = await import('../teamexport.js');
+        const parts = res.codes.map(c => ({ code: c, name: langName(c), pairs: pairs(c) }));
+        const done = await exportDictionary(parts, title,
+          { note, cols: res.cols, pdf: res.fmt === 'pdf', letters: res.sort === 'ar' });
+        if (!done) return toast('اسمح بالنوافذ المنبثقة للطباعة.', 'bad');
+      }
+      toast('جرى التصدير.', 'ok');
+    } catch (err) { toast(err.message, 'bad'); }
+  }
+
+  q.addEventListener('input', () => draw());
+  cat.addEventListener('change', () => draw());
+  onlyMissing.addEventListener('change', () => draw());
+
+  drawCards();
+  await draw();
+  drawQueue();
 
   return h('div',
     h('div.page-head',
       h('div.row.wrap', { style: { marginInlineStart: 'auto', order: 2 } },
-        expBtn, tmplBtn, impBtn, fileIn, addBtn),
+        expBtn, tmplBtn, impBtn, fileIn, askBtn, askFile, addBtn),
       h('div.grow', h('div.eyebrow', 'المرجع'), h('h1', 'الدليل الإرشادي للمصطلحات'),
         h('p.muted', 'مصطلحٌ واحد ومقابلٌ واحد في كل لغة، فلا يختلف المترجمون في لفظٍ شرعي. '
           + 'والرجوع إليه إلزامي عند لبس المصطلح.'))),
+    h('div.tabs',
+      h('button.tab', { type: 'button', 'aria-selected': 'true' }, 'الدليل'),
+      h('a.tab', { href: '/app/glossary/watch', 'aria-selected': 'false' }, 'مرصد المصطلحات')),
     h('div.card.stack.gl-open',
       h('b', 'الدليل يُبنى بالفريق كله'),
-      h('p.small.muted', 'لكل عضو أن يضيف مصطلحًا أو يستورد ملفًّا، ويُحفظ بحال «مقترح» '
-        + 'حتى يعتمده المنسق أو مدير المشروع فيصير هو المعتمد. '
-        + 'والاستيرادُ يقبل شكلين: ورقةً واحدةً أعمدتُها اللغات، أو ورقةً لكلِّ لغةٍ '
-        + 'يدلُّ اسمُها على لسانها — وهو شكلُ القواميس.')),
+      h('p.small.muted', 'لكل عضو أن يضيف مصطلحًا، ولكلِّ مترجمٍ أن يكتب المقابلَ في لغته '
+        + 'ويُنقّح ما ظهر له فيه معنًى أدقّ — وما يُنقَّح محفوظُ الأثر. '
+        + 'وما رُفع بملفٍّ بلغتين يدخل معتمدًا، فالأصلُ فيه أنه مترجَمٌ مراجَع.')),
     cardsBar,
     cards,
     queue,
     h('div.card.stack',
-      h('div.row.between', h('b', 'البحث'), count),
-      f.q,
+      h('div.row.between', h('b', 'المعجم'), count),
+      q,
       h('div.grid-2',
-        h('label.field', 'التصنيف', f.cat),
-        h('label.field', 'اللغة', f.lang),
-        h('label.field', 'الحال', f.status))),
-    list,
-    extras);
+        h('label.field', 'التصنيف', cat),
+        h('label.check', onlyMissing, h('span', 'ما لا مقابلَ له في هذه اللغة'))),
+      letters,
+      table));
+}
+
+// مرصد المصطلحات وسجلُّ المشاركة في تبويبٍ مستقل (ملاحظة ٢٥٦)
+export async function watch() {
+  const box = h('div.stack');
+  const page = h('div',
+    h('div.page-head',
+      h('div.grow', h('div.eyebrow', 'المرجع'), h('h1', 'مرصد المصطلحات'),
+        h('p.muted', 'يمسح المرصدُ أصولَ الأرشيف العربية فيُخرج المتكرِّرَ من الألفاظ، '
+          + 'ثم يُضاف ما يُختار منها إلى الدليل.'))),
+    h('div.tabs',
+      h('a.tab', { href: '/app/glossary', 'aria-selected': 'false' }, 'الدليل'),
+      h('button.tab', { type: 'button', 'aria-selected': 'true' }, 'مرصد المصطلحات')),
+    box);
+
+  (async () => {
+    try {
+      if (isAdmin()) box.append(await observatoryCard(() => {}));
+      box.append(await contribCard());
+    } catch (err) { box.append(h('p.muted', err.message)); }
+  })();
+
+  return page;
 }
 
 // لوحة البحث السريع داخل شاشة الترجمة: لا يغادر المترجم عمله (ملاحظة ١٥٠)

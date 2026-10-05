@@ -1,0 +1,305 @@
+// الشهادات: شهاداتُ الدورات وشهاداتُ الخبرة (ملاحظة ٢٦٧)
+//
+//   يُنشئها المنسقُ مسوّدةً، ويعتمدها مديرُ المشروع فتصدر ويُمنح لها
+//   رقمٌ متسلسلٌ موحَّد. وعليها باركودٌ يفتح صفحةَ تحقّقٍ عامّة. ولا
+//   تُمنح إلا لمستحقٍّ بقرار.
+import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDate } from '../ui.js';
+import { db } from '../sb.js';
+import { state, isManager, can } from '../store.js';
+import { printCertificate, certVerifyUrl, CERT_THEMES } from '../certdoc.js';
+
+const KIND_LABEL = { course: 'دورة تدريبية', experience: 'خبرة' };
+const STATE = { draft: ['مسوّدة', 'warn'], issued: ['صادرة', 'ok'], revoked: ['ملغاة', 'bad'] };
+
+export async function render() {
+  const list = h('div.stack');
+  const tabs = h('div.tabs');
+  let want = '';
+
+  const addBtn = can('cert_draft')
+    ? h('button.btn.sm.primary', { type: 'button', onclick: () => edit(null) }, '＋ منحُ شهادة')
+    : null;
+
+  const page = h('div',
+    h('div.page-head',
+      h('div', h('p.eyebrow', 'الفريق'), h('h2', 'الشهادات')),
+      h('div.row', addBtn)),
+    h('p.lead', 'شهاداتُ الدورات التدريبية وشهاداتُ الخبرة. يُنشئها المنسق مسوّدةً، '
+      + 'ويعتمدها مديرُ المشروع فتصدر برقمها وباركودِ تحقّقها.'),
+    tabs, h('div.card.stack', list));
+
+  let members = [];
+  try {
+    members = await db.select('profiles', { select: 'id,full_name,role,status',
+      status: 'eq.active', order: 'full_name.asc' }) || [];
+  } catch { /* تبقى القائمةُ فارغةً فيُنبَّه عند الإنشاء */ }
+  const nameOf = id => members.find(m => m.id === id)?.full_name || '';
+
+  function drawTabs() {
+    fill(tabs, [['', 'الكل'], ['draft', 'المسوّدات'], ['issued', 'الصادرة'], ['revoked', 'الملغاة']]
+      .map(([k, label]) => {
+        const b = h('button.tab', { type: 'button', 'aria-selected': want === k ? 'true' : 'false' }, label);
+        b.onclick = () => { want = k; drawTabs(); draw(); };
+        return b;
+      }));
+  }
+
+  async function draw() {
+    fill(list, h('p.muted', 'يُحمَّل…'));
+    let rows = [];
+    try { rows = await db.rpc('certificates_list', { p_status: want || null }) || []; }
+    catch (err) { fill(list, h('p.muted', err.message)); return; }
+    if (!rows.length) {
+      fill(list, emptyState('لا شهادات', 'ما مُنحت شهادةٌ بعد في هذه القائمة.'));
+      return;
+    }
+    fill(list, rows.map(card));
+  }
+
+  function card(c) {
+    const [label, tone] = STATE[c.status] || STATE.draft;
+    const open = h('button.btn.xs', { type: 'button' }, '👁 معاينة');
+    open.onclick = () => openCert(c);
+
+    const issue = (c.status === 'draft' && can('cert_issue'))
+      ? h('button.btn.xs.primary', { type: 'button' }, 'اعتمادٌ وإصدار') : null;
+    if (issue) issue.onclick = () => busy(issue, async () => {
+      try {
+        const no = await db.rpc('issue_certificate', { p_cert: c.id });
+        toast(`صدرت الشهادةُ برقم ${no}.`, 'ok'); draw();
+      } catch (err) { toast(err.message, 'bad'); }
+    });
+
+    const editBtn = (c.status === 'draft' && can('cert_draft'))
+      ? h('button.btn.xs', { type: 'button', onclick: () => edit(c) }, 'تعديل') : null;
+
+    const revoke = (c.status === 'issued' && can('cert_revoke'))
+      ? h('button.btn.xs.danger', { type: 'button' }, 'إلغاء') : null;
+    if (revoke) revoke.onclick = async () => {
+      const why = h('input', { 'aria-label': 'سبب الإلغاء', placeholder: 'صدرت بخطأ في…' });
+      const res = await dialog({
+        title: 'إلغاءُ شهادة',
+        body: h('div.stack',
+          h('p.small.muted', 'الشهادةُ الملغاةُ تبقى في السجلِّ ويُعلَن إلغاؤها في صفحة التحقق، '
+            + 'ولا تُحذف — فالرقمُ المسحوبُ أثر.'),
+          h('label.field', 'السبب', why)),
+        buttons: [{ label: 'إلغاء الشهادة', kind: 'danger', value: () => why.value.trim() },
+                  { label: 'تراجع', value: null }]
+      });
+      if (res === null) return;
+      try { await db.rpc('revoke_certificate', { p_cert: c.id, p_why: res || null });
+        toast('أُلغيت الشهادة.', 'ok'); draw(); }
+      catch (err) { toast(err.message, 'bad'); }
+    };
+
+    const link = c.serial_no
+      ? h('a.small', { href: certVerifyUrl(c), target: '_blank', rel: 'noopener', dir: 'ltr' }, c.serial_no)
+      : h('span.small.muted', 'بلا رقمٍ حتى تُعتمد');
+
+    return h('div.cert-row',
+      h('div', { style: { flex: 1, minWidth: '220px' } },
+        h('b', c.title),
+        h('div.small.muted', `${KIND_LABEL[c.kind] || ''} · ${c.member_name}`),
+        h('div.small.muted', c.hours ? `${c.hours} ساعة · ` : '',
+          c.start_on ? fmtDate(c.start_on) : '', c.end_on ? ' – ' + fmtDate(c.end_on) : ''),
+        link),
+      h('span.pill', { class: tone }, label),
+      h('div.row', open, editBtn, issue, revoke));
+  }
+
+  async function openCert(c) {
+    // تُولَّد من القالب والبيانات عند الطلب، فلا يُخزَّن منها ملف
+    let full = c;
+    try {
+      const rows = await db.select('certificates', { select: '*', id: `eq.${c.id}` });
+      if (rows && rows[0]) full = rows[0];
+    } catch { /* تُرسَم بما في اليد */ }
+    if (!printCertificate(full, c.member_name || nameOf(full.member_id))) {
+      toast('امنع حجبَ النوافذ لتُفتح الشهادة.', 'bad');
+    }
+  }
+
+  // -------------------------------------------------------------
+  // الإنشاءُ والتعديل: ويُسأل أوّلًا أهي دورةٌ على المنصة أم خارجها
+  // -------------------------------------------------------------
+  async function edit(c) {
+    const cur = c || {};
+    let plans = [];
+    try { plans = await db.select('training_plans', { select: 'id,title', order: 'created_at.desc' }) || []; }
+    catch { /* لا خططَ محمَّلة */ }
+
+    const kind = h('select', { 'aria-label': 'نوع الشهادة' },
+      h('option', { value: 'course', selected: cur.kind !== 'experience' }, 'شهادةُ دورةٍ تدريبية'),
+      h('option', { value: 'experience', selected: cur.kind === 'experience' }, 'شهادةُ خبرة'));
+    const member = h('select', { 'aria-label': 'العضو' },
+      h('option', { value: '' }, '— اختر العضو —'),
+      members.map(m => h('option', { value: m.id, selected: cur.member_id === m.id }, m.full_name)));
+    const source = h('select', { 'aria-label': 'مصدر الدورة' },
+      h('option', { value: 'platform', selected: cur.source !== 'external' }, 'دورةٌ على المنصة'),
+      h('option', { value: 'external', selected: cur.source === 'external' }, 'دورةٌ خارج المنصة'));
+    const plan = h('select', { 'aria-label': 'الدورة على المنصة' },
+      h('option', { value: '' }, '— اختر الدورة —'),
+      plans.map(p => h('option', { value: p.id, selected: cur.plan_id === p.id }, p.title)));
+
+    const f = {
+      title:    h('input', { value: cur.title || '', 'aria-label': 'العنوان' }),
+      subject:  h('input', { value: cur.subject || '', 'aria-label': 'الموضوع' }),
+      hours:    h('input', { type: 'number', min: '0', step: '0.5', value: cur.hours ?? '', 'aria-label': 'المدة بالساعات' }),
+      start_on: h('input', { type: 'date', value: cur.start_on || '', 'aria-label': 'من' }),
+      end_on:   h('input', { type: 'date', value: cur.end_on || '', 'aria-label': 'إلى' }),
+      place:    h('input', { value: cur.place || '', 'aria-label': 'المكان' }),
+      provider: h('input', { value: cur.provider || '', 'aria-label': 'الجهة المنفّذة' }),
+      role_text: h('input', { value: cur.role_text || '', 'aria-label': 'الدور' }),
+      body:     h('textarea', { rows: 3, 'aria-label': 'ما باشره' }, cur.body || '')
+    };
+
+    // تبويبُ تصميم الشهادة (ملاحظة ٢٦٧ هـ و ك)
+    const d = cur.design || {};
+    const theme = h('select', { 'aria-label': 'القالب' },
+      Object.entries(CERT_THEMES).map(([k, v]) =>
+        h('option', { value: k, selected: (d.theme || 'classic') === k }, v.name)));
+    const landscape = h('input', { type: 'checkbox', checked: d.landscape !== false ? true : null,
+      'aria-label': 'أفقي' });
+    const signer = h('input', { value: cur.signer_name || '', 'aria-label': 'اسم الموقِّع',
+      placeholder: 'يُكتب عند كلِّ شهادة' });
+    const signerRole = h('input', { value: cur.signer_role || '', 'aria-label': 'منصب الموقِّع',
+      placeholder: 'يُكتب عند كلِّ شهادة' });
+    const sign = h('select', { 'aria-label': 'التوقيع' },
+      h('option', { value: 'blank', selected: (cur.signature || 'blank') === 'blank' },
+        'فراغٌ يُوقَّع عليه باليد بعد الطباعة'),
+      h('option', { value: 'image', selected: cur.signature === 'image' }, 'صورةُ توقيعٍ تُدرَج'),
+      h('option', { value: 'none', selected: cur.signature === 'none' }, 'بلا توقيعٍ — اكتفاءً بالباركود'));
+    const signSrc = h('input', { value: d.signature_src || '', 'aria-label': 'رابط صورة التوقيع',
+      placeholder: 'عنوانُ صورة التوقيع' });
+
+    const courseBox = h('div.stack');
+    const expBox = h('div.stack');
+    const syncKind = () => {
+      const isCourse = kind.value === 'course';
+      courseBox.style.display = isCourse ? '' : 'none';
+      expBox.style.display = isCourse ? 'none' : '';
+    };
+    const syncSource = () => {
+      const ext = source.value === 'external';
+      plan.closest('label').style.display = ext ? 'none' : '';
+      f.provider.closest('label').style.display = ext ? '' : 'none';
+    };
+    kind.addEventListener('change', syncKind);
+    source.addEventListener('change', syncSource);
+
+    fill(courseBox,
+      h('label.field', 'أهي دورةٌ على المنصة أم خارجها؟', source),
+      h('label.field', 'الدورة على المنصة', plan,
+        h('small', 'تُملأ بياناتُها من سجلّها')),
+      h('label.field', 'الجهةُ المنفّذة', f.provider),
+      h('div.grid-2',
+        h('label.field', 'الموضوع', f.subject),
+        h('label.field', 'المدّة بالساعات', f.hours),
+        h('label.field', 'المكان', f.place)));
+    fill(expBox,
+      h('label.field', 'الدور الذي قام به', f.role_text),
+      h('label.field', 'ما باشره من أعمال', f.body));
+
+    // التواريخُ للنوعين معًا: مدّةُ الدورة، ومدّةُ العمل في الخبرة
+    const datesRow = h('div.grid-2',
+      h('label.field', 'من', f.start_on),
+      h('label.field', 'إلى', f.end_on));
+
+    plan.addEventListener('change', () => {
+      const p = plans.find(x => x.id === plan.value);
+      if (p && !f.title.value.trim()) f.title.value = p.title;
+    });
+
+    const res = await dialog({
+      title: c ? 'تعديلُ شهادة' : 'منحُ شهادة',
+      body: h('div.stack',
+        h('div.grid-2',
+          h('label.field', 'النوع', kind),
+          h('label.field', 'العضو', member)),
+        h('label.field', 'عنوانُ البرنامج أو الشهادة', f.title),
+        courseBox, expBox, datesRow,
+        h('fieldset.stack', h('legend', 'تصميمُ الشهادة'),
+          h('div.grid-2',
+            h('label.field', 'القالب', theme),
+            h('label.check', landscape, h('span', 'اتّجاهٌ أفقي'))),
+          h('div.grid-2',
+            h('label.field', 'اسمُ الموقِّع', signer),
+            h('label.field', 'المنصب', signerRole)),
+          h('p.small.muted', 'الاسمُ والمنصبُ لا يُثبَّتان: يُكتبان عند كلِّ شهادةٍ ويُعدَّلان متى شئت.'),
+          h('label.field', 'التوقيع', sign),
+          h('label.field', 'صورةُ التوقيع', signSrc))),
+      onOpen: () => { syncKind(); syncSource(); },
+      buttons: [
+        { label: 'حفظ', kind: 'primary',
+          validate: () => {
+            if (!f.title.value.trim()) { toast('اكتب عنوانَ البرنامج.', 'bad'); return false; }
+            if (!member.value) { toast('اختر العضو.', 'bad'); return false; }
+            return true;
+          },
+          value: () => ({
+            id: cur.id || null, kind: kind.value, member_id: member.value,
+            title: f.title.value.trim(), subject: f.subject.value.trim(),
+            hours: f.hours.value || null,
+            start_on: f.start_on.value || null, end_on: f.end_on.value || null,
+            place: f.place.value.trim(), provider: f.provider.value.trim(),
+            source: kind.value === 'course' ? source.value : 'platform',
+            plan_id: source.value === 'platform' ? (plan.value || null) : null,
+            role_text: f.role_text.value.trim(), body: f.body.value.trim(),
+            signer_name: signer.value.trim(), signer_role: signerRole.value.trim(),
+            signature: sign.value,
+            design: { theme: theme.value, landscape: landscape.checked,
+                      signature_src: signSrc.value.trim() || null }
+          }) },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
+    try {
+      await db.rpc('save_certificate', { p: res });
+      toast(c ? 'حُفظت الشهادة.' : 'أُنشئت الشهادةُ مسوّدةً — تنتظر اعتمادَ مدير المشروع.', 'ok');
+      draw();
+    } catch (err) { toast(err.message, 'bad'); }
+  }
+
+  drawTabs(); draw();
+  return page;
+}
+
+// شهاداتي: يراها العضو في حسابه
+export async function mine() {
+  const list = h('div.stack');
+  const page = h('div',
+    h('div.page-head', h('div', h('p.eyebrow', 'حسابي'), h('h2', 'شهاداتي'))),
+    h('div.card.stack', list));
+
+  let rows = [];
+  try { rows = await db.rpc('my_certificates') || []; }
+  catch (err) { fill(list, h('p.muted', err.message)); return page; }
+
+  if (!rows.length) {
+    fill(list, emptyState('لا شهادات', 'لم تصدر لك شهادةٌ بعد.'));
+    return page;
+  }
+  fill(list, rows.map(c => {
+    const [label, tone] = STATE[c.status] || STATE.issued;
+    const open = h('button.btn.xs.primary', { type: 'button' }, '⤓ الشهادة');
+    open.onclick = async () => {
+      let full = c;
+      try {
+        const r = await db.select('certificates', { select: '*', id: `eq.${c.id}` });
+        if (r && r[0]) full = r[0];
+      } catch { /* تُرسَم بما في اليد */ }
+      if (!printCertificate(full, state.profile?.full_name)) {
+        toast('امنع حجبَ النوافذ لتُفتح الشهادة.', 'bad');
+      }
+    };
+    return h('div.cert-row',
+      h('div', { style: { flex: 1, minWidth: '220px' } },
+        h('b', c.title),
+        h('div.small.muted', `${KIND_LABEL[c.kind] || ''}${c.hours ? ' · ' + c.hours + ' ساعة' : ''}`),
+        c.serial_no ? h('div.small.muted', { dir: 'ltr' }, c.serial_no) : null),
+      h('span.pill', { class: tone }, label),
+      c.status === 'issued' ? open : null);
+  }));
+  return page;
+}
