@@ -2687,8 +2687,9 @@ begin
   if (select explanation from public.glossary_terms where term_ar = 'التقوى') <> 'شرحٌ محدَّث للتقوى.' then
     raise exception 'FAIL: لم يُحدَّث شرح المصطلح الموجود';
   end if;
-  if (select status from public.glossary_terms where term_ar = 'الإحسان') <> 'مقترح' then
-    raise exception 'FAIL: المستورَد دخل معتمدًا';
+  -- ملاحظة ٢٥٩: ما رُفع بملفٍّ فالأصلُ أنه مترجَمٌ مراجَع، فيدخل معتمدًا
+  if (select status from public.glossary_terms where term_ar = 'الإحسان') <> 'معتمد' then
+    raise exception 'FAIL: المستورَد لم يدخل معتمدًا';
   end if;
   if (select count(*) from public.glossary_translations where term_id =
         (select id from public.glossary_terms where term_ar = 'التقوى')) <> 2 then
@@ -3099,9 +3100,12 @@ begin
   -- يُغلق على المنسق: الرواتب والقاعات
   perform public.set_member_perms(v_crd,
     jsonb_build_object('payroll', false, 'rooms', false, 'team', true));
-  if (select perms from public.profiles where id = v_crd)
-       <> jsonb_build_object('payroll', false, 'rooms', false) then
-    raise exception 'FAIL: لم يُحفظ إلا المغلق (%)', (select perms from public.profiles where id = v_crd);
+  if (select count(*) from public.member_perms
+       where member_id = v_crd and perm_key in ('payroll', 'rooms') and not allowed) <> 2 then
+    raise exception 'FAIL: لم يُحفظ المنع في جدول الصلاحيات';
+  end if;
+  if not public.perm_allowed(v_crd, 'team') then
+    raise exception 'FAIL: لم يُحفظ المنح';
   end if;
 
   -- فيُمنع من جدولة اللقاءات
@@ -5834,9 +5838,10 @@ begin
   if v_names ~ 'الرواتب|التسعيرة|المستحقات|ريال' then
     raise exception 'FAIL: ذكرٌ ماليٌّ في الأدوار';
   end if;
-  -- والصفةُ التشغيلية على حساب التنسيق لا تزيد عليه
-  if v_names !~ 'صلاحياتُ المنسق' then
-    raise exception 'FAIL: لم يُبيَّن أن الصفةَ التشغيلية بصلاحية التنسيق';
+  -- والصفةُ التشغيلية لا يُعلَن أنها بصلاحية التنسيق (ملاحظة ٢٦٥):
+  -- الأمرُ في النظام على حاله، ولا يُشعَر صاحبُه بأنه منسّق
+  if v_names ~ 'صلاحياتُ المنسق|لقبٌ تشغيليٌّ|لقبُه تشغيليٌّ' then
+    raise exception 'FAIL: بقي الإعلانُ بأن الصفةَ التشغيلية بصلاحية التنسيق';
   end if;
 
   -- قسمُ التدريب أُضيف بعد القاعات
@@ -6193,4 +6198,413 @@ begin
   perform set_config('request.jwt.claim.sub', v_mgr::text, true);
   delete from public.backup_runs;
   raise notice 'PASS: حالُ النسخ الاحتياطية بيّنٌ لمدير المشروع، محجوبٌ عن غيره';
+end $$;
+
+-- =====================================================================
+-- ٧١) تفعيلُ التسجيلات الإدارية لمدير المشروع (ملاحظة ٢٧٠)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        v_new uuid := '00000000-0000-0000-0000-0000000002a1';
+        n int;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  insert into auth.users (id, email, raw_user_meta_data)
+  values (v_new, 'applicant-admin@test', '{"full_name":"متقدمٌ بصفة منسق"}');
+  update public.profiles set status = 'pending' where id = v_new;
+  update public.profile_private set applied_as = 'coordinator' where id = v_new;
+
+  -- المنسقُ لا يبتّ في تسجيلٍ تقدّم بصفةٍ إدارية
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  begin
+    perform public.admin_update_member(v_new, 'active', null, null);
+    raise exception 'FAIL: فعّل المنسقُ تسجيلًا إداريًّا';
+  exception when sqlstate '42501' then null;
+  end;
+
+  -- ولا يرفع أحدًا إلى رتبته
+  begin
+    perform public.admin_update_member(v_new, null, 'coordinator', null);
+    raise exception 'FAIL: رقّى المنسقُ عضوًا إلى منسق';
+  exception when sqlstate '42501' then null;
+  end;
+
+  -- ومديرُ المشروع يبتّ، ويُكتب الأثر
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.admin_update_member(v_new, 'active', null, null);
+  if (select status from public.profiles where id = v_new) <> 'active' then
+    raise exception 'FAIL: لم يُفعّل مديرُ المشروع التسجيل';
+  end if;
+  select count(*) into n from public.admin_audit
+   where action = 'activate' and target_id = v_new;
+  if n < 1 then raise exception 'FAIL: لم يُكتب أثرُ التفعيل'; end if;
+
+  raise notice 'PASS: التسجيلُ الإداريُّ لا يُفعّله إلا مديرُ المشروع، والأثرُ مكتوب';
+end $$;
+
+-- =====================================================================
+-- ٧٢) الصلاحياتُ مفصَّلةً: الفرعُ وأصلُه، والمنحُ بأجل (ملاحظات ٢٦٣ و٢٦٦)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        n int;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_perms(v_crd, '{}'::jsonb);   -- تنظيفُ ما سبق
+
+  -- المالُ مسحوبٌ من المنسق ابتداءً
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  if public.has_perm('bank_check') then raise exception 'FAIL: تدقيقُ الحسابات مفتوحٌ ابتداءً'; end if;
+  if public.has_perm('payroll')    then raise exception 'FAIL: الرواتبُ مفتوحةٌ ابتداءً'; end if;
+  -- وما كان من عمله اليومي مفتوحٌ
+  if not public.has_perm('mat_assign') then raise exception 'FAIL: أُغلق الإسنادُ على المنسق'; end if;
+  -- وإسنادُ المادة إلى منسّقٍ آخر مسحوبٌ (ملاحظة ٢٦٩)
+  if public.has_perm('mat_assign_coord') then raise exception 'FAIL: أسند المنسقُ إلى منسّقٍ آخر'; end if;
+
+  -- والمنسقُ لا يمنح ولا يمنع
+  begin
+    perform public.set_member_perm(v_crd, 'bank_check', true, null, null);
+    raise exception 'FAIL: منح المنسقُ نفسَه صلاحية';
+  exception when sqlstate '42501' then null;
+  end;
+
+  -- ومديرُ المشروع يمنح صلاحيةً مفردة
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_perm(v_crd, 'bank_check', true, null, 'تدقيقُ الآيبانات');
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  if not public.has_perm('bank_check') then raise exception 'FAIL: لم ينفذ المنح'; end if;
+  -- والمنحُ لا يفتح أختَه
+  if public.has_perm('bank_activate') then raise exception 'FAIL: فُتحت صلاحيةٌ لم تُمنح'; end if;
+
+  -- ومنعُ الرأس يمنع الفرع
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_perm(v_crd, 'banks', false, null, null);
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  if public.has_perm('bank_check') then raise exception 'FAIL: بقي الفرعُ مفتوحًا ورأسُه ممنوع'; end if;
+
+  -- والأجلُ يُسقط المنحَ من نفسه
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_perm(v_crd, 'banks', true, now() - interval '1 day', null);
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  if public.has_perm('banks') then raise exception 'FAIL: لم يسقط المنحُ بانتهاء أجله'; end if;
+
+  -- وكلُّ منحٍ يُكتب
+  select count(*) into n from public.admin_audit where action = 'perm' and target_id = v_crd;
+  if n < 3 then raise exception 'FAIL: لم يُكتب أثرُ المنح (%)', n; end if;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_perms(v_crd, '{}'::jsonb);
+  raise notice 'PASS: الصلاحياتُ مفصَّلةٌ بأصولها وآجالها، والمنحُ بيد مدير المشروع وحدَه';
+end $$;
+
+-- =====================================================================
+-- ٧٣) الحضورُ يُقاس بالوردية المقرَّرة (ملاحظة ٢٦٤)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_fld uuid := '00000000-0000-0000-0000-0000000002b1';
+        v_sh  uuid;
+        s     public.shifts;
+        v_day date := current_date;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  insert into auth.users (id, email, raw_user_meta_data)
+  values (v_fld, 'field-shift@test', '{"full_name":"مرشدٌ للورديات"}');
+  update public.profiles set status = 'active', track = 'field' where id = v_fld;
+  delete from public.shifts where member_id = v_fld;
+
+  -- وردةٌ من السابعة إلى الثالثة، وبصمةٌ في الحادية عشرة
+  insert into public.shifts (member_id, shift_date, start_at, end_at, status, created_by)
+  values (v_fld, v_day, time '07:00', time '15:00', 'scheduled', v_mgr)
+  returning id into v_sh;
+
+  update public.shifts
+     set check_in_at = (v_day + time '11:00') at time zone 'Asia/Riyadh', status = 'present'
+   where id = v_sh;
+
+  select * into s from public.shifts where id = v_sh;
+  if s.start_at <> time '07:00' or s.end_at <> time '15:00' then
+    raise exception 'FAIL: تغيّرت الوردةُ المقرَّرة بوقت البصمة';
+  end if;
+  if s.late_minutes <> 240 then
+    raise exception 'FAIL: لم يُحتسب التأخيرُ أربعَ ساعات (%)', s.late_minutes;
+  end if;
+
+  -- وانصرافٌ في الثانية: ساعةٌ مبكرًا، وثلاثُ ساعاتٍ محتسَبة
+  update public.shifts
+     set check_out_at = (v_day + time '14:00') at time zone 'Asia/Riyadh'
+   where id = v_sh;
+  select * into s from public.shifts where id = v_sh;
+  if s.early_minutes <> 60 then
+    raise exception 'FAIL: لم يُحتسب الانصرافُ المبكر (%)', s.early_minutes;
+  end if;
+  if s.worked_minutes <> 180 then
+    raise exception 'FAIL: ما احتُسب من العمل غيرُ صحيح (%)', s.worked_minutes;
+  end if;
+
+  -- والدوامُ المرن يُسقط التأخير
+  perform public.set_flex_hours(v_fld, true);
+  perform public.shift_recalc(v_sh);
+  select * into s from public.shifts where id = v_sh;
+  if s.late_minutes <> 0 then raise exception 'FAIL: احتُسب تأخيرٌ في الدوام المرن'; end if;
+  perform public.set_flex_hours(v_fld, false);
+
+  -- والمنسقُ لا يفعّل الدوامَ المرن بلا إذن
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000b'::text, true);
+  begin
+    perform public.set_flex_hours(v_fld, true);
+    raise exception 'FAIL: فعّل المنسقُ الدوامَ المرن بلا إذن';
+  exception when sqlstate '42501' then null;
+  end;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  delete from public.shifts where member_id = v_fld;
+  raise notice 'PASS: الحضورُ يُقاس بالوردية المقرَّرة: تأخيرٌ وانصرافٌ مبكرٌ وعملٌ محتسَب';
+end $$;
+
+-- =====================================================================
+-- ٧٤) حسابُ المتابعة بمسمّاه، وتسمياتُ الأدوار (ملاحظتا ٢٧١ و٢٧٢)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        v_vw  uuid := '00000000-0000-0000-0000-0000000002c1';
+        n int;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  insert into auth.users (id, email, raw_user_meta_data)
+  values (v_vw, 'lang-dir@test', '{"full_name":"مديرُ إدارة اللغات"}');
+  update public.profile_private set applied_as = 'translator' where id = v_vw;
+
+  -- المنسقُ لا ينشئ حسابَ متابعة
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  begin
+    perform public.convert_to_viewer(v_vw, 'مدير إدارة اللغات', null, null);
+    raise exception 'FAIL: حوّل المنسقُ تسجيلًا إلى حساب متابعة';
+  exception when sqlstate '42501' then null;
+  end;
+
+  -- ومديرُ المشروع يحوّله بمسمّاه، فيسقط ما سجّل به
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.convert_to_viewer(v_vw, 'مدير إدارة اللغات', null, null);
+  if (select role from public.profiles where id = v_vw) <> 'viewer' then
+    raise exception 'FAIL: لم يصر الحسابُ حسابَ متابعة';
+  end if;
+  if (select job_title from public.profiles where id = v_vw) <> 'مدير إدارة اللغات' then
+    raise exception 'FAIL: لم يُحفظ المسمّى الوظيفي';
+  end if;
+  if (select applied_as from public.profile_private where id = v_vw) is not null then
+    raise exception 'FAIL: بقيت الصفةُ التي سجّل بها';
+  end if;
+
+  -- يرى ولا يفعل
+  perform set_config('request.jwt.claim.sub', v_vw::text, true);
+  if not public.can_view_reports() then raise exception 'FAIL: حُجبت التقاريرُ عن المتابع'; end if;
+  if not public.has_perm('tm_view')  then raise exception 'FAIL: حُجب الاطّلاعُ على الأعضاء'; end if;
+  if public.has_perm('tm_edit')      then raise exception 'FAIL: فُتح للمتابع تعديلُ الأعضاء'; end if;
+  if public.has_perm('payroll')      then raise exception 'FAIL: فُتحت للمتابع الرواتب'; end if;
+  if public.is_admin()               then raise exception 'FAIL: عُدَّ المتابعُ إداريًّا'; end if;
+  begin
+    perform public.save_glossary_term(jsonb_build_object('term_ar', 'من متابع', 'explanation', 'شرح'));
+    raise exception 'FAIL: كتب المتابعُ في الدليل';
+  exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+
+  -- والأجلُ يُسقط الحساب
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_expiry(v_vw, now() - interval '1 day');
+  perform set_config('request.jwt.claim.sub', v_vw::text, true);
+  if public.my_role() is not null then raise exception 'FAIL: بقي الحسابُ عاملًا بعد أجله'; end if;
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_expiry(v_vw, null);
+
+  -- ويظهر في قائمة حسابات المتابعة
+  select count(*) into n from public.viewer_accounts() where id = v_vw;
+  if n <> 1 then raise exception 'FAIL: لم يظهر في قائمة حسابات المتابعة'; end if;
+
+  -- تسمياتُ الأدوار: الاسمُ يتغيّر والصلاحياتُ لا
+  perform public.set_role_label('ops_manager', 'مدير التشغيل', 'وصفٌ جديد');
+  if (select label from public.role_labels where key = 'ops_manager') <> 'مدير التشغيل' then
+    raise exception 'FAIL: لم يتغيّر الاسمُ الظاهر';
+  end if;
+  perform public.reset_role_label('ops_manager');
+  if (select label from public.role_labels where key = 'ops_manager')
+       <> 'مدير العمليات التشغيلية' then
+    raise exception 'FAIL: لم يُعَد الاسمُ إلى أصله';
+  end if;
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  begin
+    perform public.set_role_label('coordinator', 'رئيس قسم');
+    raise exception 'FAIL: غيّر المنسقُ تسميةَ دور';
+  exception when sqlstate '42501' then null;
+  end;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  raise notice 'PASS: حسابُ المتابعة يرى ولا يفعل بمسمّاه، وتسمياتُ الأدوار بيد مدير المشروع';
+end $$;
+
+-- =====================================================================
+-- ٧٥) طلبُ ترجمةِ مصطلحات، وتنقيحُ المقابل (ملاحظتا ٢٦٠ و٢٦١)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_tr  uuid := '00000000-0000-0000-0000-00000000000c';
+        r record; v_task uuid; v_term uuid; n int; v_tr_txt text;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  insert into public.member_languages (member_id, language_code)
+  values (v_tr, 'en') on conflict do nothing;
+
+  -- رفعُ كلماتٍ عربيةٍ وحدَها: تدخل الدليلَ معتمدةً من حينها
+  select * into r from public.import_arabic_terms(array['الاستسقاء', 'الاعتكاف', 'الاستسقاء'], 'فقهي');
+  if r.added <> 2 then raise exception 'FAIL: عددُ المضاف (%)', r.added; end if;
+  select id into v_term from public.glossary_terms where term_ar = 'الاعتكاف';
+  if (select status from public.glossary_terms where id = v_term) <> 'معتمد' then
+    raise exception 'FAIL: الكلمةُ العربيةُ لم تدخل معتمدة';
+  end if;
+
+  -- ثم تُسنَد إلى لغةٍ فتُنشأ مهمّتُها
+  select * into r from public.dispatch_glossary(array[v_term], array['en'],
+    jsonb_build_object('en', v_tr::text), 'نأمل الدقّة', null);
+  v_task := r.task_id;
+  if r.assignee <> v_tr then raise exception 'FAIL: لم تُسنَد المهمّةُ لمن حُدِّد'; end if;
+  if r.terms <> 1 then raise exception 'FAIL: عددُ مصطلحات المهمّة (%)', r.terms; end if;
+
+  -- وتظهر للمترجم في مهامه
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  select count(*) into n from public.my_glossary_tasks() where id = v_task;
+  if n <> 1 then raise exception 'FAIL: لم تظهر المهمّةُ للمترجم'; end if;
+
+  -- وما كتبه يدخل الدليلَ معتمدًا بلا مراجعة
+  perform public.set_translation(v_term, 'en', 'Iʿtikāf', null, v_task);
+  if public.term_tr_of(v_term, 'en') <> 'Iʿtikāf' then
+    raise exception 'FAIL: لم يدخل المقابلُ الدليل';
+  end if;
+  if (select done_at from public.glossary_task_terms
+       where task_id = v_task and term_id = v_term) is null then
+    raise exception 'FAIL: لم يُعلَّم البندُ منجَزًا';
+  end if;
+
+  -- ولا يكتب في لغةٍ لم يسجّلها ضمن إتقانه
+  begin
+    perform public.set_translation(v_term, 'ur', 'اعتکاف', null, null);
+    raise exception 'FAIL: كتب في لغةٍ لم يسجّلها';
+  exception when sqlstate '42501' then null;
+  end;
+
+  -- والتنقيحُ يُحفظ أثرُه
+  perform public.set_translation(v_term, 'en', 'Spiritual retreat (iʿtikāf)', 'معنًى أدقّ', null);
+  select count(*) into n from public.translation_history(v_term, 'en');
+  if n < 2 then raise exception 'FAIL: لم يُحفظ سجلُّ التنقيح (%)', n; end if;
+  select was into v_tr_txt from public.translation_history(v_term, 'en') limit 1;
+  if v_tr_txt <> 'Iʿtikāf' then raise exception 'FAIL: لم يُحفظ المقابلُ السابق'; end if;
+
+  -- ولوحةُ المتابعة تُري المديرَ ما أُنجز
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select * into r from public.glossary_task_board() where id = v_task;
+  if r.done <> 1 then raise exception 'FAIL: لم تُحصَ المهمّةُ المنجَزة'; end if;
+
+  raise notice 'PASS: طلبُ ترجمةِ المصطلحات يُسنَد ويُنجَز بلا مراجعة، والتنقيحُ محفوظُ الأثر';
+end $$;
+
+-- =====================================================================
+-- ٧٦) الشهادات: مسوّدةٌ فاعتمادٌ فرقمٌ وتحقّقٌ عام (ملاحظة ٢٦٧)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        v_tr  uuid := '00000000-0000-0000-0000-00000000000c';
+        v_c uuid; v_no text; v_key text; v jsonb;
+begin
+  -- المنسقُ ينشئ مسوّدة
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  v_c := public.save_certificate(jsonb_build_object(
+    'kind', 'course', 'member_id', v_tr, 'title', 'دورةُ الترجمة الشرعية',
+    'subject', 'مصطلحاتُ الخطبة', 'hours', 12, 'source', 'external',
+    'provider', 'معهدُ اللغات', 'start_on', '2026-03-01', 'end_on', '2026-03-05'));
+  if (select status from public.certificates where id = v_c) <> 'draft' then
+    raise exception 'FAIL: لم تُنشأ الشهادةُ مسوّدة';
+  end if;
+  if (select serial_no from public.certificates where id = v_c) is not null then
+    raise exception 'FAIL: مُنح رقمٌ قبل الاعتماد';
+  end if;
+
+  -- ولا يعتمدها
+  begin
+    perform public.issue_certificate(v_c);
+    raise exception 'FAIL: اعتمد المنسقُ شهادةً بلا إذن';
+  exception when sqlstate '42501' then null;
+  end;
+
+  -- ومديرُ المشروع يعتمدها فيُمنح الرقم
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  v_no := public.issue_certificate(v_c);
+  if v_no !~ '^HS-[0-9]{4}-[0-9]{4}$' then raise exception 'FAIL: صيغةُ الرقم (%)', v_no; end if;
+  select verify_key into v_key from public.certificates where id = v_c;
+
+  -- والتحقّقُ عامٌّ بالرقم ومفتاحه، ولا يُستخرج بالتخمين
+  perform set_config('request.jwt.claim.sub', '', true);
+  v := public.verify_certificate(v_no, v_key);
+  if not (v ->> 'found')::boolean then raise exception 'FAIL: لم تُقرأ الشهادةُ في صفحة التحقق'; end if;
+  if (v ->> 'state') <> 'صحيحة' then raise exception 'FAIL: حالُ الشهادة (%)', v ->> 'state'; end if;
+  if v ? 'national_id' or v ? 'email' then raise exception 'FAIL: عُرضت بياناتٌ شخصية'; end if;
+  v := public.verify_certificate(v_no, 'deadbeef');
+  if (v ->> 'found')::boolean then raise exception 'FAIL: قُبل مفتاحٌ خاطئ'; end if;
+
+  -- والإلغاءُ يُعلَن ولا يُحذف
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.revoke_certificate(v_c, 'صدرت بخطأ في العنوان');
+  perform set_config('request.jwt.claim.sub', '', true);
+  v := public.verify_certificate(v_no, v_key);
+  if (v ->> 'state') <> 'ملغاة' then raise exception 'FAIL: لم يُعلَن الإلغاء'; end if;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  raise notice 'PASS: الشهاداتُ مسوّدةٌ فاعتمادٌ فرقمٌ موحَّد، وتحقّقٌ عامٌّ لا يكشف سوى الاسم';
+end $$;
+
+-- =====================================================================
+-- ٧٧) من أنشأ تَبِع: المنسقُ لا يُسنِد مرحلتَه إلى منسّقٍ آخر (ملاحظة ٢٦٩)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        v_crd2 uuid := '00000000-0000-0000-0000-0000000002d1';
+        v_ws  public.workflow_stages;
+        v_p   public.profiles;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  insert into auth.users (id, email, raw_user_meta_data)
+  values (v_crd2, 'coord2@test', '{"full_name":"منسّقٌ آخر"}');
+  perform public.admin_update_member(v_crd2, 'active', 'coordinator', null);
+
+  select * into v_ws from public.workflow_stages where assignee_role = 'coordinator' limit 1;
+  select * into v_p  from public.profiles where id = v_crd2;
+
+  -- المنسقُ لا يُسنِد إلى نظيره
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  begin
+    perform public.check_assignee(v_ws, v_p, 'en');
+    raise exception 'FAIL: أسند المنسقُ مرحلتَه إلى منسّقٍ آخر';
+  exception when sqlstate '42501' then null;
+  end;
+
+  -- ويُسنِدها إلى نفسه
+  select * into v_p from public.profiles where id = v_crd;
+  perform public.check_assignee(v_ws, v_p, 'en');
+
+  -- ومديرُ المشروع يختار من يشاء
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select * into v_p from public.profiles where id = v_crd2;
+  perform public.check_assignee(v_ws, v_p, 'en');
+
+  -- ومن مُنح مفتاحَ الإسناد يُسنِد
+  perform public.set_member_perm(v_crd, 'mat_assign_coord', true, null, null);
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  perform public.check_assignee(v_ws, v_p, 'en');
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_perm(v_crd, 'mat_assign_coord', null, null, null);
+  raise notice 'PASS: من أنشأ المادةَ تابَعها، وإسنادُها إلى منسّقٍ آخر بيد مدير المشروع';
 end $$;
