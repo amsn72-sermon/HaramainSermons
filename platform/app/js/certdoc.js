@@ -14,6 +14,9 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, ch =>
 
 const KIND = { course: 'شهادةُ حضورِ دورةٍ تدريبية', experience: 'شهادةُ خبرة' };
 
+// شعارُ الهيئة الداكن: اسمُ الهيئة مكتوبٌ فيه، فلا يُعاد تحته نصًّا
+export const AUTH_LOGO = '/assets/alharamain-logo-dark.png';
+
 // القوالبُ الثلاثة: أبيضُ الأرضيةِ كلُّها، لا تختلف إلا في اللون
 // والحلية — فالاحترافُ في النسبة والخطّ لا في الحبر (ملاحظة ٢٧٣)
 export const CERT_THEMES = {
@@ -83,16 +86,28 @@ export function certHtml(c, memberName) {
            background: var(--gold); opacity: .14; }
   .spine::after { content: ''; position: absolute; inset-inline-start: 0; top: 0; bottom: 0;
                   width: 1.2mm; background: var(--gold); }
-  header { display: flex; align-items: center; gap: 10mm; }
-  header img { height: 16mm; }
-  .org { font-size: 10pt; color: var(--gold); letter-spacing: .02em; }
-  .kind { margin-top: 12mm; font-size: 13pt; color: var(--gold); letter-spacing: .08em; }
+  /* شعارُ الهيئة وحدَه متوسّطًا، واسمُها مكتوبٌ فيه (ملاحظة ٢٨١) */
+  header { display: flex; align-items: center; justify-content: center; }
+  header img.auth { height: ${Math.max(10, Math.min(34, Number(d.logo_h) || 20))}mm; }
+  /* علامةٌ مائيةٌ شفّافةٌ في الوسط (ملاحظة ٢٨٢) */
+  .wm { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+        pointer-events: none; }
+  .wm img { width: ${Math.max(20, Math.min(90, Number(d.wm_size) || 55))}%;
+            opacity: ${Math.max(0.02, Math.min(0.3, Number(d.wm_opacity) || 0.07))}; }
+  /* شعاراتٌ تُضاف وتُحرَّك بحرية (ملاحظة ٢٨٢) */
+  .mark { position: absolute; }
+  .mark img { display: block; }
+  /* الاتّزانُ: المتنُ متوسّطٌ كلُّه لا مُزاحٌ إلى حافّة (ملاحظة ٢٨١) */
+  .body { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1;
+          align-items: center; text-align: center; }
+  .body > footer { width: 100%; }
+  .kind { margin-top: 10mm; font-size: 13pt; color: var(--gold); letter-spacing: .08em; }
   h1 { margin: 2mm 0 0; font-size: 30pt; font-weight: 700; line-height: 1.3; }
-  .orn { display: block; width: 46mm; height: 9mm; margin: 6mm 0 0; }
+  .orn { display: block; width: 46mm; height: 9mm; margin: 6mm auto 0; }
   .pre { margin: 7mm 0 0; font-size: 12.5pt; line-height: 2; max-width: 150mm; color: #4a4a4a; }
   .name { margin: 4mm 0 0; font-size: 22pt; font-weight: 700; }
-  .facts { margin: 7mm 0 0; display: grid; grid-template-columns: auto 1fr; gap: 2.5mm 8mm;
-           font-size: 12pt; max-width: 160mm; }
+  .facts { margin: 7mm 0 0; display: inline-grid; grid-template-columns: auto auto; gap: 2.5mm 8mm;
+           font-size: 12pt; max-width: 170mm; text-align: start; }
   .facts b { color: var(--gold); font-weight: 600; }
   footer { margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 10mm; }
   .sign { text-align: center; min-width: 60mm; }
@@ -109,12 +124,14 @@ export function certHtml(c, memberName) {
   @media print { .sheet { page-break-after: always; } }
 </style></head><body><div class="sheet">
 <div class="spine"></div>
+${d.watermark === false ? '' : `<div class="wm"><img src="${esc(d.wm_src || AUTH_LOGO)}" alt=""></div>`}
+${(Array.isArray(d.logos) ? d.logos : []).map(g => `<div class="mark" style="`
+  + `top:${Number(g.y) || 0}%; inset-inline-start:${Number(g.x) || 0}%;">`
+  + `<img src="${esc(g.src)}" style="height:${Math.max(5, Math.min(60, Number(g.h) || 14))}mm" alt=""></div>`).join('')}
 ${c.status === 'revoked' ? '<div class="revoked">ملغاة</div>' : ''}
+<div class="body">
 <header>
-  <img src="/assets/alharamain-logo.png" alt="">
-  <img src="/assets/presidency.png" alt="">
-  <div class="org">الهيئةُ العامةُ للعناية بشؤون المسجد الحرام والمسجد النبوي<br>
-    مشروعُ خادم الحرمين الشريفين لترجمة خطب الحرمين</div>
+  <img class="auth" src="${esc(d.header_src || AUTH_LOGO)}" alt="الهيئة العامة للعناية بشؤون المسجد الحرام والمسجد النبوي">
 </header>
 <div class="kind">${esc(KIND[c.kind] || '')}</div>
 <h1>${esc(c.title || '')}</h1>
@@ -134,7 +151,7 @@ ${ORNAMENT(th.gold)}
   <div class="no">${esc(c.serial_no || '')}${c.issued_at ? ' · ' + esc(fmtDate(c.issued_at)) : ''}</div>
   ${qr ? `<div class="stamp"><img src="${qr}" alt="رمز التحقق">للتحقق من الشهادة</div>` : ''}
 </footer>
-</div></body></html>`;
+</div></div></body></html>`;
 }
 
 // تُفتح في نافذةٍ للطباعة أو الحفظ PDF — ولا يُخزَّن منها ملف

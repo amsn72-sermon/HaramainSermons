@@ -74,21 +74,25 @@ export async function render(ctx) {
 
   function card(l) {
     const members = n(l.code);
-    const state2 = l.is_initiative ? 'init' : (l.is_core ? 'core' : (l.is_active ? 'active' : 'off'));
-    const fixed = l.is_core || l.is_initiative;
+    const state2 = l.is_source ? 'core' : l.is_initiative ? 'init'
+      : (l.is_core ? 'core' : (l.is_active ? 'active' : 'off'));
+    const fixed = l.is_core || l.is_initiative || l.is_source;
     const el = h(fixed ? 'div.lang-card' : 'button.lang-card',
       { class: state2, type: fixed ? null : 'button',
-        title: l.is_initiative ? (l.initiative_note || 'لغةُ مبادرة بلا مقابل')
+        title: l.is_source ? 'لغةُ المصدر: تُنتقى لغةً أمًّا ولا تكون هدفًا للترجمة'
+          : l.is_initiative ? (l.initiative_note || 'لغةُ مبادرة بلا مقابل')
           : l.is_core ? 'لغة رئيسية ثابتة' : (l.is_active ? 'اضغط لتعطيلها' : 'اضغط لتفعيلها') },
       h('div.row.between', h('b', l.name_ar), h('span.lang-code', { dir: 'ltr' }, l.code)),
       h('span.lang-native', { dir: l.dir }, l.native_name),
       h('div.row.between',
-        members ? h('span.small.muted', `${members} مترجمًا`) : h('span.badge.warn', 'لا أحد'),
+        l.is_source ? h('span.small.muted', 'لسانُ المصدر')
+          : members ? h('span.small.muted', `${members} مترجمًا`) : h('span.badge.warn', 'لا أحد'),
         h('span.row', { style: { gap: '4px' } },
           l.is_initiative ? h('span.badge.gold', { title: 'بلا مقابل' }, 'مبادرة') : null,
-          l.is_core ? h('span.badge.gold', 'ثابتة')
+          l.is_source ? h('span.badge.gold', 'لغةُ المصدر')
+            : l.is_core ? h('span.badge.gold', 'ثابتة')
             : h('span.badge', { class: l.is_active ? 'ok' : '' }, l.is_active ? 'مفعّلة' : 'معطّلة'))),
-      isManager()
+      isManager() && !l.is_source
         ? h('button.btn.xs', { type: 'button', style: { marginTop: '6px' },
             onclick: e => { e.stopPropagation(); initDialog(l); } },
             l.is_initiative ? 'إخراجٌ من المبادرة' : 'ضمٌّ إلى المبادرة')
@@ -102,14 +106,17 @@ export async function render(ctx) {
     const match = l => (!s || l.name_ar.includes(s) || (l.native_name || '').includes(s) || l.code.includes(s.toLowerCase()))
       && (filter.value !== 'core' || l.is_core)
       && (filter.value !== 'active' || (l.is_active && !l.is_core))
-      && (filter.value !== 'off' || !l.is_active)
+      && (filter.value !== 'off' || (!l.is_active && !l.is_source))
+      && (filter.value !== 'active' || !l.is_source)
+      && (filter.value !== 'empty' || !l.is_source)
       && (filter.value !== 'empty' || !n(l.code));
     const list = state.languages.filter(match);
     const groups = [
-      ['لغاتُ المبادرة — بلا مقابل', list.filter(l => l.is_initiative)],
-      ['اللغات الرئيسية الثابتة', list.filter(l => l.is_core && !l.is_initiative)],
-      ['المفعّلة', list.filter(l => !l.is_core && !l.is_initiative && l.is_active)],
-      ['المعطّلة', list.filter(l => !l.is_active)]
+      ['لغةُ المصدر', list.filter(l => l.is_source)],
+      ['لغاتُ المبادرة — بلا مقابل', list.filter(l => l.is_initiative && !l.is_source)],
+      ['اللغات الرئيسية الثابتة', list.filter(l => l.is_core && !l.is_initiative && !l.is_source)],
+      ['المفعّلة', list.filter(l => !l.is_core && !l.is_initiative && !l.is_source && l.is_active)],
+      ['المعطّلة', list.filter(l => !l.is_active && !l.is_source)]
     ].filter(([, g]) => g.length);
     counter.textContent = `${list.length} من ${state.languages.length} لغة`;
     box.replaceChildren(...(groups.length ? groups.map(([title, g]) =>

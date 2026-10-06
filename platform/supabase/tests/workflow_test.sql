@@ -136,7 +136,12 @@ commit;
 begin; set local role anon;
 select public._assert((select count(*) = 0 from public.tracks), 'الزائر لا يرى المسارات');
 select public._assert((select count(*) = 0 from public.public_translations()), 'لا شيء منشور قبل الاعتماد');
-select public._assert((select count(*) = 50 from public.languages), 'الزائر يقرأ قائمة اللغات الموحّدة (٥٠)');
+-- خمسون لغةَ ترجمة، والعربيةُ لغةُ المصدر زيادةً عليها (ملاحظة ٢٧٦)
+select public._assert((select count(*) = 50 from public.languages where not is_source),
+  'الزائر يقرأ قائمة اللغات الموحّدة (٥٠)');
+select public._assert((select count(*) = 1 from public.languages
+                        where code = 'ar' and is_source and not is_active),
+  'العربيةُ مسجَّلةٌ لغةَ مصدرٍ لا هدفًا للترجمة');
 commit;
 
 -- 6) الاستلام: العدّاد لا يبدأ قبله، ولا يستلم إلا مسؤول المرحلة الأولى
@@ -3144,8 +3149,10 @@ declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
 begin
   -- ---------- المرشد المتميّز يترجم بلغته ----------
   perform set_config('request.jwt.claim.sub', v_mgr::text, true);
-  select code into v_lang from public.languages order by sort limit 1;
-  select code into v_other from public.languages where code <> v_lang order by sort limit 1;
+  -- لغاتُ الترجمة وحدَها: العربيةُ لغةُ مصدرٍ لا يُسنَد بها عمل (ملاحظة ٢٧٦)
+  select code into v_lang from public.languages where not is_source order by sort limit 1;
+  select code into v_other from public.languages
+   where code <> v_lang and not is_source order by sort limit 1;
 
   update public.profiles set track = 'field', status = 'active' where id = v_fld;
 
@@ -6607,4 +6614,70 @@ begin
   perform set_config('request.jwt.claim.sub', v_mgr::text, true);
   perform public.set_member_perm(v_crd, 'mat_assign_coord', null, null, null);
   raise notice 'PASS: من أنشأ المادةَ تابَعها، وإسنادُها إلى منسّقٍ آخر بيد مدير المشروع';
+end $$;
+
+-- =====================================================================
+-- الدليلُ المصطلحي: الترتيبُ بالجذر، والقوسُ شرحٌ، والاعتمادُ جملةً،
+--   والمرصدُ لا يقترح ما في الدليل (ملاحظات ٢٧٥ و٢٧٧ و٢٧٩ و٢٩٨ و٣٠٠)
+-- =====================================================================
+do $$
+declare v_mgr uuid; v_id uuid; v_n int; v_term text; v_exp text; v_norm text;
+begin
+  select id into v_mgr from public.profiles where role = 'manager' limit 1;
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+
+  -- ١) الجذر: «ال» لا تُحسب من الكلمة
+  if public.ar_bare('الاعتكاف') <> 'اعتكاف' then
+    raise exception 'FAIL: لم تُنزع «ال» في الترتيب المعجمي';
+  end if;
+  if public.ar_bare('ال') <> 'ال' then
+    raise exception 'FAIL: نُزعت «ال» ولم يبقَ بعدها حرفان';
+  end if;
+  raise notice 'PASS: المعجمُ يُرتَّب بالجذر لا بـ«ال» التعريف';
+
+  -- ٢) القوسُ في المصطلح يُنزَع إلى الشرح، والمرفوعُ يدخل معتمدًا
+  perform public.import_glossary(
+    '[{"term_ar":"الطوافُ (بالبيت)","category":"مناسك",
+       "translations":[{"language_code":"en","term_tr":"Tawaf"}]}]'::jsonb);
+  select term_ar, explanation, status into v_term, v_exp, v_norm
+    from public.glossary_terms where term_ar like 'الطواف%';
+  if v_term <> 'الطوافُ' then
+    raise exception 'FAIL: لم يُنزع القوسُ من المصطلح (%)', v_term;
+  end if;
+  if coalesce(v_exp, '') not like '%بالبيت%' then
+    raise exception 'FAIL: لم يُضَمَّ ما بين القوسين إلى الشرح';
+  end if;
+  if v_norm <> 'معتمد' then
+    raise exception 'FAIL: المرفوعُ بلغتين لم يدخل معتمدًا';
+  end if;
+  raise notice 'PASS: القوسُ بيانٌ يُضَمُّ إلى الشرح، والمرفوعُ يدخل معتمدًا';
+
+  -- ٣) الاعتمادُ جملةً
+  insert into public.glossary_terms (term_ar, category, status, created_by)
+  values ('مصطلحُ اختبارِ الاعتماد', 'عام', 'مقترح', v_mgr) returning id into v_id;
+  select public.approve_glossary_terms(array[v_id], true) into v_n;
+  if v_n <> 1 or (select status from public.glossary_terms where id = v_id) <> 'معتمد' then
+    raise exception 'FAIL: لم يُعتمد المصطلحُ جملةً';
+  end if;
+  raise notice 'PASS: المصطلحاتُ تُعتمَد جملةً في ضغطة';
+
+  -- ٤) المرصد: ما في الدليل لا يبقى مرشَّحًا، والمرشَّحُ يُولَّد مصطلحًا
+  insert into public.term_candidates (norm, raw, hits, works, words, last_seen)
+  values (public.ar_norm('الطوافُ'), 'الطواف', 9, 3, 1, now())
+  on conflict (norm) do update set state = 'new', hits = 9;
+  select public.purge_candidates() into v_n;
+  if (select state from public.term_candidates where norm = public.ar_norm('الطوافُ')) <> 'added' then
+    raise exception 'FAIL: بقي في المرصد لفظٌ هو في الدليل';
+  end if;
+
+  v_norm := public.ar_norm('لفظُ اختبارِ المرصد');
+  insert into public.term_candidates (norm, raw, hits, works, words, last_seen)
+  values (v_norm, 'لفظ اختبار المرصد', 40, 7, 3, now())
+  on conflict (norm) do update set state = 'new';
+  select count(*)::int into v_n from public.promote_candidates(array[v_norm], 'عام');
+  if v_n <> 1 then raise exception 'FAIL: لم يُولَّد المصطلحُ من المرشَّح'; end if;
+  if (select state from public.term_candidates where norm = v_norm) <> 'added' then
+    raise exception 'FAIL: بقي المرشَّحُ معروضًا بعد توليده';
+  end if;
+  raise notice 'PASS: المرصدُ لا يقترح ما في الدليل، ومرشَّحُه يُولَّد مصطلحًا';
 end $$;

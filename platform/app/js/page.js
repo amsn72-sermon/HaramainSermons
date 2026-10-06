@@ -6,6 +6,16 @@ import { MOSQUE, langName, state } from './store.js';
 export const PAGE = { w: 210, h: 297, top: 38, bottom: 32, side: 20 };
 export const LETTERHEAD = '/assets/letterhead.jpg';
 
+// حدودٌ واحدةٌ لكلِّ مُخرَجٍ على الكليشة (ملاحظتا ٢٧٤ و٢٨٠):
+//   numH  شريطُ رقم الصفحة تحت صندوق الكتابة
+//   safeH فسحةُ أمانٍ تمنع ملامسةَ المحتوى لذيل الكليشة
+// وهي المقاساتُ التي ثبتت في تصدير المادة والكتاب المجمَّع منذ ملاحظة ٧١،
+// فتُعمَّم على المُخرَجات كلِّها فلا يشذُّ واحدٌ عن الحدود.
+export const BOX = { numH: 8, safeH: 9 };
+export const boxWidth  = () => PAGE.w - PAGE.side * 2;
+export const boxHeight = () => PAGE.h - PAGE.top - PAGE.bottom;
+export const winHeight = () => boxHeight() - BOX.numH - BOX.safeH;
+
 // التحقق من رقم التوثيق المطبوع: صفحة عامة يفتحها رمز QR (ملاحظة ١٣٤)
 export const PUBLIC_SITE = 'https://haramainsermons.com';
 export const docVerifyUrl = no => `${PUBLIC_SITE}/verify?doc=${encodeURIComponent(no || '')}`;

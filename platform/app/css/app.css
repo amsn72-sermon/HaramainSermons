@@ -554,10 +554,26 @@ dialog:has(.circular-doc) .dlg-body { max-height: 82vh; }
 .data-list dd { margin: 2px 0 0; font-weight: 600; }
 .row.between { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 
-/* مصمِّم بطاقة العمل (ملاحظة ٨٦) */
-.cd-wrap { display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
-@media (max-width: 1280px) { .cd-wrap { grid-template-columns: 300px minmax(0, 1fr); } .cd-wrap .cd-side { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; } }
-@media (max-width: 860px) { .cd-wrap { grid-template-columns: 1fr; } .cd-wrap .cd-side { grid-template-columns: 1fr; } }
+/* مصمِّم بطاقة العمل (ملاحظة ٨٦) — مربّعٌ واحدٌ بلا فراغٍ بين أقسامه،
+   والفواصلُ خطوطٌ رفيعةٌ لا مسافات (ملاحظة ٢٨٣) */
+.cd-board { padding: 0; overflow: hidden; }
+.cd-board .cd-wrap > * { padding: 14px; }
+.cd-board .cd-wrap > * + * { border-inline-start: 1px solid var(--border); }
+.cd-board h3 { margin-top: 0; }
+.cd-board .cd-tabbody { padding: 12px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg); }
+.cd-wrap { display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px; gap: 0; align-items: stretch; }
+@media (max-width: 1280px) {
+  .cd-wrap { grid-template-columns: 300px minmax(0, 1fr); }
+  .cd-wrap .cd-side { grid-column: 1 / -1; display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .cd-board .cd-wrap > .cd-side { border-inline-start: 0; border-top: 1px solid var(--border); }
+}
+@media (max-width: 860px) {
+  .cd-wrap { grid-template-columns: 1fr; }
+  .cd-wrap .cd-side { grid-template-columns: 1fr; }
+  .cd-board .cd-wrap > * + * { border-inline-start: 0; border-top: 1px solid var(--border); }
+}
 .card-stage-wrap { display: flex; justify-content: center; padding: 14px 0;
   background: repeating-conic-gradient(rgba(127,127,127,.10) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
   border-radius: 10px; }
@@ -673,18 +689,20 @@ dialog:has(.card-show) { width: min(760px, calc(100vw - 24px)); }
 /* القائمة الجانبية مجموعاتٌ تُطوى وتُفتح (ملاحظتا ٩٢ و٢٦٨) */
 .nav-group { display: block; }
 .nav-group + .nav-group { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+/* اسمُ القسم بلونٍ مغايرٍ يميّزه عن روابطه (ملاحظة ٢٩٣) */
 .nav-head { display: flex; align-items: center; gap: 8px; cursor: pointer;
-  padding: 7px 14px; font-size: .78rem; letter-spacing: .03em; color: var(--muted);
-  border-radius: 10px; list-style: none; user-select: none; }
+  padding: 7px 14px; font-size: .78rem; letter-spacing: .03em; color: var(--gold);
+  font-weight: 600; border-radius: 10px; list-style: none; user-select: none; }
 .nav-head::-webkit-details-marker { display: none; }
 .nav-head::after { content: '‹'; margin-inline-start: auto; font-size: 1rem; line-height: 1;
   transition: transform .15s ease; color: var(--muted); }
 .nav-group[open] > .nav-head::after { transform: rotate(-90deg); }
-.nav-head:hover { background: var(--hover, rgba(255, 255, 255, .04)); color: var(--text); }
-.nav-group[open] > .nav-head { color: var(--text); font-weight: 600; }
+.nav-head:hover { background: var(--hover, rgba(255, 255, 255, .04)); }
+.nav-group[open] > .nav-head { color: var(--gold); }
+.nav-head::after { color: var(--gold); }
 /* الوحدةُ الداخلية عنوانٌ باهتٌ لا مفتاحُ طيٍّ ثانٍ — فطبقتان تكفيان */
-.nav-unit { display: block; padding: 8px 14px 3px; font-size: .68rem; color: var(--muted);
-  opacity: .75; letter-spacing: .03em; }
+.nav-unit { display: block; padding: 8px 14px 3px; font-size: .68rem; color: var(--gold);
+  opacity: .72; letter-spacing: .03em; }
 @media (max-width: 900px) {
   .nav-group + .nav-group { margin-top: 4px; }
   .nav-head { padding: 9px 12px; }
@@ -1100,6 +1118,31 @@ button.arch-tile:hover { border-color: var(--gold); }
 .src-audio-prev { margin-top: 8px; gap: 4px; }
 .src-audio-prev audio { width: 100%; }
 .gl-open { border-inline-start: 3px solid var(--gold); }
+/* داخلَ اللغة ولافتةُ المقترحات: سطرٌ لا يُطيل الصفحة (ملاحظتا ٢٩٥ و٢٩٦) */
+/* رفعُ الشعارات والتوقيع وتحريكُها (ملاحظتا ٢٨٢ و٢٨٣) */
+.mark-prev img { max-height: 18mm; max-width: 100%; background: #fff; border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px; }
+.mark-row { gap: 8px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; }
+.mark-thumb { height: 30px; width: auto; background: #fff; border-radius: 4px; padding: 2px; }
+.field.sm { font-size: .8rem; }
+.field.sm input { max-width: 7.5rem; }
+
+/* مرشَّحو المرصد: أيقوناتٌ بحجم اللفظ لا صفوفٌ تُطيل الصفحة (ملاحظة ٢٩٧) */
+.cand-wrap { display: flex; flex-wrap: wrap; gap: 6px; }
+.cand { display: inline-flex; align-items: stretch; border: 1px solid var(--border);
+  border-radius: 999px; overflow: hidden; background: var(--card); font-size: .86rem; }
+.cand.on { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold) inset; }
+.cand-word { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px;
+  border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; }
+.cand-n { font-size: .74rem; color: var(--muted); background: var(--bg);
+  border-radius: 999px; padding: 0 5px; direction: ltr; }
+.cand-act { border: 0; border-inline-start: 1px solid var(--border); background: transparent;
+  color: var(--muted); cursor: pointer; padding: 0 7px; font-size: .86rem; line-height: 1; }
+.cand-act:hover { background: var(--bg); color: var(--text); }
+.cand-act.ghost:hover { color: var(--bad, #b00); }
+
+.gl-langbar { padding: 10px 12px; border-inline-start: 3px solid var(--gold); gap: 8px; }
+.gl-pend { padding: 8px 12px; border-inline-start: 3px solid var(--warn, var(--gold)); gap: 8px; }
 
 /* القاعات واللقاءات (ملاحظة ١٦٣) */
 .meet-card { border-inline-start: 3px solid var(--border); }
@@ -1621,3 +1664,15 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .gl-save.bad { color: #c0564a; }
 .shift-chip.late { border-color: #c98a2e; }
 .shift-chip.adhoc { border-style: dashed; }
+
+/* صندوقُ البحث فوق قائمة الأعمال مباشرةً (ملاحظة ٢٨٧) */
+.work-filter { margin: 16px 0 10px; }
+.work-filter .grid { margin: 0; }
+
+/* مستودع الترجمة: جدولُ «الجميع» صفوفُه قصيرةٌ وأيقوناتُه ظاهرة (ملاحظة ٢٨٨) */
+.repo-all td, .repo-all th { padding: 4px 8px; }
+.repo-all td b { font-weight: 600; }
+.repo-ico.sm { display: inline-flex; vertical-align: -3px; margin-inline-end: 6px; }
+.repo-acts { gap: 4px; }
+.repo-view .repo-text { font-size: .86rem; color: var(--muted); max-height: 9rem;
+  overflow: auto; white-space: pre-wrap; }

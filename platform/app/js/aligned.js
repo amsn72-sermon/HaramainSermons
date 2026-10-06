@@ -8,6 +8,7 @@
 import { h, escapeHtml, fmtDate } from './ui.js';
 import { PAGE, LETTERHEAD } from './page.js';
 import { buildXlsxBook, downloadBlob } from './xlsx.js';
+import { openSheetWindow, measureBlocks, flowBlocks, mm2px, sheetCss, winHeight } from './sheetflow.js';
 import { langName, langDir } from './store.js';
 
 const BLOCK = /<\/(p|div|h[1-6]|li|tr|blockquote|section)>/gi;
@@ -64,51 +65,55 @@ export function alignedXlsx(work, parts, mode) {
     `${safe(work.title)} — مقابل ${mode === 'sentence' ? 'جملةً بجملة' : 'فقرةً بفقرة'}.xlsx`);
 }
 
+// المقابلةُ على صفحاتِ A4 حقيقيةٍ: تُقاس الأزواجُ وتُوزَّع، ولكلِّ
+// صفحةٍ كليشتُها ورقمُها، فلا يفيض الجدولُ على الكليشة (ملاحظة ٢٧٤)
 export function alignedPdf(work, parts, mode, note = '') {
-  const w = window.open('', '_blank');
-  if (!w) return false;
   const unit = mode === 'sentence' ? 'جملةً بجملة' : 'فقرةً بفقرة';
-  const sections = parts.map(p => {
-    const rows = p.pairs.map((pr, i) => `<div class="pair">
-        <div class="n">${i + 1}</div>
-        <div class="ar" dir="rtl">${escapeHtml(pr[0]) || '<span class="gap">— لا مقابل في الأصل —</span>'}</div>
-        <div class="tr" dir="${langDir(p.code)}">${escapeHtml(pr[1]) || '<span class="gap">— لم تُترجم —</span>'}</div>
-      </div>`).join('');
-    const warn = p.drift
-      ? `<p class="warn">تنبيه: الأصل ${p.srcCount} والترجمة ${p.trCount} — والمحاذاةُ بالترتيب، فراجِعْ ما بعد موضع الاختلاف.</p>`
-      : '';
-    return `<section class="lang"><h2>${escapeHtml(langName(p.code))}</h2>${warn}${rows}</section>`;
-  }).join('');
 
-  w.document.write(`<!doctype html><html lang="ar" dir="rtl" data-theme="light"><head><meta charset="utf-8"><title></title>
-<style>
-  @page { size: ${PAGE.w}mm ${PAGE.h}mm; margin: 0; }
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: "Haramain Arabic", "Segoe UI", Tahoma, sans-serif; color: #12202c; background: #fff; }
-  .sheet { position: relative; width: ${PAGE.w}mm; min-height: ${PAGE.h}mm; overflow: hidden; }
-  .sheet img.lh { position: absolute; inset: 0; width: ${PAGE.w}mm; height: ${PAGE.h}mm; object-fit: cover; z-index: 0; }
-  .win { position: relative; z-index: 1; padding: ${PAGE.top}mm ${PAGE.side}mm ${PAGE.bottom + 6}mm; }
-  h1 { font-size: 15pt; text-align: center; margin: 0 0 2mm; }
-  .sub { text-align: center; font-size: 9pt; color: #5a6a78; margin: 0 0 6mm; }
-  h2 { font-size: 11.5pt; margin: 5mm 0 2mm; padding-bottom: 1mm; border-bottom: 1px solid #c8b591; }
+  const ctx = openSheetWindow(sheetCss(`
+  h2 { font-size: 11.5pt; margin: 0 0 2mm; padding-bottom: 1mm; border-bottom: 1px solid #c8b591; }
   .warn { font-size: 8.5pt; color: #8a5a00; background: #fff6e5; border: 1px solid #e8d3a8;
           border-radius: 2mm; padding: 1.5mm 2mm; margin: 0 0 3mm; }
-  .pair { display: grid; grid-template-columns: 8mm 1fr; gap: 0 2mm; break-inside: avoid;
+  .pair { display: grid; grid-template-columns: 8mm 1fr; gap: 0 2mm;
           padding: 1.5mm 0; border-bottom: 1px dotted #ddd2bd; }
   .n { grid-row: span 2; font-size: 7.5pt; color: #9aa6b1; padding-top: .6mm; }
   .ar { font-size: 10pt; font-weight: 600; line-height: 1.7; }
   .tr { font-size: 9.5pt; color: #2c3b48; line-height: 1.7; unicode-bidi: plaintext; }
-  .gap { color: #b3261e; font-size: 8pt; }
-  @media print { .sheet { page-break-after: always; } }
-</style></head><body>
-<div class="sheet"><img class="lh" src="${LETTERHEAD}" alt=""><div class="win">
-  <h1>${escapeHtml(work.title || 'عمل')}</h1>
-  <p class="sub">${escapeHtml(note || `${unit} — ${fmtDate(new Date())}`)}</p>
-  ${sections}
-</div></div>
-<script>window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 350); });<\/script>
-</body></html>`);
-  w.document.close();
+  .gap { color: #b3261e; font-size: 8pt; }`));
+  if (!ctx) return false;
+  const { el, pages, measure, w } = ctx;
+
+  ctx.ready(() => {
+    const blocks = [
+      { html: `<h1>${escapeHtml(work.title || 'عمل')}</h1>` },
+      { html: `<p class="sub">${escapeHtml(note || `${unit} — ${fmtDate(new Date())}`)}</p>` }
+    ];
+    for (const p of parts) {
+      blocks.push({ keep: 40, html: `<h2>${escapeHtml(langName(p.code))}</h2>` });
+      if (p.drift) {
+        blocks.push({ html: `<p class="warn">تنبيه: الأصل ${p.srcCount} والترجمة ${p.trCount}`
+          + ' — والمحاذاةُ بالترتيب، فراجِعْ ما بعد موضع الاختلاف.</p>' });
+      }
+      p.pairs.forEach((pr, i) => blocks.push({ html: '<div class="pair">'
+        + `<div class="n">${i + 1}</div>`
+        + `<div class="ar" dir="rtl">${escapeHtml(pr[0]) || '<span class="gap">— لا مقابل في الأصل —</span>'}</div>`
+        + `<div class="tr" dir="${langDir(p.code)}">${escapeHtml(pr[1]) || '<span class="gap">— لم تُترجم —</span>'}</div>`
+        + '</div>' }));
+    }
+    measureBlocks(w, measure, blocks);
+
+    const sheets = [];
+    const nextBox = () => {
+      const { sheet, win } = ctx.sheet();
+      sheets.push(sheet);
+      return win;
+    };
+    flowBlocks(blocks, mm2px(winHeight()), nextBox);
+
+    sheets.forEach((sh, i) => sh.append(el('div', 'pageno', `${i + 1} / ${sheets.length}`)));
+    pages.replaceChildren(...sheets);
+    measure.remove();
+  });
   return true;
 }
 

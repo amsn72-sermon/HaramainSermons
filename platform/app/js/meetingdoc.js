@@ -1,5 +1,6 @@
 // محاور الاجتماع ومحضره: نافذتان على الصيغة النموذجية، ويُصدَّر المحضر
 // على كليشة الهيئة (ملاحظة ١٨٢).
+import { openSheetWindow, measureBlocks, flowBlocks, mm2px, sheetCss, winHeight } from './sheetflow.js';
 import { h, dialog, toast, fmtDateTime, fmtHijri } from './ui.js';
 import { db } from './sb.js';
 import { state, isAdmin } from './store.js';
@@ -194,51 +195,62 @@ export function printMinutes(m, doc, nameOf = (x => x)) {
   const decisions = (d.axes || []).filter(a => a.decision).map((a, i) =>
     `<li>${esc(a.decision)}${a.owner ? ` — <b>${esc(nameOf(a.owner))}</b>` : ''}${a.due ? ` (${esc(a.due)})` : ''}</li>`).join('');
 
-  const w = window.open('', '_blank');
-  if (!w) { toast('اسمح بالنوافذ المنبثقة لطباعة المحضر.', 'bad'); return false; }
-  w.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8">
-<title>محضر ${esc(m.title)}</title>
-<style>
-  @page { size: A4; margin: 20mm; }
-  body { font-family: 'IBM Plex Sans Arabic', Tahoma, sans-serif; color: #1f2a37; line-height: 1.7; }
-  h1 { font-size: 18pt; text-align: center; margin: 0 0 4px; }
-  .sub { text-align: center; color: #666; font-size: 10pt; margin-bottom: 18px; }
-  .meta { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 10.5pt; }
-  .meta td { border: 1px solid #ccc; padding: 6px 8px; }
+  // المحضرُ على كليشة الهيئة، صفحاتٍ تُقاس وتُوزَّع (ملاحظة ٢٨٠ ز)
+  const ctx = openSheetWindow(sheetCss(`
+  h1 { font-size: 16pt; margin: 0 0 1mm; }
+  .sub { font-size: 10pt; margin: 0 0 5mm; }
+  .meta { width: 100%; border-collapse: collapse; margin-bottom: 4mm; font-size: 9.5pt; }
+  .meta td { border: 1px solid #c8b591; padding: 1.6mm 2mm; }
   .meta td.k { background: #f6f4ef; width: 22%; font-weight: 600; }
-  table.ax { width: 100%; border-collapse: collapse; font-size: 10.5pt; }
-  table.ax th { background: #f6f4ef; border: 1px solid #ccc; padding: 6px; }
-  table.ax td { border: 1px solid #ccc; padding: 6px 8px; vertical-align: top; }
-  td.n { text-align: center; width: 28px; }
-  .disc { color: #444; font-size: 9.8pt; margin-top: 3px; }
-  h2 { font-size: 12pt; margin: 18px 0 6px; border-bottom: 2px solid #bc9661; padding-bottom: 3px; }
-  .sign { margin-top: 34px; display: flex; justify-content: space-between; font-size: 10.5pt; }
+  table.ax { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+  table.ax th { background: #f6f4ef; border: 1px solid #c8b591; padding: 1.6mm; }
+  table.ax td { border: 1px solid #c8b591; padding: 1.6mm 2mm; vertical-align: top; }
+  td.n { text-align: center; width: 8mm; }
+  .disc { color: #444; font-size: 9pt; margin-top: .8mm; }
+  h2 { font-size: 11.5pt; margin: 5mm 0 2mm; border-bottom: .5mm solid #bc9661; padding-bottom: 1mm; }
+  p { margin: 0 0 3mm; font-size: 10pt; line-height: 1.8; }
+  ol { margin: 0 0 3mm; padding-inline-start: 6mm; font-size: 10pt; line-height: 1.9; }
+  .sign { margin-top: 8mm; display: flex; justify-content: space-between; font-size: 10pt; }
   .sign div { text-align: center; width: 45%; }
-  .line { margin-top: 36px; border-top: 1px solid #333; }
-</style></head><body>
-<h1>محضر اجتماع</h1>
-<div class="sub">${esc(m.title)}</div>
-<table class="meta">
+  .line { margin-top: 12mm; border-top: 1px solid #333; }`));
+  if (!ctx) { toast('اسمح بالنوافذ المنبثقة لطباعة المحضر.', 'bad'); return false; }
+  const { el, pages, measure, w } = ctx;
+
+  ctx.ready(() => {
+    const blocks = [
+      { html: '<h1>محضر اجتماع</h1>' },
+      { html: `<div class="sub">${esc(m.title)}</div>` },
+      { html: `<table class="meta">
   <tr><td class="k">التاريخ</td><td>${esc(fmtHijri((m.starts_at || '').slice(0, 10)))}</td>
       <td class="k">القاعة</td><td>${esc(m.room_name || '—')}</td></tr>
   <tr><td class="k">رئيس الاجتماع</td><td>${esc(nameOf(d.chair_id) || m.chair_name || '—')}</td>
       <td class="k">أمين السرّ</td><td>${esc(m.secretary_name || '—')}</td></tr>
   <tr><td class="k">الحاضرون</td><td colspan="3">${esc((d.present || []).join(' · ')) || '—'}</td></tr>
   <tr><td class="k">الغائبون</td><td colspan="3">${esc((d.absent || []).join(' · ')) || '—'}</td></tr>
-</table>
-${d.opening ? `<h2>تمهيد</h2><p>${esc(d.opening)}</p>` : ''}
-<h2>المحاور وما دار فيها</h2>
-<table class="ax"><thead><tr><th>م</th><th>المحور وما دار فيه</th><th>القرار</th><th>المسؤول</th><th>الاستحقاق</th></tr></thead>
-<tbody>${rows || '<tr><td colspan="5">—</td></tr>'}</tbody></table>
-${decisions ? `<h2>القرارات</h2><ol>${decisions}</ol>` : ''}
-${d.closing ? `<h2>الخاتمة</h2><p>${esc(d.closing)}</p>` : ''}
-${m.next_meeting_at ? `<p><b>موعد الاجتماع القادم:</b> ${esc(fmtDateTime(m.next_meeting_at))}</p>` : ''}
-<div class="sign">
+</table>` }
+    ];
+    if (d.opening) blocks.push({ keep: 30, html: `<h2>تمهيد</h2><p>${esc(d.opening)}</p>` });
+    blocks.push({ keep: 40, html: '<h2>المحاور وما دار فيها</h2>' });
+    blocks.push({ html: `<table class="ax"><thead><tr><th>م</th><th>المحور وما دار فيه</th>`
+      + `<th>القرار</th><th>المسؤول</th><th>الاستحقاق</th></tr></thead>`
+      + `<tbody>${rows || '<tr><td colspan="5">—</td></tr>'}</tbody></table>` });
+    if (decisions) blocks.push({ keep: 30, html: `<h2>القرارات</h2><ol>${decisions}</ol>` });
+    if (d.closing) blocks.push({ keep: 30, html: `<h2>الخاتمة</h2><p>${esc(d.closing)}</p>` });
+    if (m.next_meeting_at) {
+      blocks.push({ html: `<p><b>موعد الاجتماع القادم:</b> ${esc(fmtDateTime(m.next_meeting_at))}</p>` });
+    }
+    blocks.push({ keep: 20, html: `<div class="sign">
   <div>أمين السرّ<div class="line">${esc(m.secretary_name || '')}</div></div>
   <div>رئيس الاجتماع<div class="line">${esc(nameOf(d.chair_id) || m.chair_name || '')}</div></div>
-</div>
-</body></html>`);
-  w.document.close();
-  setTimeout(() => { w.focus(); w.print(); }, 400);
+</div>` });
+    measureBlocks(w, measure, blocks);
+
+    const sheets = [];
+    const nextBox = () => { const { sheet, win } = ctx.sheet(); sheets.push(sheet); return win; };
+    flowBlocks(blocks, mm2px(winHeight()), nextBox);
+    sheets.forEach((sh, i) => sh.append(el('div', 'pageno', `${i + 1} / ${sheets.length}`)));
+    pages.replaceChildren(...sheets);
+    measure.remove();
+  });
   return true;
 }

@@ -100,6 +100,10 @@ export async function render(ctx) {
   }
 
   function draw() {
+    // نقلُ صندوق البحث داخل القائمة يُفقد التركيزَ عند إعادة الرسم،
+    // فيُستعاد موضعُ المؤشر كما كان (ملاحظة ٢٨٧)
+    const act = document.activeElement;
+    const keep = (act === filters.q) ? { el: act, at: act.selectionStart } : null;
     const list = rows();
     const mats = new Set(list.map(r => r.m.id));
     const totalStages = list.reduce((a, r) => a + r.t.stages.length, 0);
@@ -212,6 +216,7 @@ export async function render(ctx) {
       })(),
 
       dueBox,
+      filterBox,
       workHead,
       doneBox,
       // كل عمل في سطرٍ واحد: نوعه واسمه وصاحبه ولغته، ثم مرحلته وإنجازه ووقته،
@@ -244,6 +249,7 @@ export async function render(ctx) {
             : 'أضف الخطبة وحدد لغاتها وفريقها لتظهر متابعتها هنا.',
           !materials.length && h('a.btn.primary', { href: '/app/new' }, '＋ إضافة مادة')),
       details);
+    restoreFocus(keep);
   }
 
   // المنجز: سطرٌ مختصر لكل عمل، أخضر إن سُلّم في وقته وأحمر إن تأخّر
@@ -381,7 +387,20 @@ export async function render(ctx) {
       tile('🎙', 'دقائق التسجيل', n(Math.round(Number(row.audio_seconds || 0) / 60)), 'الصوت المسلَّم مع الترجمات'));
   }).catch(() => {});
 
+  const restoreFocus = keep => {
+    if (!keep) return;
+    try { keep.el.focus(); keep.el.setSelectionRange(keep.at, keep.at); } catch { /* لا يدعمه الحقل */ }
+  };
+
   const workHead = h('div.work-head');
+  // البحثُ والتصفيةُ فوق النتائج مباشرةً لا في رأس الصفحة: فالبحثُ
+  // يُطلب عند النظر في القائمة لا قبل رؤيتها (ملاحظة ٢٨٧)
+  const filterBox = h('div.card.stack.work-filter',
+    h('div.row.between', h('b', 'ابحث في الأعمال'),
+      h('span.small.muted', 'النتائجُ تظهر في القائمة أدناه فورَ الكتابة')),
+    h('div.grid',
+      h('label.field', 'البحث', filters.q), h('label.field', 'الموقع', filters.mosque),
+      h('label.field', 'اللغة', filters.lang), h('label.field', 'الحالة', filters.status)));
   const FOCUS_LABEL = {
     awaiting_receipt: 'بانتظار الاستلام', completed: 'مكتملة', late_now: 'متأخرة الآن',
     due_soon: 'تستحق خلال ٢٤ ساعة', had_late: 'سُجّل فيها تأخير'
@@ -506,8 +525,6 @@ export async function render(ctx) {
       h('p.muted', 'من الإسناد إلى قبول المنسق، ثم اعتماد المدير والنشر.')),
       chipBox,
       h('a.btn.primary', { href: '/app/new' }, '＋ إضافة مادة')),
-    h('div.grid', { style: { marginBottom: '16px' } }, h('label.field', 'البحث', filters.q), h('label.field', 'الموقع', filters.mosque),
-      h('label.field', 'اللغة', filters.lang), h('label.field', 'الحالة', filters.status)),
     reviewCard,
     backupCard,
     out);

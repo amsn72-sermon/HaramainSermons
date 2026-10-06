@@ -221,6 +221,10 @@ export async function loadReference(force = false) {
     filePattern: settings[0]?.file_name_pattern || null });
 }
 
+// العربيةُ لغةٌ مسجَّلةٌ لتُنتقى لغةً أمًّا، وهي لغةُ المصدر: لا تكون
+// هدفًا للترجمة ولا عمودًا في الدليل (ملاحظة ٢٧٦)
+export const trLangs = () => state.languages.filter(l => !l.is_source);
+
 export const langName = code => state.languages.find(l => l.code === code)?.name_ar || code;
 export const langDir = code => state.languages.find(l => l.code === code)?.dir || 'ltr';
 export const stageName = key => state.stages.find(s => s.key === key)?.name_ar || key;

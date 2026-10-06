@@ -8,6 +8,7 @@ import { state, MATERIAL_TYPES, SERMON_TYPES, MOSQUE, langName, isAdmin, can } f
 import { typeIcon } from '../icons.js';
 import { pickColumns, narrowSheet } from '../columns.js';
 import { buildXlsx, downloadBlob } from '../xlsx.js';
+import { fileName } from '../page.js';
 
 const needsSermonType = t => t === 'خطب';
 const yearOf = r => (r.work_date ? Number(String(r.work_date).slice(0, 4)) : null);
@@ -111,7 +112,7 @@ export async function render(ctx) {
       const lang = h('select', { 'aria-label': 'لغة النسخة' },
         h('option', { value: 'ar', selected: (pre.language_code || 'ar') === 'ar' }, 'العربية (الأصل)'),
         (state.languages || []).filter(l => l.is_active).map(l =>
-          h('option', { value: l.code, selected: pre.language_code === l.code }, l.name)));
+          h('option', { value: l.code, selected: pre.language_code === l.code }, l.name_ar)));
       const url = h('input', { type: 'url', value: pre.media_url || '', placeholder: 'https://…',
         'aria-label': 'رابط الوسائط' });
       const body = h('textarea', { rows: 3, 'aria-label': 'نصّ النسخة' }, pre.body_html || '');
@@ -185,6 +186,73 @@ export async function render(ctx) {
     } catch (err) { toast(err.message, 'bad'); }
   }
 
+  // أيقوناتُ السطر: عرضٌ وتعديلٌ وحذف (ملاحظة ٢٨٨)
+  const RICONS = {
+    open: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="3"/>',
+    edit: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M14 6l4 4"/>',
+    trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
+    file: '<path d="M6 2h7l5 5v15H6z"/><path d="M13 2v5h5"/>',
+    media: '<path d="M3 6h12v12H3z"/><path d="M15 10l6-3v10l-6-3z"/>'
+  };
+  const rIcon = name => {
+    const sp = document.createElement('span');
+    sp.className = 'ico'; sp.setAttribute('aria-hidden', 'true');
+    sp.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+      stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${RICONS[name]}</svg>`;
+    return sp;
+  };
+
+  // فتحُ العمل: نسخُه ولغاتُها وملفّاتُها — فالعملُ يُقرأ لا يُعدَّل فقط
+  //   (ملاحظة ٢٨٩)
+  async function openWork(r) {
+    const box = h('div.stack', h('p.muted', 'يُحمَّل…'));
+    const dlg = dialog({
+      title: r.title || 'عمل',
+      body: h('div.stack',
+        h('p.small.muted', [r.sermon_type || r.material_type, MOSQUE[r.mosque],
+          r.work_date ? `${fmtHijri(r.work_date)} · ${fmtDate(r.work_date)}` : null,
+          r.khateeb_name].filter(Boolean).join(' · ')),
+        r.notes ? h('p.small', r.notes) : null,
+        box),
+      buttons: [
+        mayEdit ? { label: 'تعديل', value: 'edit' } : null,
+        { label: 'إغلاق', value: null }
+      ].filter(Boolean)
+    });
+
+    try {
+      const items = await db.select('repo_items',
+        { select: '*', work_id: `eq.${r.id}`, order: 'is_source.desc,language_code.asc' }) || [];
+      box.replaceChildren(items.length ? h('div.stack', items.map(it => {
+        const openFile = h('button.btn.xs', { type: 'button' }, 'افتح الملف');
+        openFile.onclick = () => busy(openFile, async () => {
+          try { window.open(await storage.signedUrl('repo', it.file_path, 600), '_blank'); }
+          catch (e) { toast(e.message, 'bad'); }
+        });
+        return h('div.card.stack.repo-view',
+          h('div.row.between.wrap',
+            h('b', langName(it.language_code) || it.language_code),
+            h('div.row', { style: { gap: '6px' } },
+              it.is_source ? h('span.badge.gold', 'الأصل') : null,
+              it.doc_no ? h('span.badge', it.doc_no) : null)),
+          it.body_html
+            ? h('div.repo-text', { dir: 'auto' },
+                String(it.body_html).replace(/<[^>]*>/g, ' ').slice(0, 1200))
+            : null,
+          h('div.row', { style: { gap: '6px' } },
+            it.file_path ? openFile : null,
+            it.media_url
+              ? h('a.btn.xs.ghost', { href: it.media_url, target: '_blank', rel: 'noopener' },
+                  'الصوت أو الفيديو')
+              : null,
+            (!it.file_path && !it.media_url && !it.body_html)
+              ? h('span.small.muted', 'لا ملفَّ ولا نصَّ في هذه النسخة.') : null));
+      })) : h('p.small.muted', 'لم تُسجَّل نسخٌ لهذا العمل بعد — افتح «تعديل» وأضِف نسخةً.'));
+    } catch (e) { box.replaceChildren(h('p.small.warn', e.message)); }
+
+    if (await dlg === 'edit') workDialog(r);
+  }
+
   async function removeWork(r) {
     if (!await confirm('حذف من المستودع',
       `يُحذف «${r.title}» ونسخُه كلُّها. والحذفُ لا يُستدرك.`, 'احذف', 'danger')) return;
@@ -228,10 +296,18 @@ export async function render(ctx) {
           r.khateeb_name ? h('span', r.khateeb_name) : null),
         langs.length ? h('div.repo-langs', langs.map(n => h('span.badge', n)))
           : h('span.small.muted', 'بلا لغاتٍ مسجَّلة')),
-      mayEdit ? h('div.row.repo-acts',
-        h('button.btn.xs', { type: 'button', onclick: () => workDialog(r) }, 'تعديل'),
-        h('button.btn.xs.ghost', { type: 'button', onclick: () => removeWork(r) }, 'حذف')) : null);
+      h('div.row.repo-acts', acts(r)));
   }
+
+  // إجراءاتُ العمل أيقوناتٍ: تُعرَض في البطاقة وفي جدول «الجميع» سواء
+  const acts = r => [
+    h('button.icon-btn', { type: 'button', title: 'عرض العمل', 'aria-label': 'عرض العمل',
+      onclick: () => openWork(r) }, rIcon('open')),
+    mayEdit ? h('button.icon-btn', { type: 'button', title: 'تعديل', 'aria-label': 'تعديل',
+      onclick: () => workDialog(r) }, rIcon('edit')) : null,
+    mayEdit ? h('button.icon-btn.danger', { type: 'button', title: 'حذف', 'aria-label': 'حذف',
+      onclick: () => removeWork(r) }, rIcon('trash')) : null
+  ].filter(Boolean);
 
   const heads = new Map();          // النوع ← مربّعُ تحديدِ مجموعته
   const drawHeads = () => {
@@ -240,6 +316,46 @@ export async function render(ctx) {
       box.checked = g.length > 0 && g.every(r => picked.has(r.id));
     }
   };
+
+  // عرضان: بطاقاتٌ بالأنواع، وجدولُ «الجميع» صفوفُه قصيرةٌ وفيه
+  //   أيقوناتُ العرض والتعديل والحذف (ملاحظة ٢٨٨)
+  let view = 'cards';
+  const viewBar = h('div.row', { style: { gap: '6px' } });
+  const drawViewBar = () => {
+    const mk = (key, label, title) => {
+      const b = h('button.btn.xs' + (view === key ? '.primary' : ''), { type: 'button', title }, label);
+      b.onclick = () => { view = key; drawViewBar(); draw(); };
+      return b;
+    };
+    viewBar.replaceChildren(
+      mk('cards', '▦ بطاقات', 'بطاقةٌ لكلِّ عمل مجموعةً بالأنواع'),
+      mk('all', '▤ الجميع', 'جدولٌ واحدٌ لكلِّ الأعمال'));
+  };
+  drawViewBar();
+
+  function allTable(list) {
+    return h('div.table-wrap', h('table.responsive.repo-all',
+      h('thead', h('tr', ['', 'العمل', 'النوع', 'المسجد', 'التاريخ', 'اللغات', '']
+        .map(t => h('th', t)))),
+      h('tbody', list.map(r => {
+        const cb = h('input', { type: 'checkbox', checked: picked.has(r.id) ? true : null,
+          'aria-label': `تحديد ${r.title}` });
+        cb.onchange = () => { cb.checked ? picked.add(r.id) : picked.delete(r.id); drawBar(); };
+        const langs = (r.languages || '').split(',').filter(Boolean);
+        return h('tr',
+          h('td', cb),
+          h('td', { 'data-label': 'العمل' },
+            h('span.repo-ico.sm', typeIcon(r.material_type, { size: 16 })),
+            h('b', r.title || '—')),
+          h('td', { 'data-label': 'النوع' }, h('span.small', r.sermon_type || r.material_type || '—')),
+          h('td', { 'data-label': 'المسجد' }, h('span.small', MOSQUE[r.mosque] || '—')),
+          h('td', { 'data-label': 'التاريخ' },
+            h('span.small', r.work_date ? fmtHijri(r.work_date) : '—')),
+          h('td', { 'data-label': 'اللغات' },
+            h('span.small', langs.length ? `${langs.length} لغة` : '—')),
+          h('td', h('div.row.repo-acts', acts(r))));
+      }))));
+  }
 
   function draw() {
     const list = shown();
@@ -283,8 +399,9 @@ export async function render(ctx) {
       list.length ? h('div.stack',
         h('div.row.between.wrap',
           h('label.check', head, h('span', `حدّد المعروض — ${list.length} عملًا من ${rows.length}`)),
-          h('span.small.muted', `${picked.size} محدَّدًا`)),
-        ...sections)
+          h('div.row.wrap', { style: { gap: '8px' } },
+            h('span.small.muted', `${picked.size} محدَّدًا`), viewBar)),
+        ...(view === 'all' ? [allTable(list)] : sections))
         : emptyState('لا أعمال في المستودع',
             mayEdit ? 'ابدأ بإضافة عمل، أو استورد دفعةً من أعمال السنوات الماضية.'
                     : 'لم يُضَف إلى المستودع شيءٌ بعد.'));
@@ -582,8 +699,24 @@ export async function render(ctx) {
     } catch (e) { toast(e.message, 'bad'); return; }
     if (!pend.length) { toast('لا ملفاتٍ تنتظر المراجعة.', 'ok'); return; }
 
+    // التسميةُ الموحَّدة: المنصةُ تقرأ الملفَّ فتسمّيه كما يُسمّى في
+    //   أرشيف الترجمة، ونمطُ التسمية هو المضبوط في الإعدادات (ملاحظة ٢٩٠)
+    const stdOf = u => {
+      const kh = (state.khateebs || []).find(k => String(k.id) === String(u.khateeb_id));
+      return fileName({
+        title: u.title || '', material_type: u.material_type || 'خطب',
+        sermon_type: u.sermon_type || null, mosque: u.mosque || null,
+        sermon_date: u.work_date || null
+      }, u.language_code || null, kh?.name || '');
+    };
+
     const rowsEl = pend.map(u => {
-      const title = h('input', { value: u.title || '', 'aria-label': 'العنوان' });
+      const std = stdOf(u);
+      const title = h('input', { value: std || u.title || '', 'aria-label': 'العنوان' });
+      const stdBtn = h('button.btn.xs.ghost', { type: 'button', title: 'التسميةُ الموحَّدة' }, 'وحِّد');
+      stdBtn.onclick = () => { title.value = stdOf({ ...u, title: u.title }) || title.value; };
+      const rawBtn = h('button.btn.xs.ghost', { type: 'button', title: 'اسمُ الملف كما هو' }, 'كما وَرَد');
+      rawBtn.onclick = () => { title.value = u.title || ''; };
       const type = h('select', { 'aria-label': 'النوع' },
         h('option', { value: '' }, '—'),
         MATERIAL_TYPES.map(t => h('option', { value: t, selected: u.material_type === t }, t)));
@@ -594,7 +727,7 @@ export async function render(ctx) {
         h('option', { value: '' }, '—'),
         h('option', { value: 'ar', selected: u.language_code === 'ar' }, 'العربية (الأصل)'),
         (state.languages || []).map(l =>
-          h('option', { value: l.code, selected: u.language_code === l.code }, l.name)));
+          h('option', { value: l.code, selected: u.language_code === l.code }, l.name_ar)));
       const mosque = h('select', { 'aria-label': 'المسجد' },
         h('option', { value: '' }, '—'),
         Object.entries(MOSQUE).map(([k, v]) =>
@@ -603,7 +736,8 @@ export async function render(ctx) {
       const del = h('button.btn.xs.ghost', { type: 'button' }, '✕');
       const tr = h('tr',
         h('td', { 'data-label': 'الملف' }, h('span.small.muted', { dir: 'ltr' }, u.file_name)),
-        h('td', { 'data-label': 'العنوان' }, title),
+        h('td', { 'data-label': 'العنوان' }, title,
+          h('div.row', { style: { gap: '4px' } }, stdBtn, rawBtn)),
         h('td', { 'data-label': 'النوع' }, type, sermon),
         h('td', { 'data-label': 'اللغة' }, lang),
         h('td', { 'data-label': 'المسجد' }, mosque),
@@ -627,6 +761,8 @@ export async function render(ctx) {
       body: h('div.stack',
         h('p.small.muted', 'ما اتّفق عنوانُه وتاريخُه اجتمع في عملٍ واحدٍ بلغاته. '
           + 'وما نقصه العنوانُ أو النوعُ أو اللغةُ يُتخطّى ويبقى في الانتظار.'),
+        h('p.small.muted', 'والأسماءُ مكتوبةٌ بالصيغة الموحَّدة التي يُسمّى بها أرشيفُ '
+          + 'الترجمة — تُعدَّل متى شئت، و«كما وَرَد» يُعيد اسمَ الملف.'),
         h('div.table-wrap', h('table.responsive',
           h('thead', h('tr', ['الملف', 'العنوان', 'النوع', 'اللغة', 'المسجد', 'التاريخ', '']
             .map(t => h('th', t)))),

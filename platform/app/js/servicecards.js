@@ -2,7 +2,8 @@
 // محتواها ورمزُها (QR) — تُعرض في الصفحة، وتُنزَّل صورةً، وتُطبع صفحةً واحدة (ملاحظة ١٤٠).
 import { h } from './ui.js';
 import { qrMatrix, qrDataUri } from './qr.js';
-import { PAGE, LETTERHEAD } from './page.js';
+
+import { openSheetWindow, measureBlocks, flowBlocks, mm2px, sheetCss, winHeight } from './sheetflow.js';
 
 const GOLD = '#bc9661';
 const INK = '#1a232d';
@@ -175,10 +176,6 @@ export async function downloadCard(service) {
 // صفحة واحدة تجمع البطاقات، تُطبع على كليشة الهيئة
 // ---------------------------------------------------------------------
 export function printSheet(services, { title = 'خدمات المبادرة' } = {}) {
-  const w = window.open('', '_blank');
-  if (!w) return false;
-  const P = PAGE;
-  const lh = new URL(LETTERHEAD, location.origin).href;
   const cards = services.map(s => {
     const art = SERVICE_ART[s.key] || SERVICE_ART.broadcast;
     const svg = `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="${GOLD}"
@@ -192,35 +189,44 @@ export function printSheet(services, { title = 'خدمات المبادرة' } =
       <div class="qurl" dir="ltr">${String(s.url).replace(/^https?:\/\//, '').replace(/\/$/, '')}</div>
       ${s.note ? `<div class="qnote">${s.note}</div>` : ''}
     </div>`;
-  }).join('');
+  });
 
-  w.document.write(`<!doctype html><html lang="ar" dir="rtl" data-theme="light"><head><meta charset="utf-8">
-<title>${title}</title><link rel="stylesheet" href="${location.origin}/css/app.css"><style>
-@page { size: A4; margin: 0; }
-html, body { margin: 0; background: #fff !important; color: #111 !important;
-  -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-.sheet { position: relative; width: ${P.w}mm; height: ${P.h}mm; overflow: hidden; background: #fff; }
-.sheet img.lh { position: absolute; inset: 0; width: 100%; height: 100%; }
-.win { position: absolute; top: ${P.top}mm; inset-inline-start: ${P.side}mm;
-  width: ${P.w - P.side * 2}mm; height: ${P.h - P.top - P.bottom}mm; }
-h1 { font-size: 15pt; text-align: center; margin: 0 0 3mm; color: #1a232d; }
-.lead { font-size: 9.5pt; text-align: center; color: #5b5349; margin: 0 0 6mm; }
-.qgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6mm; }
-.qcard { border: .4mm solid #bc9661; border-radius: 3mm; padding: 4mm; text-align: center;
-  break-inside: avoid; }
-.qcard:last-child:nth-child(odd) { grid-column: 1 / -1; width: 50%; margin: 0 auto; }
-.qhead { display: flex; align-items: center; justify-content: center; gap: 2mm; margin-bottom: 2mm; }
-.qhead b { font-size: 11pt; color: #1a232d; }
-.qcard img.q { width: 34mm; height: 34mm; display: block; margin: 0 auto 2mm; }
-.qurl { font-size: 8.5pt; color: #8a6835; direction: ltr; }
-.qnote { font-size: 8pt; color: #6b6257; margin-top: 1mm; }
-@media screen { body { background: #d9d9d9 !important; } .sheet { margin: 16px auto; box-shadow: 0 2px 12px #0003; } }
-</style></head><body><div class="sheet"><img class="lh" alt="" src="${lh}">
-<div class="win"><h1>${title}</h1>
-<p class="lead">امسح الرمز بكاميرا الجوال للوصول إلى الخدمة مباشرة</p>
-<div class="qgrid">${cards}</div></div></div></body></html>`);
-  w.document.close();
-  const go = () => setTimeout(() => w.print(), 500);
-  if (w.document.readyState === 'complete') go(); else w.addEventListener('load', go);
+  // البطاقاتُ تُقاس وتُوزَّع على صفحاتٍ، فلا تفيض إن كثُرت (ملاحظة ٢٨٠ ح)
+  const ctx = openSheetWindow(sheetCss(`
+  h1 { color: #1a232d; }
+  .lead { font-size: 9.5pt; text-align: center; color: #5b5349; margin: 0 0 4mm; }
+  .qrow { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5mm; margin-bottom: 5mm; }
+  .qcard { border: .4mm solid #bc9661; border-radius: 3mm; padding: 3mm; text-align: center; }
+  .qhead { display: flex; align-items: center; justify-content: center; gap: 2mm; margin-bottom: 1.5mm; }
+  .qhead b { font-size: 11pt; color: #1a232d; }
+  .qcard img.q { width: 28mm; height: 28mm; display: block; margin: 0 auto 1.5mm; }
+  .qurl { font-size: 8.5pt; color: #8a6835; direction: ltr; }
+  .qnote { font-size: 8pt; color: #6b6257; margin-top: 1mm; }`));
+  if (!ctx) return false;
+  const { el, pages, measure, w } = ctx;
+
+  ctx.ready(() => {
+    // صفَّان في كلِّ سطر، والسطرُ كتلةٌ تُقاس ولا تُقسَم
+    const blocks = [
+      { html: `<h1>${title}</h1>` },
+      { html: '<p class="lead">امسح الرمز بكاميرا الجوال للوصول إلى الخدمة مباشرة</p>' }
+    ];
+    for (let i = 0; i < cards.length; i += 2) {
+      blocks.push({ html: `<div class="qrow">${cards.slice(i, i + 2).join('')}</div>` });
+    }
+    measureBlocks(w, measure, blocks);
+
+    const sheets = [];
+    const nextBox = () => {
+      const { sheet, win } = ctx.sheet();
+      sheets.push(sheet);
+      return win;
+    };
+    flowBlocks(blocks, mm2px(winHeight()), nextBox);
+    sheets.forEach((sh, i) => sh.append(el('div', 'pageno',
+      sheets.length > 1 ? `${i + 1} / ${sheets.length}` : '')));
+    pages.replaceChildren(...sheets);
+    measure.remove();
+  });
   return true;
 }

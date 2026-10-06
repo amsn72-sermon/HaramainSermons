@@ -62,17 +62,18 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 .cover-sheet { background: #fff; }
 .cover-sheet img.lh { display: none; }
 .cover { position: absolute; inset: 0; padding: 26mm 26mm 20mm; display: flex;
-  flex-direction: column; text-align: start; }
+  flex-direction: column; align-items: center; text-align: center; }
 .cover .spine { position: absolute; inset-inline-end: 0; top: 0; bottom: 0; width: 15mm;
   background: #b9975b; opacity: .13; }
 .cover .spine::after { content: ''; position: absolute; inset-inline-start: 0; top: 0; bottom: 0;
   width: 1.1mm; background: #b9975b; }
-.cover .logos { display: flex; align-items: center; gap: 7mm; }
-.cover .logos img { height: 14mm; }
-.cover .org { margin-top: 5mm; font-size: 9.5pt; color: #b9975b; letter-spacing: .02em; line-height: 1.9; }
+/* شعارُ الهيئة وحدَه، والاسمُ مكتوبٌ فيه فلا يُعاد تحته (ملاحظة ٢٧٣) */
+.cover .logos { display: flex; align-items: center; justify-content: center; }
+.cover .logos img { height: 26mm; }
 .cover .gap { flex: 0 0 26mm; }
-.cover .ct { font-size: 32pt; font-weight: 700; color: #1d2b3a; line-height: 1.35; max-width: 125mm; }
-.cover .orn { display: block; width: 52mm; height: 10mm; margin: 7mm 0 0; }
+.cover .ct { font-size: 32pt; font-weight: 700; color: #1d2b3a; line-height: 1.35;
+  max-width: 140mm; text-align: center; }
+.cover .orn { display: block; width: 52mm; height: 10mm; margin: 7mm auto 0; }
 .cover .cs { margin-top: 5mm; font-size: 14pt; font-weight: 400; color: #4a5560; }
 .cover .meta { margin-top: 3mm; font-size: 11pt; color: #6b6257; line-height: 2; }
 .cover .foot { margin-top: auto; font-size: 8.5pt; color: #6b6257; letter-spacing: .06em; }
@@ -205,17 +206,13 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
     const c = el('div', 'cover');
     c.append(el('div', 'spine'));
 
+    // شعارُ الهيئة وحدَه متوسّطًا، واسمُها مكتوبٌ فيه (ملاحظة ٢٧٣)
     const logos = el('div', 'logos');
-    for (const [src, alt] of [['/assets/alharamain-logo.png', 'الهيئة'],
-                              ['/assets/presidency.png', 'الرئاسة']]) {
-      const im = d.createElement('img'); im.src = new URL(src, location.origin).href; im.alt = alt;
-      logos.append(im);
-    }
+    const im = d.createElement('img');
+    im.src = new URL('/assets/alharamain-logo-dark.png', location.origin).href;
+    im.alt = 'الهيئة العامة للعناية بشؤون المسجد الحرام والمسجد النبوي';
+    logos.append(im);
     c.append(logos);
-    const org = el('div', 'org');
-    org.append(el('div', null, 'الهيئةُ العامةُ للعناية بشؤون المسجد الحرام والمسجد النبوي'));
-    org.append(el('div', null, 'مشروعُ خادم الحرمين الشريفين لترجمة خطب الحرمين'));
-    c.append(org);
 
     c.append(el('div', 'gap'));
     c.append(el('div', 'ct', meta.title));

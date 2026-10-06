@@ -28,6 +28,10 @@ function append(el, children) {
     el.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }
 }
+// عبارةُ المنع الواحدة: لا تُشعر أحدًا بالنقص، وتبيّن أنّ الأمرَ
+// موزَّعٌ لا ممنوع (ملاحظة ٢٩٤)
+export const DENY = 'هذا خارجَ نطاقِ عملك الحالي.';
+
 export const frag = (...children) => { const f = document.createDocumentFragment(); append(f, children); return f; };
 // يستبدل محتوى العنصر، ويقبل المصفوفات ويتجاهل الفراغات (بخلاف replaceChildren الأصلية)
 export function fill(el, ...children) { el.replaceChildren(); append(el, children); return el; }

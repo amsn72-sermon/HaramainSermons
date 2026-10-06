@@ -52,6 +52,8 @@ const routes = [
   ['/app/evaluation', () => import('./views/evaluation.js'), true, 'reports'],
   ['/app/glossary', () => import('./views/glossary.js'), true],
   ['/app/glossary/watch', () => import('./views/glossary.js').then(m => ({ render: m.watch })), true],
+  // لغةٌ بعينها: مصطلحاتُها ومنها يُصدَر قاموسُها (ملاحظة ٢٩٥)
+  ['/app/glossary/:lang', () => import('./views/glossary.js'), true],
   ['/app/certificates', () => import('./views/certificates.js'), true, true],
   ['/app/my-certificates', () => import('./views/certificates.js').then(m => ({ render: m.mine })), true],
   ['/app/roles', () => import('./views/roles.js'), true, 'manager'],

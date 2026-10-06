@@ -7,6 +7,7 @@ import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDate } from '../u
 import { db } from '../sb.js';
 import { state, isManager, can } from '../store.js';
 import { printCertificate, certVerifyUrl, CERT_THEMES } from '../certdoc.js';
+import { prepareMark } from '../photo.js';
 
 const KIND_LABEL = { course: 'دورة تدريبية', experience: 'خبرة' };
 const STATE = { draft: ['مسوّدة', 'warn'], issued: ['صادرة', 'ok'], revoked: ['ملغاة', 'bad'] };
@@ -172,6 +173,63 @@ export async function render() {
     const signSrc = h('input', { value: d.signature_src || '', 'aria-label': 'رابط صورة التوقيع',
       placeholder: 'عنوانُ صورة التوقيع' });
 
+    // رفعُ التوقيع صورةً بدل كتابة عنوانها (ملاحظتا ٢٨٢ و٢٨٣)
+    const signFile = h('input', { type: 'file', accept: 'image/*', hidden: true,
+      'aria-label': 'ملفُّ التوقيع' });
+    const signUp = h('button.btn.xs', { type: 'button' }, '⤒ ارفع صورةَ التوقيع');
+    const signPrev = h('div.mark-prev');
+    const drawSignPrev = () => signPrev.replaceChildren(signSrc.value.trim()
+      ? h('img', { src: signSrc.value.trim(), alt: 'التوقيع' }) : null);
+    signUp.onclick = () => signFile.click();
+    signFile.onchange = async () => {
+      const file = signFile.files?.[0]; if (!file) return;
+      try { signSrc.value = await prepareMark(file, 500); drawSignPrev(); sign.value = 'image'; }
+      catch (e) { toast(e.message, 'bad'); }
+      signFile.value = '';
+    };
+    drawSignPrev();
+
+    // العلامةُ المائية: شعارُ الهيئة شفّافًا في الوسط (ملاحظة ٢٨٢)
+    const wmOn = h('input', { type: 'checkbox', checked: d.watermark === false ? null : true,
+      'aria-label': 'علامة مائية' });
+    const wmSize = h('input', { type: 'range', min: '20', max: '90', step: '5',
+      value: String(d.wm_size || 55), 'aria-label': 'حجمُ العلامة' });
+    const wmOp = h('input', { type: 'range', min: '2', max: '30', step: '1',
+      value: String(Math.round((d.wm_opacity || 0.07) * 100)), 'aria-label': 'شفافيةُ العلامة' });
+
+    // شعاراتٌ تُضاف وتُحرَّك بحرية (ملاحظة ٢٨٢)
+    let marks = Array.isArray(d.logos) ? d.logos.map(x => ({ ...x })) : [];
+    const markBox = h('div.stack');
+    const markFile = h('input', { type: 'file', accept: 'image/*', hidden: true,
+      'aria-label': 'ملفُّ الشعار' });
+    const markAdd = h('button.btn.xs', { type: 'button' }, '＋ أضِف شعارًا');
+    markAdd.onclick = () => markFile.click();
+    markFile.onchange = async () => {
+      const file = markFile.files?.[0]; if (!file) return;
+      try { marks.push({ src: await prepareMark(file, 500), x: 8, y: 8, h: 14 }); drawMarks(); }
+      catch (e) { toast(e.message, 'bad'); }
+      markFile.value = '';
+    };
+    const num = (m, key, label, min, max) => {
+      const i = h('input', { type: 'number', value: String(m[key]), min: String(min),
+        max: String(max), 'aria-label': label });
+      i.oninput = () => { m[key] = Number(i.value); };
+      return h('label.field.sm', label, i);
+    };
+    function drawMarks() {
+      markBox.replaceChildren(...(marks.length ? marks.map((m, i) =>
+        h('div.row.between.wrap.mark-row',
+          h('img.mark-thumb', { src: m.src, alt: '' }),
+          h('div.row.wrap', { style: { gap: '6px' } },
+            num(m, 'x', 'من اليمين ٪', 0, 95),
+            num(m, 'y', 'من الأعلى ٪', 0, 95),
+            num(m, 'h', 'الارتفاع مم', 5, 60)),
+          h('button.btn.xs.ghost', { type: 'button',
+            onclick: () => { marks.splice(i, 1); drawMarks(); } }, 'احذفه')))
+        : [h('p.small.muted', 'لا شعاراتٍ مضافة — شعارُ الهيئة في رأس الشهادة دائمًا.')]));
+    }
+    drawMarks();
+
     const courseBox = h('div.stack');
     const expBox = h('div.stack');
     const syncKind = () => {
@@ -227,7 +285,18 @@ export async function render() {
             h('label.field', 'المنصب', signerRole)),
           h('p.small.muted', 'الاسمُ والمنصبُ لا يُثبَّتان: يُكتبان عند كلِّ شهادةٍ ويُعدَّلان متى شئت.'),
           h('label.field', 'التوقيع', sign),
-          h('label.field', 'صورةُ التوقيع', signSrc))),
+          h('div.row.between.wrap',
+            h('span.small.muted', 'صورةُ التوقيع'), h('div.row', signUp, signFile)),
+          signSrc, signPrev,
+          h('fieldset.stack', h('legend', 'العلامةُ المائية'),
+            h('label.check', wmOn, h('span', 'شعارُ الهيئة شفّافًا في الوسط')),
+            h('div.grid-2',
+              h('label.field.sm', 'الحجم', wmSize),
+              h('label.field.sm', 'الشفافية', wmOp))),
+          h('fieldset.stack', h('legend', 'شعاراتٌ إضافية'),
+            h('div.row.between', h('span.small.muted', 'تُرفَع وتُحرَّك بحرّية'),
+              h('div.row', markAdd, markFile)),
+            markBox))),
       onOpen: () => { syncKind(); syncSource(); },
       buttons: [
         { label: 'حفظ', kind: 'primary',
@@ -248,7 +317,10 @@ export async function render() {
             signer_name: signer.value.trim(), signer_role: signerRole.value.trim(),
             signature: sign.value,
             design: { theme: theme.value, landscape: landscape.checked,
-                      signature_src: signSrc.value.trim() || null }
+                      signature_src: signSrc.value.trim() || null,
+                      watermark: wmOn.checked,
+                      wm_size: Number(wmSize.value), wm_opacity: Number(wmOp.value) / 100,
+                      logos: marks }
           }) },
         { label: 'إلغاء', value: null }
       ]

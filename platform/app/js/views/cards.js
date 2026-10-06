@@ -68,6 +68,7 @@ export async function render(ctx) {
   const bandBox = h('div.stack');
   const fontBox = h('div');   // نوع الخط ظاهر دائمًا لا داخل التفاصيل المطوية
   const logoBox = h('div.stack');
+  const signBox = h('div.stack');
   const sampleOf = () => pool.find(m => picked.has(m.id)) || pool[0] || null;
   const logoSrc = () => (logoKind === 'none' ? null : logoKind === 'custom' ? logoUrl : HARAMAIN_LOGO);
 
@@ -375,6 +376,55 @@ export async function render(ctx) {
     toast('طُبّق القالب — عدّل عليه ثم احفظ.', 'ok');
   };
 
+  // توقيعُ المسؤول: يُرفع صورةً ويوضع عنصرًا يُحرَّك بحرّية (ملاحظة ٢٨٣)
+  const SIGN_ID = 'official-sign';
+  const signOf = () => (layout.custom || []).find(c => c.id === SIGN_ID) || null;
+  function drawSign() {
+    const cur = signOf();
+    const up = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/svg+xml',
+      'aria-label': 'ملفُّ التوقيع' });
+    up.onchange = () => busy(up, async () => {
+      const file = up.files[0]; if (!file) return;
+      if (file.size > 3 * 1024 * 1024) return toast('الحد الأقصى ٣ ميغابايت.', 'bad');
+      try {
+        const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const path = `card-sign-${Date.now()}.${ext}`;
+        await storage.upload('brand', path, file);
+        let c = signOf();
+        if (!c) {
+          c = { ...newCustom('image', 9), id: SIGN_ID, x: 8, y: 36, w: 24 };
+          layout.custom = [...(layout.custom || []), c];
+        }
+        c.path = path; c.show = true;
+        delete customUrls[SIGN_ID];
+        await loadCustomImg(c);
+        selected = `c:${SIGN_ID}`;
+        toast('رُفع التوقيع — احفظ التصميم لتثبيته.', 'ok');
+        drawStage(); drawSign();
+      } catch (e) { toast(e.message, 'bad'); }
+    });
+    const kids = [
+      h('p.small.muted', 'توقيعُ مَن يعتمد البطاقات: يُرفع صورةً بخلفيةٍ شفافة، '
+        + 'ثم يُسحب إلى موضعه من البطاقة كأيِّ عنصر.'),
+      h('label.field', 'رفعُ صورة التوقيع', up)
+    ];
+    if (cur) {
+      kids.push(h('label.field', `عرض التوقيع (${round(cur.w)} مم)`,
+        sizeRange(cur.w, 6, 50, 0.5, v => { cur.w = v; drawSign(); })));
+      const t = h('button.btn.sm' + (cur.show ? '.primary' : ''), { type: 'button' },
+        cur.show ? 'ظاهر على البطاقة' : 'مخفي');
+      t.onclick = () => { cur.show = !cur.show; drawStage(); drawSign(); };
+      const del = h('button.btn.sm.ghost', { type: 'button' }, 'احذف التوقيع');
+      del.onclick = () => {
+        layout.custom = (layout.custom || []).filter(c => c.id !== SIGN_ID);
+        if (selected === `c:${SIGN_ID}`) selected = 'name';
+        drawStage(); drawSign();
+      };
+      kids.push(h('div.row', t, del));
+    }
+    signBox.replaceChildren(...kids);
+  }
+
   function drawLogo() {
     const sel = h('select', { 'aria-label': 'الشعار' },
       h('option', { value: 'haramain', selected: logoKind === 'haramain' ? true : null }, 'شعار الحرمين (أبيض — على شريط داكن)'),
@@ -523,7 +573,7 @@ export async function render(ctx) {
   });
 
   for (const el of Object.values(f)) el.addEventListener('input', drawStage);
-  drawList(); count(); drawBand(); drawLogo(); drawStage();
+  drawList(); count(); drawBand(); drawLogo(); drawSign(); drawStage();
 
   // شريطُ أيقونات: كلُّ أيقونةٍ تفتح خياراتها وحدها، فلا تزدحم الشاشة
   // بكل الخيارات معًا (ملاحظة ١٩٩)
@@ -542,13 +592,14 @@ export async function render(ctx) {
           h('label.field', 'قالب جاهز', h('div.row.tight', presetSel, applyPreset)))],
       ['font',  '🎨', 'الألوان والخط', 'خط البطاقة وألوانها', () => fontBox],
       ['logo',  '🖼', 'الصور والشعار', 'الشعار وخياراته', () => logoBox],
+      ['sign',  '✒', 'توقيع المسؤول', 'يُرفع صورةً ويوضع حيث شئت', () => signBox],
       ['band',  '▭', 'الشريط والخلفية', 'الشريط والفواصل وخلفية البطاقة', () => bandBox],
       ['save',  '💾', 'حفظ التصميم', 'يُحفظ للفريق كلِّه',
         () => h('div.stack',
           h('p.small.muted', 'يُحفظ التصميم فيصير قالبَ بطاقات الفريق كلِّه.'),
           h('div.row', saveBtn))]
     ];
-    const body = h('div.card.stack.cd-tabbody');
+    const body = h('div.stack.cd-tabbody');
     const btns = TABS.map(([key, icon, label, hint, make]) => {
       const b = h('button.cd-tool', { type: 'button', 'aria-label': label, title: hint },
         h('i.cd-tool-icon', { 'aria-hidden': 'true' }, icon),
@@ -568,14 +619,15 @@ export async function render(ctx) {
     h('div.page-head', h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'بطاقات العمل'),
       h('p.muted', 'بطاقة بمقاس الهوية الوطنية ٨٥٫٦×٥٤ مم. اسحب أي عنصر إلى مكانه، وغيّر حجم خطه ولونه، ثم اطبع.'))),
     // ثلاثة أعمدة تملأ الشاشة: الخصائص، ثم لوحة التصميم، ثم البيانات والشكل (ملاحظة ١٣٠)
-    h('div.cd-wrap',
-      h('div.card.stack.cd-props', h('h3', 'خصائص العنصر'), panel),
-      h('div.card.stack.cd-stage',
-        h('h3', 'لوحة التصميم'),
-        h('div.card-stage-wrap', stage),
-        h('p.small.muted', 'اسحب العنصر بالفأرة، أو اخترَه ثم حرّكه بالأسهم (مع Shift خطوة أكبر).'),
-        h('div.row', resetBtn)),
-      sideTools()),
+    h('div.card.cd-board',
+      h('div.cd-wrap',
+        h('div.stack.cd-props', h('h3', 'خصائص العنصر'), panel),
+        h('div.stack.cd-stage',
+          h('h3', 'لوحة التصميم'),
+          h('div.card-stage-wrap', stage),
+          h('p.small.muted', 'اسحب العنصر بالفأرة، أو اخترَه ثم حرّكه بالأسهم (مع Shift خطوة أكبر).'),
+          h('div.row', resetBtn)),
+        sideTools())),
     h('div.card.stack',
       h('div.row.between', h('h3', 'من تُطبع بطاقته'), h('div.row', onlyTranslators, counter)),
       h('label.check', allBox, h('b', 'تحديد الكل')),
@@ -644,7 +696,10 @@ function printCards(rows, cfg, layout, logoData, customData = {}) {
 
   const card = row => `<div class="wcard">${band}${rules}${ITEM_ORDER.map(k => itemHtml(k, row)).join('')}${customHtml}</div>`;
 
-  const perPage = 10;
+  // صفحةُ A4 بهوامشَ ١٠مم تتّسع لـ٢٧٧مم: أربعةُ صفوفٍ من البطاقات
+  // (٤×٥٤ + ٣×٤ = ٢٢٨مم) لا خمسةٌ، فالخمسةُ ٢٨٦مم وتفيض (ملاحظة ٢٨٠ ح)
+  const ROWS = Math.max(1, Math.floor((277 - 4) / (CARD.h + 4)));
+  const perPage = ROWS * 2;
   const pages = [];
   for (let i = 0; i < rows.length; i += perPage) pages.push(rows.slice(i, i + perPage));
 
@@ -656,7 +711,7 @@ function printCards(rows, cfg, layout, logoData, customData = {}) {
   @font-face { font-family: 'HS'; src: url('/assets/arabic-bold.ttf') format('truetype'); font-weight: 700; }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   body { margin: 0; font-family: 'HS', system-ui, sans-serif; background: #f3f3f3; color: #1c1a17; }
-  .sheet { width: 190mm; min-height: 277mm; margin: 0 auto 8mm; background: #fff; padding: 2mm;
+  .sheet { width: 190mm; height: 277mm; overflow: hidden; margin: 0 auto 8mm; background: #fff; padding: 2mm;
            display: grid; grid-template-columns: repeat(2, ${CARD.w}mm); gap: 4mm 6mm;
            justify-content: center; align-content: start; }
   .wcard { position: relative; width: ${CARD.w}mm; height: ${CARD.h}mm; overflow: hidden;

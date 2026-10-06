@@ -101,3 +101,32 @@ export function dataUrlToBlob(dataUrl) {
   for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
   return new Blob([buf], { type });
 }
+
+// ---------------------------------------------------------------------
+// شعارٌ أو توقيعٌ يُرفَع ويُدرَج في المستند (ملاحظتا ٢٨٢ و٢٨٣)
+//   الشفافيةُ تُحفظ، فتُحوَّل PNG لا JPG، ويُصغَّر فلا يثقل السجلّ،
+//   ولا يُرفع إلى مخزنٍ أصلًا: يُحفظ في بيانات التصميم نصًّا.
+// ---------------------------------------------------------------------
+export const MARK = { maxPx: 600, maxBytes: 4 * 1024 * 1024, maxOut: 220 * 1024 };
+
+export async function prepareMark(file, maxPx = MARK.maxPx) {
+  if (!file) throw new Error('اختر صورة');
+  if (!/^image\/(png|jpeg|webp|svg\+xml)$/.test(file.type)) {
+    throw new Error('الصورة بصيغة PNG أو JPG أو WEBP أو SVG');
+  }
+  if (file.size > MARK.maxBytes) throw new Error('حجم الصورة أكبر من ٤ ميغابايت');
+  const img = await loadImage(file);
+  const w = img.naturalWidth || 1, hgt = img.naturalHeight || 1;
+  const k = Math.min(1, maxPx / Math.max(w, hgt));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w * k));
+  c.height = Math.max(1, Math.round(hgt * k));
+  const g = c.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(img, 0, 0, c.width, c.height);
+  const url = c.toDataURL('image/png');
+  if (url.length > MARK.maxOut * 1.37) {
+    throw new Error('الصورة كبيرةٌ على الحفظ — اختر صورةً أصغر أو أوضح خلفيتَها');
+  }
+  return url;
+}

@@ -1,4 +1,5 @@
 // عميل Supabase مصغّر: المصادقة، واجهة REST، الدوال، والتخزين — بلا مكتبات خارجية.
+import { DENY } from './ui.js';
 const cfg = window.HS_CONFIG || {};
 const BASE = String(cfg.supabaseUrl || '').replace(/\/+$/, '');
 const KEY = cfg.supabaseAnonKey || '';
@@ -52,7 +53,8 @@ function translateError(msg) {
     [/rate limit/i, 'محاولات كثيرة. انتظر قليلًا ثم أعد المحاولة'],
     [/jwt expired/i, 'انتهت الجلسة. سجّل الدخول من جديد'],
     [/Database error saving new user/i, 'تعذّر حفظ بيانات التسجيل. تحقق من رقم الهوية (١٠ أرقام تبدأ بـ١ أو ٢)'],
-    [/permission denied|row-level security/i, 'لا تملك صلاحية هذا الإجراء'],
+    // عبارةٌ واحدةٌ لطيفةٌ لكلِّ منع (ملاحظة ٢٩٤)
+    [/permission denied|row-level security|غير مصرح|ليست لك صلاحية|ليس لديك/i, DENY],
     [/Failed to fetch|NetworkError/i, 'تعذّر الاتصال بالخادم. تحقق من الإنترنت']
   ];
   for (const [re, ar] of map) if (re.test(msg)) return ar;
