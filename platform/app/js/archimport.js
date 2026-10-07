@@ -358,6 +358,8 @@ export async function importDialog({ sectionId, year, onDone }) {
       h('div.row.gap.wrap',
         h('label.field', h('span', 'اللغة'), fileLang),
         h('label.field', h('span', 'المسجد'), fileMosque)),
+      h('p.small.muted', 'المسجدُ لازمٌ لكلِّ خطبة: كثيرٌ من المجمَّعات لا تذكره في '
+        + 'ترويستها، فحدِّدْه هنا ليسريَ على الملفِّ كلِّه — ولك تصحيحُه صفًّا صفًّا بعدُ.'),
       note),
     buttons: [
       { label: 'اقرأ الملفات', kind: 'primary',
@@ -412,7 +414,8 @@ async function reviewDialog({ sectionId, year, rows, report, fridaySet, fridays,
       type: h('select', { 'aria-label': `نوعُ الصفِّ ${i + 1}` },
         ...SERMON_TYPES.map(t => h('option', { value: t, selected: (r.type || 'خطبة جمعة') === t }, t))),
     };
-    fields.push({ r, f });
+    const entry = { r, f, i: i + 1, tr: null };
+    fields.push(entry);
 
     const peek = h('button.link.small', { type: 'button' }, 'استعرِض');
     peek.onclick = () => dialog({
@@ -423,13 +426,14 @@ async function reviewDialog({ sectionId, year, rows, report, fridaySet, fridays,
       buttons: [{ label: 'إغلاق', value: null }],
     });
 
-    return h('tr', { class: bad.length ? 'warn-row' : '' },
+    entry.tr = h('tr', { class: bad.length ? 'warn-row' : '' },
       h('td', f.on), h('td.num', String(i + 1)),
       h('td', f.title), h('td', f.mosque), h('td', f.date),
       h('td', f.khateeb), h('td', f.lang), h('td', f.type),
       h('td.num', String(r.words || 0)),
       h('td.small.muted', [...bad, ...warn].join('، ') || '—'),
       h('td', peek));
+    return entry.tr;
   };
 
   const table = h('table.tbl.imp-tbl',
@@ -475,8 +479,23 @@ async function reviewDialog({ sectionId, year, rows, report, fridaySet, fridays,
         validate: async () => {
           const items = collect();
           if (!items.length) return 'لم تَختر صفًّا واحدًا';
-          const bad = items.filter(x => !x.sermon_date).length;
-          if (bad) return `${ARY(bad)} صفًّا بلا تاريخ — أكملْه أو استبعدْه`;
+          // الصفُّ الناقصُ يُسمَّى ويُقفَز إليه ويُظلَّل، فلا يُبحَث عنه
+          fields.forEach(x => x.tr && x.tr.classList.remove('bad-row'));
+          // التاريخُ والمسجدُ لازمان: الجمعةُ لا تُعرَف إلا بهما
+          for (const [key, what] of [['date', 'تاريخ'], ['mosque', 'مسجد']]) {
+            const miss = fields.filter(x => x.f.on.checked && !x.f[key].value);
+            if (!miss.length) continue;
+            miss.forEach(x => x.tr && x.tr.classList.add('bad-row'));
+            const first = miss[0];
+            try {
+              first.tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
+              first.f[key].focus();
+            } catch { /* يكفي التظليل */ }
+            return miss.length === 1
+              ? `الصفُّ ${ARY(first.i)} بلا ${what} — أكملْه أو انزعْ علامتَه`
+              : `${ARY(miss.length)} صفًّا بلا ${what}: ${miss.slice(0, 8).map(x => ARY(x.i)).join('، ')}`
+                + (miss.length > 8 ? ' …' : '');
+          }
           try {
             done = await db.rpc('import_arch_sermons',
               { p: { section_id: sectionId, items } });
