@@ -90,7 +90,7 @@ export async function render(ctx) {
     } else if (key === 'photo') {
       inner = (member && photoOf[member.id])
         ? h('img.cd-photo-img', { alt: '' })
-        : h('span.cd-photo-ph', '٤×٦');
+        : h('span.cd-photo-ph', '4×6');
     } else if (key === 'qr') {
       // باركودُ التحقق (ملاحظة ٣١٣) — في اللوحة يُرسَم برمزٍ تجريبي
       style.height = px(it.w);
@@ -270,7 +270,7 @@ export async function render(ctx) {
         'aria-label': 'صورة العنصر' });
       up.onchange = () => busy(up, async () => {
         const file = up.files[0]; if (!file) return;
-        if (file.size > 3 * 1024 * 1024) return toast('الحد الأقصى ٣ ميغابايت.', 'bad');
+        if (file.size > 3 * 1024 * 1024) return toast('الحد الأقصى 3 ميغابايت.', 'bad');
         try {
           const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
           const path = `card-${it.id}-${Date.now()}.${ext}`;
@@ -282,7 +282,7 @@ export async function render(ctx) {
         } catch (e) { toast(e.message, 'bad'); }
       });
       kids.splice(1, 0, h('label.field', it.path ? 'استبدال الصورة أو الشعار' : 'رفع الصورة أو الشعار',
-        h('small', 'PNG بخلفية شفافة أفضل — حتى ٣ ميغابايت'), up));
+        h('small', 'PNG بخلفية شفافة أفضل — حتى 3 ميغابايت'), up));
       kids.push(h('div.row', chip(it.badge ? 'خلفية داكنة خلفها' : 'بلا خلفية', it.badge,
         () => { it.badge = !it.badge; })));
     }
@@ -394,7 +394,7 @@ export async function render(ctx) {
       'aria-label': 'ملفُّ التوقيع' });
     up.onchange = () => busy(up, async () => {
       const file = up.files[0]; if (!file) return;
-      if (file.size > 3 * 1024 * 1024) return toast('الحد الأقصى ٣ ميغابايت.', 'bad');
+      if (file.size > 3 * 1024 * 1024) return toast('الحد الأقصى 3 ميغابايت.', 'bad');
       try {
         const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
         const path = `card-sign-${Date.now()}.${ext}`;
@@ -443,7 +443,7 @@ export async function render(ctx) {
     const up = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/svg+xml' });
     up.onchange = () => busy(up, async () => {
       const file = up.files[0]; if (!file) return;
-      if (file.size > 3 * 1024 * 1024) return toast('الحد الأقصى ٣ ميغابايت.', 'bad');
+      if (file.size > 3 * 1024 * 1024) return toast('الحد الأقصى 3 ميغابايت.', 'bad');
       try {
         const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
         const path = `card-logo-${Date.now()}.${ext}`;
@@ -457,7 +457,7 @@ export async function render(ctx) {
     logoBox.replaceChildren(
       h('label.field', 'الشعار على البطاقة', sel),
       h('label.field', 'رفع شعار الهيئة أو شعارًا آخر',
-        h('small', 'PNG بخلفية شفافة أفضل — حتى ٣ ميغابايت'), up),
+        h('small', 'PNG بخلفية شفافة أفضل — حتى 3 ميغابايت'), up),
       h('label.field', `عرض الشعار (${round(layout.items.logo.w)} مم)`,
         sizeRange(layout.items.logo.w, 4, 40, 0.5, v => { layout.items.logo.w = v; drawLogo(); })),
       h('div.row', (() => {
@@ -626,7 +626,7 @@ export async function render(ctx) {
 
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'بطاقات العمل'),
-      h('p.muted', 'بطاقة بمقاس الهوية الوطنية ٨٥٫٦×٥٤ مم. اسحب أي عنصر إلى مكانه، وغيّر حجم خطه ولونه، ثم اطبع.'))),
+      h('p.muted', 'بطاقة بمقاس الهوية الوطنية 85٫6×54 مم. اسحب أي عنصر إلى مكانه، وغيّر حجم خطه ولونه، ثم اطبع.'))),
     // ثلاثة أعمدة تملأ الشاشة: الخصائص، ثم لوحة التصميم، ثم البيانات والشكل (ملاحظة ١٣٠)
     h('div.card.cd-board',
       h('div.cd-wrap',
@@ -673,7 +673,7 @@ function printCards(rows, cfg, layout, logoData, customData = {}) {
     }
     if (key === 'photo') {
       return `<div class="cd-item cd-photo" style="${style}">${
-        row.photo ? `<img src="${row.photo}" alt="">` : '<span>٤×٦</span>'}</div>`;
+        row.photo ? `<img src="${row.photo}" alt="">` : '<span>4×6</span>'}</div>`;
     }
     if (key === 'qr') {
       const src = qrDataUri(cardVerifyUrl(row.member.member_no, row.member.card_key),

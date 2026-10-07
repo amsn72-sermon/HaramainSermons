@@ -11,8 +11,8 @@ import { db, storage } from '../sb.js';
 import { state, MOSQUE, SERMON_TYPES, langName, trLangs, isManager, can } from '../store.js';
 import { typeIcon } from '../icons.js';
 
-const AR = n => Number(n || 0).toLocaleString('ar-SA');
-const ARY = n => Number(n || 0).toLocaleString('ar-SA', { useGrouping: false });
+const AR = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn');
+const ARY = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn', { useGrouping: false });
 const MOSQUE_ICON = { makkah: '🕋', madinah: '🕌' };
 
 const mayUpload = () => isManager() || can('arch_upload');
@@ -46,18 +46,31 @@ export async function render(ctx) {
   let tiles = [];
   try { tiles = await db.rpc('arch_year_tiles') || []; } catch (e) { tiles = []; }
 
+  // ثلاثُ بطاقاتٍ في الصفّ، تصاعديًّا من اليمين، بأرقام العام (ملاحظتا ٣٢٨ و٣٢٩)
   const grid = h('div.year-grid');
   const draw = () => {
-    fill(grid, ...(tiles.length ? tiles.map(t =>
-      h('a.year-tile', { href: `/app/sermons/${t.h_year}` },
+    const rows = [...tiles].sort((a, b) => a.h_year - b.h_year);
+    fill(grid, ...(rows.length ? rows.map(t => {
+      const pct = Number(t.pct || 0);
+      return h('a.year-tile', { href: `/app/sermons/${t.h_year}` },
         h('b.year-no', ARY(t.h_year)),
         h('span.year-h', 'هـ'),
-        h('div.year-meta',
-          h('span', `${AR(t.sermons)} خطبة`),
-          h('span', `${AR(t.versions)} نسخة`),
-          h('span', `${AR(t.langs)} لغة`))))
-      : [emptyState('لا أعوام بعد', 'أضِفْ عامًا لتبدأ الأرشفة.')]));
+        h('div.year-bar', { title: `اكتملَ ${AR(pct)}٪ من جُمَع العام` },
+          h('span', { style: { width: `${Math.max(2, pct)}%` },
+            class: pct >= 90 ? 'ok' : pct >= 50 ? 'warn' : 'bad' })),
+        h('div.year-stats',
+          stat(t.covered, 'جمعة مغطّاة', `من ${AR(t.fridays)}`),
+          stat(t.sermons, 'خطبة'),
+          stat(t.versions, 'نسخة'),
+          stat(t.langs, 'لغة'),
+          stat(t.khateebs, 'خطيب'),
+          stat(t.gaps, 'جمعة ناقصة', null, Number(t.gaps) ? 'bad' : 'ok')));
+    }) : [emptyState('لا أعوام بعد', 'أضِفْ عامًا لتبدأ الأرشفة.')]));
   };
+  const stat = (n, label, sub, kind) =>
+    h('div.year-stat', { class: kind || '' },
+      h('b', AR(n || 0)), h('span', label),
+      sub ? h('i.small.muted', sub) : null);
   draw();
 
   const addYear = async () => {
@@ -232,6 +245,60 @@ async function yearPage(ctx, year) {
     return box;
   };
 
+  // صفٌّ لكلِّ حرمٍ يُطوى ويُفتَح بسهمٍ في آخره (ملاحظة ٣٢٦)
+  // وحالُ الطيِّ محفوظةٌ لصاحبها فلا يُعيدها كلَّ مرة
+  const FOLD_KEY = `arch-fold-${year}`;
+  const readFold = () => {
+    try { return JSON.parse(localStorage.getItem(FOLD_KEY) || '{}') || {}; }
+    catch { return {}; }
+  };
+  const writeFold = v => { try { localStorage.setItem(FOLD_KEY, JSON.stringify(v)); } catch {} };
+  let fold = readFold();
+  const isShut = (friday, mosque) => fold[`${friday}|${mosque}`] === 1;
+  const setShut = (friday, mosque, on) => {
+    if (on) fold[`${friday}|${mosque}`] = 1; else delete fold[`${friday}|${mosque}`];
+    writeFold(fold);
+  };
+
+  const mosqueLine = (w, mosque) => {
+    const s = w[mosque];
+    // الغائبُ صفٌّ واحدٌ لا يُطوى: عنوانُه بيانُه، وفيه زرُّ رفعه
+    if (!s) {
+      return h('div.mosque-group.empty',
+        h('div.mosque-head',
+          h('b', `${MOSQUE_ICON[mosque]} ${MOSQUE[mosque]}`),
+          h('span.small.bad', 'لم تُضَفْ'),
+          h('span.row', { style: { gap: '6px', marginInlineStart: 'auto' } },
+            mayUpload()
+              ? h('button.btn.xs', { type: 'button',
+                  onclick: () => sermonDialog(null, { mosque, friday: w.friday_on }) }, '⤒ ارفعْ')
+              : null)));
+    }
+    const shut = isShut(w.friday_on, mosque);
+    const n = Number(s.n_langs || 0);
+    const arrow = h('button.fold-btn', { type: 'button',
+      'aria-expanded': shut ? 'false' : 'true',
+      title: shut ? 'افتحْ هذا الصف' : 'اطوِ هذا الصف' }, shut ? '▾' : '▴');
+    const inner = h('div.week-body', { hidden: shut },
+      sermonRow(s, mosque, w.friday_on));
+    arrow.onclick = () => {
+      const now = !inner.hidden;
+      inner.hidden = now;
+      arrow.textContent = now ? '▾' : '▴';
+      arrow.setAttribute('aria-expanded', now ? 'false' : 'true');
+      setShut(w.friday_on, mosque, now);
+    };
+    return h('div.mosque-group', { class: shut ? 'shut' : '' },
+      h('div.mosque-head',
+        h('b', `${MOSQUE_ICON[mosque]} ${MOSQUE[mosque]}`),
+        h('span.small.muted', s.title || ''),
+        h('span.row', { style: { gap: '6px', marginInlineStart: 'auto' } },
+          h('span.badge', { class: n >= 10 ? 'ok' : n ? 'warn' : 'bad' },
+            n ? `${AR(n)} لغة` : 'بلا نسخ'),
+          arrow)),
+      inner);
+  };
+
   const weekCard = w => {
     const total = Number(w.langs || 0);
     const have = (w.makkah ? 1 : 0) + (w.madinah ? 1 : 0);
@@ -244,9 +311,14 @@ async function yearPage(ctx, year) {
             total ? `${AR(total)} نسخة` : 'خالٍ'),
           h('span.badge', { class: have === 2 ? 'ok' : have ? 'warn' : 'bad' },
             have === 2 ? '✓✓' : have ? '✓' : '—'))),
-      h('div.week-body',
-        sermonRow(w.makkah, 'makkah', w.friday_on),
-        sermonRow(w.madinah, 'madinah', w.friday_on)));
+      mosqueLine(w, 'makkah'),
+      mosqueLine(w, 'madinah'));
+  };
+
+  // طيُّ الكلِّ وفتحُه لكلِّ حرمٍ على حِدة
+  const foldAll = (mosque, shut) => {
+    for (const w of weeks) setShut(w.friday_on, mosque, shut);
+    drawWeeks();
   };
 
   function drawWeeks() {
@@ -277,52 +349,109 @@ async function yearPage(ctx, year) {
         cur = (Array.isArray(r) ? r[0] : r) || {};
       } catch { cur = {}; }
     }
+    const langs = trLangs();
     const f = {
       title: h('input', { value: cur.title || '', 'aria-label': 'موضوع الخطبة' }),
       khateeb: h('input', { value: cur.khateeb || '', 'aria-label': 'الخطيب' }),
       date: h('input', { type: 'date',
         value: cur.sermon_date || (friday ? String(friday).slice(0, 10) : ''),
         'aria-label': 'تاريخ الخطبة' }),
-      hijri: h('input', { value: cur.hijri_text || '', 'aria-label': 'التاريخ الهجري',
-        placeholder: '٧ محرّم ١٤٤٦هـ' }),
+      hijri: h('input', { value: cur.hijri_text || '', 'aria-label': 'التاريخ الهجري' }),
+      seq: h('input', { type: 'number', min: '1', value: cur.seq || '', 'aria-label': 'رقم الخطبة' }),
       mosque: h('select', { 'aria-label': 'المسجد' },
         Object.entries(MOSQUE).map(([k, v]) =>
           h('option', { value: k, selected: (cur.mosque || mosque) === k }, v))),
       type: h('select', { 'aria-label': 'نوع الخطبة' },
         SERMON_TYPES.map(t => h('option', { value: t,
           selected: (cur.sermon_type || 'خطبة جمعة') === t }, t))),
-      notes: h('textarea', { rows: 2, 'aria-label': 'ملاحظة' }, cur.notes || '')
+      notes: h('input', { value: cur.notes || '', 'aria-label': 'ملاحظة' }),
+      // ونصُّ الخطبة يُرفَع هنا لا في نافذةٍ أخرى (ملاحظة ٣١٩)
+      lang: h('select', { 'aria-label': 'لغة النص' },
+        h('option', { value: '' }, '—'),
+        h('option', { value: 'ar' }, 'العربية (الأصل)'),
+        ...langs.map(l => h('option', { value: l.code }, l.name_ar))),
+      file: h('input', { type: 'file', accept: '.docx', 'aria-label': 'ملف Word' }),
+      text: h('textarea', { rows: 3, 'aria-label': 'نص الخطبة',
+        placeholder: 'أو الصقِ النصَّ هنا' }),
     };
-    const hint = h('p.small.muted');
+
+    // التاريخُ الهجريُّ يُولَّد من تاريخ الخطبة لا من العام الجاري (ملاحظة ٣٢٠)
+    const hint = h('span.small.muted');
+    let hijriTouched = !!cur.hijri_text;
+    f.hijri.oninput = () => { hijriTouched = !!f.hijri.value.trim(); };
     const syncHint = () => {
-      hint.textContent = f.date.value
-        ? `بالهجري: ${fmtHijri(f.date.value)} — وتُنسَب إلى جمعة ${fmtDate(f.date.value)}`
-        : '';
+      if (!f.date.value) { hint.textContent = ''; return; }
+      const hj = fmtHijri(f.date.value);
+      hint.textContent = `${hj} · جمعةُ ${fmtDate(f.date.value)}`;
+      if (!hijriTouched) f.hijri.value = hj;
     };
     f.date.oninput = syncHint; syncHint();
 
+    // ملفُّ Word يُقرأ فيصير نصًّا، ويُقترَح منه ما خلا من البيانات
+    const fileNote = h('span.small.muted');
+    let body_html = '';
+    f.file.onchange = async () => {
+      const file = f.file.files?.[0];
+      if (!file) { body_html = ''; fileNote.textContent = ''; return; }
+      try {
+        const [{ readDocxParagraphs }, imp] = await Promise.all([
+          import('../docxread.js'), import('../archimport.js')]);
+        const paras = await readDocxParagraphs(file);
+        const r = imp.splitSermons(paras, { year });
+        const one = r.rows[0] || {};
+        body_html = one.html || paras.map(p => p.html).filter(Boolean).join('\n');
+        if (!f.title.value && one.title) f.title.value = one.title;
+        if (!f.khateeb.value && one.khateeb) f.khateeb.value = one.khateeb;
+        if (!f.date.value && one.date) { f.date.value = one.date; syncHint(); }
+        if (one.mosque) f.mosque.value = one.mosque;
+        if (!f.lang.value) {
+          const c = imp.langOfName(file.name);
+          if (c) f.lang.value = c;
+        }
+        fileNote.textContent = `قُرئ: ${imp.countWords(
+          new DOMParser().parseFromString(body_html, 'text/html').body.textContent)} كلمة`;
+      } catch (e) { body_html = ''; fileNote.textContent = e.message; }
+    };
+
     const res = await dialog({
       title: id ? 'تعديلُ خطبة' : 'إضافةُ خطبة',
-      body: h('div.stack',
+      body: h('div.stack.tight.sermon-form',
         h('label.field', 'موضوع الخطبة', f.title),
-        h('div.grid-2',
+        h('div.grid-3',
           h('label.field', 'الخطيب', f.khateeb),
           h('label.field', 'المسجد', f.mosque),
-          h('label.field', 'نوع الخطبة', f.type),
-          h('label.field', 'تاريخ الخطبة', f.date)),
+          h('label.field', 'النوع', f.type),
+          h('label.field', 'التاريخ', f.date),
+          h('label.field', 'الهجري كما يُكتب', f.hijri),
+          h('label.field', 'رقم الخطبة', f.seq)),
         hint,
-        h('label.field', 'التاريخ الهجري كما يُكتب', f.hijri,
-          h('small', 'يُطبَع في صفحة عنوانها بالمجمَّع — يُترك فارغًا فيُحسَب')),
-        h('label.field', 'ملاحظة', f.notes)),
+        h('div.grid-3',
+          h('label.field', 'لغة النص', f.lang),
+          h('label.field', 'ملف Word', f.file),
+          h('label.field', 'ملاحظة', f.notes)),
+        fileNote,
+        h('label.field', 'أو النص', f.text)),
       buttons: [{ label: 'حفظ', kind: 'primary',
         validate: () => (f.title.value.trim() ? true : 'اكتب موضوعَ الخطبة'),
-        value: () => ({
-          id: id || null, section_id: section?.id,
-          title: f.title.value.trim(), khateeb: f.khateeb.value.trim() || null,
-          mosque: f.mosque.value, sermon_type: f.type.value,
-          sermon_date: f.date.value || null, hijri_text: f.hijri.value.trim() || null,
-          notes: f.notes.value.trim() || null, versions: []
-        }) }, { label: 'إلغاء', value: null }]
+        value: () => {
+          const txt = f.text.value.trim();
+          const html = body_html
+            || (txt ? txt.split(/\n{2,}/).map(x =>
+                 `<p>${x.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</p>`).join('\n')
+               : '');
+          return {
+            id: id || null, section_id: section?.id,
+            title: f.title.value.trim(), khateeb: f.khateeb.value.trim() || null,
+            mosque: f.mosque.value, sermon_type: f.type.value,
+            sermon_date: f.date.value || null, hijri_text: f.hijri.value.trim() || null,
+            seq: f.seq.value ? Number(f.seq.value) : null,
+            notes: f.notes.value.trim() || null,
+            versions: (f.lang.value && html)
+              ? [{ language_code: f.lang.value, is_source: f.lang.value === 'ar',
+                   body_html: html }]
+              : []
+          };
+        } }, { label: 'إلغاء', value: null }]
     });
     if (!res) return;
     try {
@@ -468,6 +597,43 @@ async function yearPage(ctx, year) {
     };
   }
 
+  // طيُّ الحرمين وفتحُهما (ملاحظة ٣٢٦)
+  const foldBar = h('div.row.gap.wrap.fold-bar',
+    h('span.small.muted', 'الطيّ:'),
+    ...Object.entries(MOSQUE).flatMap(([k, v]) => [
+      h('button.btn.xs', { type: 'button', onclick: () => foldAll(k, true) }, `اطوِ ${v}`),
+      h('button.btn.xs.ghost', { type: 'button', onclick: () => foldAll(k, false) }, `افتحْ ${v}`),
+    ]),
+    h('button.btn.xs', { type: 'button',
+      onclick: () => { Object.keys(MOSQUE).forEach(k => foldAll(k, true)); } }, 'اطوِ الكلَّ'),
+    h('button.btn.xs.ghost', { type: 'button',
+      onclick: () => { Object.keys(MOSQUE).forEach(k => foldAll(k, false)); } }, 'افتحِ الكلَّ'));
+
+  // إعادةُ ترقيم العام بالتاريخ (ملاحظة ٣٢٧)
+  const numBtn = mayEdit()
+    ? h('button.btn.sm.ghost', { type: 'button' }, '№ أعِدْ ترقيمَ العام')
+    : null;
+  if (numBtn) {
+    numBtn.onclick = async () => {
+      const per = h('input', { type: 'checkbox' });
+      const res = await dialog({
+        title: `إعادةُ ترقيم خطب ${ARY(year)}هـ`,
+        body: h('div.stack',
+          h('p.small.muted', 'تُرتَّب خطبُ العام بتاريخها ويُعاد ترقيمُها من واحد. '
+            + 'وما كتبتَه من أرقامٍ يدويةٍ يُستبدَل.'),
+          h('label.check', per, h('span', 'ترقيمٌ مستقلٌّ لكلِّ حرم'))),
+        buttons: [{ label: 'أعِدِ الترقيم', kind: 'primary', value: () => ({ per: per.checked }) },
+                  { label: 'إلغاء', value: null }]
+      });
+      if (!res) return;
+      try {
+        const n = await db.rpc('renumber_arch_year', { p_year: year, p_per_mosque: res.per });
+        toast(`أُعيد ترقيمُ ${AR(n || 0)} خطبة.`, 'ok');
+        drawWeeks();
+      } catch (e) { toast(e.message, 'bad'); }
+    };
+  }
+
   const bookBtn = mayExport()
     ? h('button.btn.sm.primary', { type: 'button' }, '📕 أصدِرْ مجمَّعًا')
     : null;
@@ -484,7 +650,7 @@ async function yearPage(ctx, year) {
   return h('div',
     h('div.page-head',
       h('div.row.wrap', { style: { marginInlineStart: 'auto', order: 2 } },
-        bookBtn, bulkBtn, shortBtn,
+        bookBtn, bulkBtn, numBtn, shortBtn,
         mayUpload()
           ? h('button.btn.sm', { type: 'button',
               onclick: () => sermonDialog(null, {}) }, '＋ خطبة')
@@ -494,5 +660,6 @@ async function yearPage(ctx, year) {
         h('p.muted', 'أسابيعُ الجُمَع: في كلِّ أسبوعٍ خطبتان، ولكلِّ خطبةٍ لغاتُها. '
           + 'والغائبُ يبقى صفًّا موسومًا فيُبصَر الناقص.'))),
     secBar,
+    foldBar,
     body);
 }

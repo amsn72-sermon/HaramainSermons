@@ -563,7 +563,7 @@ async function importFile(file, reload) {
         h('label.check', modeAdd, h('span', 'أضِفْ ولا تمحُ — يبقى المقابلُ القديمُ حيث وُجد')),
         h('label.check', modeRep, h('span', 'استبدِلْ — يحلُّ مقابلُ الملفِ محلَّ القديم'))),
       h('p.small.muted', 'ما رُفع بملفٍّ يدخل الدليلَ معتمدًا — فالأصلُ فيه أنه مترجَمٌ مراجَع '
-        + '(ملاحظة ٢٥٩). والمصطلحُ المكرَّرُ بصياغتين تُجمع صياغتاه بينهما فاصلة.'),
+        + '(ملاحظة 259). والمصطلحُ المكرَّرُ بصياغتين تُجمع صياغتاه بينهما فاصلة.'),
       h('ul.small', parsed.terms.slice(0, 5).map(t => h('li', h('b', t.term_ar), ' — ',
         h('span.muted', Object.keys(t.tr).slice(0, 3).map(c => langName(c)).join(' · ') || 'بلا مقابل')))),
       parsed.terms.length > 5 ? h('p.small.muted', `… و${parsed.terms.length - 5} غيرها`) : null),
@@ -668,7 +668,7 @@ export async function render(ctx) {
         r.native ? h('span.badge.ok', 'لغتك الأمّ') : h('span.lang-code', { dir: 'ltr' }, r.code)),
       h('span.lang-native', { dir: r.dir || 'ltr' }, r.native_name || ''),
       h('div.lang-count',
-        h('b', r.done ? String(r.done) : '٠'),
+        h('b', r.done ? String(r.done) : '0'),
         h('small', 'مصطلحًا')),
       // اللغةُ التي لم يُترجَم فيها شيءٌ بعد ليست «مكتملة» (ملاحظة ٢٧٨)
       r.missing ? h('span.badge.warn', `ينقص ${r.missing}`)

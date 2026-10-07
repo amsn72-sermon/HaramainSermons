@@ -49,10 +49,10 @@ function translateError(msg) {
     [/invalid login credentials/i, 'البريد أو كلمة المرور غير صحيحة'],
     [/email not confirmed/i, 'لم يُؤكَّد البريد بعد. افتح رابط التأكيد المرسل إليك'],
     [/user already registered/i, 'هذا البريد مسجل مسبقًا'],
-    [/password should be at least/i, 'كلمة المرور قصيرة (٨ أحرف على الأقل)'],
+    [/password should be at least/i, 'كلمة المرور قصيرة (8 أحرف على الأقل)'],
     [/rate limit/i, 'محاولات كثيرة. انتظر قليلًا ثم أعد المحاولة'],
     [/jwt expired/i, 'انتهت الجلسة. سجّل الدخول من جديد'],
-    [/Database error saving new user/i, 'تعذّر حفظ بيانات التسجيل. تحقق من رقم الهوية (١٠ أرقام تبدأ بـ١ أو ٢)'],
+    [/Database error saving new user/i, 'تعذّر حفظ بيانات التسجيل. تحقق من رقم الهوية (10 أرقام تبدأ بـ1 أو 2)'],
     // عبارةٌ واحدةٌ لطيفةٌ لكلِّ منع (ملاحظة ٢٩٤)
     [/permission denied|row-level security|غير مصرح|ليست لك صلاحية|ليس لديك/i, DENY],
     [/Failed to fetch|NetworkError/i, 'تعذّر الاتصال بالخادم. تحقق من الإنترنت']

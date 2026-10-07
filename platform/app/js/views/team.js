@@ -52,7 +52,7 @@ export async function render(ctx, opts = {}) {
   const signOf = {};
   for (const r of signed) if (r.policy_version === POLICY_VERSION) signOf[r.member_id] = r;
 
-  const stars = n => h('span.stars', { title: n ? `${n} من ٥` : 'بلا تقييم' },
+  const stars = n => h('span.stars', { title: n ? `${n} من 5` : 'بلا تقييم' },
     [1, 2, 3, 4, 5].map(i => h('b', { class: i <= Math.round(n || 0) ? '' : 'off' }, '★')));
   const hours = sec => {
     const s = Math.max(0, Number(sec) || 0);
@@ -500,7 +500,7 @@ export async function render(ctx, opts = {}) {
     const drawIqama = () => {
       const view = h('div');
       if (p.iqama_path) storage.signedUrl('private-docs', p.iqama_path, 600)
-        .then(url => view.replaceChildren(h('a.btn.sm', { href: url, target: '_blank', rel: 'noopener' }, 'عرض صورة الهوية (رابط مؤقت ١٠ دقائق)')))
+        .then(url => view.replaceChildren(h('a.btn.sm', { href: url, target: '_blank', rel: 'noopener' }, 'عرض صورة الهوية (رابط مؤقت 10 دقائق)')))
         .catch(() => view.replaceChildren(h('span.small.muted', 'تعذّر فتح الصورة')));
       else view.replaceChildren(h('span.small.muted', 'لم تُرفع صورة الهوية بعد'));
       const up = h('input', { type: 'file', accept: 'image/*,application/pdf', 'aria-label': 'رفع صورة الهوية' });
@@ -558,7 +558,7 @@ export async function render(ctx, opts = {}) {
           if (nid && fld.id_type.value === 'passport' && !/^[A-Z0-9]{5,15}$/.test(nid)) {
             toast('رقم الجواز من خمسة إلى خمسة عشر حرفًا ورقمًا.', 'bad'); return false; }
           if (nid && fld.id_type.value === 'national' && !/^[12][0-9]{9}$/.test(nid)) {
-            toast('رقم الهوية أو الإقامة: ١٠ أرقام تبدأ بـ١ أو ٢.', 'bad'); return false; }
+            toast('رقم الهوية أو الإقامة: 10 أرقام تبدأ بـ1 أو 2.', 'bad'); return false; }
           if (fld.full_name.value.trim().length < 3) { toast('اكتب الاسم الكامل.', 'bad'); return false; }
           // تُطلب اللغةُ الأمُّ ولا يُحجب بها حفظُ من سُجّل قبلها: تُنبَّه ثم تُستكمل
           if (!nativeSel.value && m.native_lang) {
@@ -699,10 +699,10 @@ export async function render(ctx, opts = {}) {
         { label: 'إنشاء الحساب', kind: 'primary', validate: () => {
           if (fld.full_name.value.trim().length < 3) { toast('اكتب الاسم الكامل.', 'bad'); return false; }
           if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fld.email.value.trim())) { toast('البريد الإلكتروني غير صحيح.', 'bad'); return false; }
-          if (fld.password.value.length < 8) { toast('كلمة المرور ٨ أحرف على الأقل.', 'bad'); return false; }
+          if (fld.password.value.length < 8) { toast('كلمة المرور 8 أحرف على الأقل.', 'bad'); return false; }
           const nid = fld.national_id.value.trim().toUpperCase();
           if (nid && !/^[12][0-9]{9}$/.test(nid)) {
-            toast('رقم الهوية أو الإقامة: ١٠ أرقام تبدأ بـ١ أو ٢.', 'bad'); return false; }
+            toast('رقم الهوية أو الإقامة: 10 أرقام تبدأ بـ1 أو 2.', 'bad'); return false; }
           if (track === 'translation' && fld.role.value === 'translator' && !chosen.size) {
             toast('اختر لغة واحدة على الأقل للمترجم.', 'bad'); return false; }
           return true;

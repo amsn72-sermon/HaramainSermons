@@ -66,7 +66,7 @@ function scoreDialog(members, row = null) {
       h('label.field', req('اسم مشرف الهيئة'), f.supervisor),
       h('label.field', 'تاريخ التقييم', f.on)),
     h('div.card.stack',
-      h('div.row.between', h('b', 'المعايير الخمسة'), h('span.small.muted', 'من ٠ إلى ٥ لكل معيار')),
+      h('div.row.between', h('b', 'المعايير الخمسة'), h('span.small.muted', 'من 0 إلى 5 لكل معيار')),
       h('div.grid-2', CRITERIA.map(([k, label]) => h('label.field', label, scores[k]))),
       h('div.row.between', h('span', 'مجموع الأسبوع'), sum)),
     h('label.field', 'ملاحظات المشرف', f.notes));
@@ -151,7 +151,7 @@ export async function render() {
 
     // متوسط الشهر لكل مرشد ونسبة الصرف المقابلة — بيانٌ لا تطبيق
     const ids = [...new Set(list.map(r => r.member_id))];
-    const mHead = ['المرشد', 'الأسابيع المسجَّلة', 'مجموع الدرجات', 'المتوسط الشهري من ١٠٠', 'نسبة الصرف المقابلة'];
+    const mHead = ['المرشد', 'الأسابيع المسجَّلة', 'مجموع الدرجات', 'المتوسط الشهري من 100', 'نسبة الصرف المقابلة'];
     monthly.replaceChildren(h('section.card.stack',
       h('h3', 'متوسط الشهر ونسبة الصرف المقابلة في العقد'),
       h('div.table-wrap', h('table.responsive',
@@ -165,7 +165,7 @@ export async function render() {
             h('td', { 'data-label': 'المرشد' }, nameOf(id)),
             h('td', { 'data-label': 'الأسابيع المسجَّلة' }, ar(l.length)),
             h('td', { 'data-label': 'مجموع الدرجات' }, `${ar(total)} من ${ar(l.length * 25)}`),
-            h('td', { 'data-label': 'المتوسط الشهري من ١٠٠' }, h('b', String(avg))),
+            h('td', { 'data-label': 'المتوسط الشهري من 100' }, h('b', String(avg))),
             h('td', { 'data-label': 'نسبة الصرف المقابلة' },
               h('span.badge', { class: band === 100 ? 'ok' : band >= 80 ? 'gold' : 'bad' }, `${band}٪`),
               avg < 70 ? h('span.small.bad', ' — يقترن بإنذار في العقد') : null));
@@ -210,7 +210,7 @@ export async function render() {
     h('div.page-head',
       h('div.row', { style: { marginInlineStart: 'auto', order: 2 } }, fmtSel, expBtn, addBtn),
       h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'تقييم المرشدين'),
-        h('p.muted', 'التقييم الأسبوعي الوارد من مشرفي الهيئة: خمسة معايير من ٥ أسبوعيًّا، ومجموع الشهر من ١٠٠.'))),
+        h('p.muted', 'التقييم الأسبوعي الوارد من مشرفي الهيئة: خمسة معايير من 5 أسبوعيًّا، ومجموع الشهر من 100.'))),
     h('div.card.stack', h('label.field', { style: { maxWidth: '18rem' } }, 'الشهر', monthIn)),
     table,
     monthly);

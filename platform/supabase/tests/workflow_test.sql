@@ -6847,3 +6847,188 @@ begin
   perform public.cancel_renewal(v_rid);
   raise notice 'PASS: الإدارةُ تطلب التجديدَ بسببٍ مكتوب، ويُلغى الطلب';
 end $$;
+
+-- =====================================================================
+-- ٦٨) قوالبُ الشهادات وأصولُ التصميم، وترقيمُ الخطب وإحصاءُ الأعوام
+--     (ملاحظات ٣١٧ و٣٢٢–٣٢٥ و٣٢٧ و٣٢٩)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_crd uuid := '00000000-0000-0000-0000-00000000000b';
+        v_yus uuid := '00000000-0000-0000-0000-00000000000c';
+        v_sec uuid; v_tpl uuid; v_as uuid; v_g jsonb; v_n int; v_s1 uuid; v_s2 uuid;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+
+  -- ---------- ٣٢٥: مكتبةُ الشعارات: النزعُ لا يُتلف ----------
+  if (select count(*) from public.design_assets where kind = 'logo' and is_builtin) < 3 then
+    raise exception 'FAIL: الشعاراتُ الافتراضيةُ ناقصة';
+  end if;
+  v_as := public.add_design_asset(jsonb_build_object(
+    'kind', 'background', 'name', 'خلفيةُ الشهادة', 'file_path', 'design/bg.pdf',
+    'mime', 'application/pdf', 'pages', 1));
+  if v_as is null then raise exception 'FAIL: لم يُضَفْ أصلُ التصميم'; end if;
+  if (select count(*) from public.design_assets_list('background')) < 1 then
+    raise exception 'FAIL: لم تُقرأ الخلفيةُ من المكتبة';
+  end if;
+  -- والافتراضيُّ لا يُحذف
+  begin
+    perform public.delete_design_asset(
+      (select id from public.design_assets where is_builtin limit 1));
+    raise exception 'FAIL: حُذف شعارٌ افتراضي';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  perform public.delete_design_asset(v_as);
+  raise notice 'PASS: مكتبةُ أصول التصميم: تُضاف وتُحذف، والافتراضيُّ محفوظ';
+
+  -- ---------- ٣٢٤: القالبُ يحمل البيانات، والمنحُ اسمٌ وحسب ----------
+  v_tpl := public.save_cert_template(jsonb_build_object(
+    'name', 'شهادةُ دورة', 'kind', 'course',
+    'tpl',   jsonb_build_object('paper', 'a4', 'texts', jsonb_build_array()),
+    'fixed', jsonb_build_object('title', 'مهاراتُ الترجمة الشرعية',
+                                'hours', 12, 'place', 'مكة المكرمة',
+                                'signer_name', 'عبدالرحمن بن محمد',
+                                'signer_role', 'مدير المشروع')));
+  if v_tpl is null then raise exception 'FAIL: لم يُحفَظ قالبُ الشهادة'; end if;
+
+  v_g := public.grant_certificates(v_tpl, array[v_yus, v_crd], false);
+  if (v_g ->> 'created')::int <> 2 then
+    raise exception 'FAIL: المنحُ بالقالب (%)', v_g;
+  end if;
+  if (select count(*) from public.certificates
+       where template_id = v_tpl and title = 'مهاراتُ الترجمة الشرعية'
+         and hours = 12 and place = 'مكة المكرمة') <> 2 then
+    raise exception 'FAIL: لم تُنقل بياناتُ القالب إلى الشهادتين';
+  end if;
+  -- وحقولُ صاحبها تُقرأ لملء القالب
+  if (public.cert_fields((select id from public.certificates
+                           where template_id = v_tpl and member_id = v_yus limit 1))
+      ->> 'full_name') is null then
+    raise exception 'FAIL: لم تُقرأ حقولُ صاحب الشهادة';
+  end if;
+  -- والمترجمُ لا يمنح
+  perform set_config('request.jwt.claim.sub', v_yus::text, true);
+  begin
+    perform public.grant_certificates(v_tpl, array[v_yus], false);
+    raise exception 'FAIL: منح المترجمُ نفسَه شهادة';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  -- وما صدر عنه شهادةٌ يُعطَّل ولا يُحذف
+  perform public.delete_cert_template(v_tpl);
+  if not exists (select 1 from public.cert_templates where id = v_tpl and not is_active) then
+    raise exception 'FAIL: حُذف قالبٌ صدرت عنه شهادات';
+  end if;
+  delete from public.certificates where template_id = v_tpl;
+  raise notice 'PASS: قوالبُ الشهادات: القالبُ يحمل البيانات، والمنحُ اسمٌ وحسب';
+
+  -- ---------- ٣٢٧: الترقيمُ يُعدَّل ويُعاد ----------
+  select id into v_sec from public.arch_sections where h_year = 1445 and name = 'الخطب';
+  v_s1 := public.save_arch_sermon(jsonb_build_object(
+    'section_id', v_sec, 'sermon_date', '2023-08-04', 'mosque', 'makkah',
+    'title', 'الأولى في ١٤٤٥'));
+  v_s2 := public.save_arch_sermon(jsonb_build_object(
+    'section_id', v_sec, 'sermon_date', '2023-07-28', 'mosque', 'makkah',
+    'title', 'السابقة في التاريخ'));
+  perform public.set_arch_seq(v_s1, 7);
+  if (select seq from public.arch_sermons where id = v_s1) <> 7 then
+    raise exception 'FAIL: لم يُقبل الرقمُ المكتوب';
+  end if;
+  -- ولا يتكرّر في العام
+  begin
+    perform public.set_arch_seq(v_s2, 7);
+    raise exception 'FAIL: تكرّر رقمُ الخطبة في العام';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  -- وإعادةُ الترقيم ترتّبها بالتاريخ
+  perform public.renumber_arch_year(1445, false);
+  if (select seq from public.arch_sermons where id = v_s2) <> 1
+     or (select seq from public.arch_sermons where id = v_s1) <> 2 then
+    raise exception 'FAIL: إعادةُ الترقيم لم تُرتّب بالتاريخ (% ، %)',
+      (select seq from public.arch_sermons where id = v_s2),
+      (select seq from public.arch_sermons where id = v_s1);
+  end if;
+  raise notice 'PASS: ترقيمُ الخطب يُكتب ولا يتكرّر، وإعادةُ الترقيم بالتاريخ';
+
+  -- ---------- ٣٢٩: إحصاءُ العام ----------
+  for v_n in select t.fridays from public.arch_year_tiles() t where t.h_year = 1445 loop
+    if v_n < 50 then raise exception 'FAIL: جُمَعُ ١٤٤٥ (%)', v_n; end if;
+  end loop;
+  for v_n in select t.covered from public.arch_year_tiles() t where t.h_year = 1445 loop
+    if v_n <> 2 then raise exception 'FAIL: الجُمَعُ المغطّاة (%)', v_n; end if;
+  end loop;
+  if (select count(*) from public.arch_year_gaps(1445) g where not g.makkah) < 40 then
+    raise exception 'FAIL: لم تُحصَ الجُمَعُ الناقصة';
+  end if;
+  if not exists (select 1 from public.arch_year_gaps(1445) g
+                  where g.friday_on = date '2023-07-28' and g.makkah and not g.madinah) then
+    raise exception 'FAIL: لم تُعرَف جمعةٌ حضر فيها الحرامُ وغاب النبوي';
+  end if;
+  perform public.delete_arch_sermon(v_s1);
+  perform public.delete_arch_sermon(v_s2);
+  raise notice 'PASS: إحصاءُ العام: جُمَعُه ومغطّاه وناقصُه';
+
+  -- ---------- ٣١٧: كشفُ الهوية يعرض من لم يرفع ----------
+  delete from public.profile_private where id = v_yus;
+  if not exists (select 1 from public.identity_sheet('translators') i
+                  where i.member_id = v_yus and i.iqama_status is null) then
+    raise exception 'FAIL: غاب عن كشف الهوية من لم يرفعها';
+  end if;
+  insert into public.profile_private (id) values (v_yus) on conflict (id) do nothing;
+  raise notice 'PASS: كشفُ الهوية يعرض كلَّ أعضاء الفئة، ومن لم يرفعْ بلا هوية';
+end $$;
+
+-- =====================================================================
+-- ٦٩) العنوانُ يُورَث من جمعتِه في الرفع الجماعي (ملاحظة ٣١٦)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_sec uuid; v_g jsonb;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select id into v_sec from public.arch_sections where h_year = 1447 and name = 'الخطب';
+
+  -- بندٌ بلا عنوانٍ ولا جمعةٍ قائمة: يُردُّ ويُبيَّن سببُه
+  v_g := public.import_arch_sermons(jsonb_build_object(
+    'section_id', v_sec, 'items', jsonb_build_array(jsonb_build_object(
+      'sermon_date', '2025-07-04', 'mosque', 'makkah',
+      'versions', jsonb_build_array(jsonb_build_object(
+        'language_code', 'zh', 'body_html', '<p>中文</p>'))))));
+  if (v_g ->> 'skipped')::int <> 1 then
+    raise exception 'FAIL: كُتبت خطبةٌ بلا عنوانٍ ولا جمعةٍ قائمة (%)', v_g;
+  end if;
+  if (v_g -> 'rows' -> 0 ->> 'why') is null then
+    raise exception 'FAIL: لم يُبيَّن سببُ الردّ';
+  end if;
+
+  -- فإذا قامت الجمعةُ بعنوانها، ورِثَ البندُ الذي بلا عنوانٍ عنوانَها
+  perform public.import_arch_sermons(jsonb_build_object(
+    'section_id', v_sec, 'items', jsonb_build_array(jsonb_build_object(
+      'sermon_date', '2025-07-04', 'mosque', 'makkah', 'title', 'عنوانٌ من البنغالية',
+      'versions', jsonb_build_array(jsonb_build_object(
+        'language_code', 'bn', 'body_html', '<p>বাংলা</p>'))))));
+  v_g := public.import_arch_sermons(jsonb_build_object(
+    'section_id', v_sec, 'items', jsonb_build_array(jsonb_build_object(
+      'sermon_date', '2025-07-04', 'mosque', 'makkah',
+      'versions', jsonb_build_array(jsonb_build_object(
+        'language_code', 'zh', 'body_html', '<p>中文</p>'))))));
+  if (v_g ->> 'merged')::int <> 1 then
+    raise exception 'FAIL: لم يُضَمَّ البندُ الذي بلا عنوان (%)', v_g;
+  end if;
+  if (select title from public.arch_sermons
+       where h_year = 1447 and friday_on = public.friday_of(date '2025-07-04')
+         and mosque = 'makkah') <> 'عنوانٌ من البنغالية' then
+    raise exception 'FAIL: أفسد الضمُّ العنوانَ القائم';
+  end if;
+  if (select count(*) from public.arch_versions v
+        join public.arch_sermons m on m.id = v.sermon_id
+       where m.h_year = 1447 and m.mosque = 'makkah') <> 2 then
+    raise exception 'FAIL: لم تجتمع اللغتان في خطبةٍ واحدة';
+  end if;
+  perform public.delete_arch_sermon((select id from public.arch_sermons
+    where h_year = 1447 and title = 'عنوانٌ من البنغالية'));
+  raise notice 'PASS: الرفعُ الجماعي: التاريخُ لازمٌ، والعنوانُ يُورَث من جمعتِه';
+end $$;

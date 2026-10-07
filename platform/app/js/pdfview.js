@@ -155,3 +155,57 @@ export async function pdfWordCount(file) {
   // ملفٌّ ممسوحٌ صورةً لا نصّ فيه: يُقال ذلك صريحًا ولا يُزعم عددٌ
   return { words, pages: doc.numPages, scanned: chars < doc.numPages * 20 };
 }
+
+// ---------------------------------------------------------------------
+// خلفيةٌ من ملف PDF تُرسَم بدقّة الطباعة (ملاحظة ٣٢٢)
+//   التصميمُ يُعدُّ في Illustrator ويُحفَظ PDF، فيُرسَم هنا صورةً
+//   بدقّةٍ عاليةٍ (٣٠٠ نقطة في البوصة) تُدمَج في الشهادة أو البطاقة،
+//   فتخرج في الطباعة بحدِّ دقّة الطابعة لا بدقّة الشاشة.
+// ---------------------------------------------------------------------
+const bgCache = new Map();
+
+export async function pdfPageImage(src, { page = 1, mmWide = 297, dpi = 300 } = {}) {
+  const key = `${typeof src === 'string' ? src : src.name}|${page}|${mmWide}|${dpi}`;
+  if (bgCache.has(key)) return bgCache.get(key);
+
+  const js = await pdfjs();
+  const data = typeof src === 'string'
+    ? await (await fetch(src)).arrayBuffer()
+    : await src.arrayBuffer();
+  const doc = await js.getDocument({ data, isEvalSupported: false }).promise;
+  const pg = await doc.getPage(Math.min(Math.max(1, page), doc.numPages));
+
+  const want = Math.round((mmWide / 25.4) * dpi);        // بكسل العرض المطلوب
+  const base = pg.getViewport({ scale: 1 });
+  const scale = Math.min(8, Math.max(0.5, want / base.width));
+  const vp = pg.getViewport({ scale });
+
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+  await pg.render({ canvasContext: ctx, viewport: vp }).promise;
+
+  const out = { url: cv.toDataURL('image/png'), w: cv.width, h: cv.height,
+                pages: doc.numPages };
+  bgCache.set(key, out);
+  return out;
+}
+
+// صورةُ خلفيةٍ عادية (PNG/JPG) تُقرأ كما هي
+export async function fileImage(src) {
+  if (typeof src === 'string') return { url: src };
+  return await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res({ url: r.result });
+    r.onerror = () => rej(new Error('تعذّرت قراءةُ الصورة'));
+    r.readAsDataURL(src);
+  });
+}
+
+// خلفيةٌ من أصلٍ محفوظ: PDF يُرسَم، وغيرُه يُؤخذ كما هو
+export async function bgImage(src, opts) {
+  const name = typeof src === 'string' ? src : (src?.name || '');
+  const isPdf = /\.pdf($|\?)/i.test(name) || src?.type === 'application/pdf';
+  return isPdf ? await pdfPageImage(src, opts) : await fileImage(src);
+}

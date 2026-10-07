@@ -134,7 +134,7 @@ export async function render(ctx) {
       const sum = claim.reduce((s, r) => s + Number(r.amount || 0), 0);
       const row = v => list.map((k, i) => (i === 0 ? v[0] : k === 'amount' ? v[1] : ''));
       body.push(row(['الإجمالي قبل الضريبة', money(sum)]));
-      body.push(row(['ضريبة القيمة المضافة ١٥٪', money(sum * 0.15)]));
+      body.push(row(['ضريبة القيمة المضافة 15٪', money(sum * 0.15)]));
       body.push(row(['الإجمالي المطالَب به', money(sum * 1.15)]));
     }
     return { head, body, cols };

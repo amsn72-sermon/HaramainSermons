@@ -66,7 +66,7 @@ export async function render(ctx) {
         .catch(() => photoBox.replaceChildren(h('div.photo-empty', 'تعذّر عرض الصورة')));
       photoBox.replaceChildren(img);
     } else {
-      photoBox.replaceChildren(h('div.photo-empty', h('b', '٤ × ٦'), h('span', 'لم تُرفع صورة بعد')));
+      photoBox.replaceChildren(h('div.photo-empty', h('b', '4 × 6'), h('span', 'لم تُرفع صورة بعد')));
     }
   };
   drawPhoto();
@@ -174,7 +174,7 @@ export async function render(ctx) {
   idUp.onclick = () => busy(idUp, async () => {
     const file = idFile.files[0];
     if (!file) return toast('اختر الملف أولًا.', 'bad');
-    if (file.size > 10 * 1024 * 1024) return toast('الحد الأقصى ١٠ ميغابايت.', 'bad');
+    if (file.size > 10 * 1024 * 1024) return toast('الحد الأقصى 10 ميغابايت.', 'bad');
     try {
       const ext = (file.type === 'application/pdf' ? 'pdf' : file.type.split('/')[1]) || 'jpg';
       const path = `${me.id}/iqama-${Date.now()}.${ext}`;
@@ -425,7 +425,7 @@ export async function render(ctx) {
         h('h3', 'الصورة الشخصية'),
         photoBox,
         docState(priv.photo_status, priv.photo_note, 'photo'),
-        h('label.field', 'رفع الصورة أو تغييرها', h('small', 'تُقصّ تلقائيًّا إلى مقاس ٤×٦'), picker),
+        h('label.field', 'رفع الصورة أو تغييرها', h('small', 'تُقصّ تلقائيًّا إلى مقاس 4×6'), picker),
         rules),
       fixed),
     completeCard,

@@ -15,7 +15,7 @@ export async function render(ctx) {
     const weight = h('input', { type: 'number', min: 0, value: 1, step: 0.5 });
     const err = h('p.err', { hidden: true }, 'اكتب اسم المرحلة');
     const v = await dialog({ title: 'إضافة مرحلة', body: h('div.stack', h('label.field', 'اسم المرحلة', name), h('label.field', 'موضعها', after),
-      h('label.field', 'تُسند إلى', role), h('label.field', 'نصيبها من المدة', h('small', 'وزن نسبي؛ الترجمة ٦ والمراجعات ٢'), weight), err),
+      h('label.field', 'تُسند إلى', role), h('label.field', 'نصيبها من المدة', h('small', 'وزن نسبي؛ الترجمة 6 والمراجعات 2'), weight), err),
       buttons: [{ label: 'إضافة', kind: 'primary', validate: () => { const ok = name.value.trim().length > 2; err.hidden = ok; return ok; },
         value: () => ({ name_ar: name.value.trim(), sort: Number(after.value) + 1, assignee_role: role.value, weight: Number(weight.value) || 0 }) },
         { label: 'إلغاء', value: null }] });

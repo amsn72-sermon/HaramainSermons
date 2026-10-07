@@ -241,7 +241,7 @@ export async function render(ctx) {
       if (!file) { attNote.textContent = ''; return; }
       att.name = file.name; att.size = file.size;
       if (file.size > 20 * 1024 * 1024) {
-        attNote.textContent = `«${file.name}» حجمه ${(file.size / (1024 * 1024)).toFixed(1)} ميغابايت — والحد ٢٠.`;
+        attNote.textContent = `«${file.name}» حجمه ${(file.size / (1024 * 1024)).toFixed(1)} ميغابايت — والحد 20.`;
         attNote.className = 'small bad';
         return;
       }
@@ -298,7 +298,7 @@ export async function render(ctx) {
         h('label.field', req('العنوان'), f.title),
         h('label.field', req('نص الرسالة'), f.body),
         h('label.field', 'مرفق PDF (اختياري)',
-          h('small', 'حتى ٢٠ ميغابايت — زيادةً على ما كتبتَه لا بديلًا عنه'), f.pdf, attNote),
+          h('small', 'حتى 20 ميغابايت — زيادةً على ما كتبتَه لا بديلًا عنه'), f.pdf, attNote),
         h('label.check', f.require_ack, 'يلزم توقيع العضو بالعلم'),
         h('label.check.top', f.blocking,
           h('span', h('b', 'تعميم ملزم: '),
@@ -317,7 +317,7 @@ export async function render(ctx) {
           }
           if (f.audience.value === 'selected' && !picked.size) return 'اختر عضوًا واحدًا على الأقل من قائمة الأعضاء المحددين.';
           if (att.size > 20 * 1024 * 1024) {
-            return `حجم المرفق ${(att.size / (1024 * 1024)).toFixed(1)} ميغابايت، والحد الأقصى ٢٠ ميغابايت.`;
+            return `حجم المرفق ${(att.size / (1024 * 1024)).toFixed(1)} ميغابايت، والحد الأقصى 20 ميغابايت.`;
           }
           if (att.reading) return 'ما زال المرفق قيد التهيئة — انتظر لحظة ثم أعد الضغط.';
           if (att.error) return `تعذّرت قراءة المرفق: ${att.error}. أعد اختيار الملف أو أرسل النص وحده.`;

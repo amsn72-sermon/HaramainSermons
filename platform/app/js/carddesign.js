@@ -338,7 +338,7 @@ export function staticCard(h, { layout, member, cfg, roleLabel, langsText, logoS
         h('img', { src: logoSrc, alt: '', style: { width: '100%', height: 'auto', display: 'block' } })));
     } else if (key === 'photo') {
       kids.push(h('div.cd-item.cd-photo', { style },
-        photoUrl ? h('img', { src: photoUrl, alt: '' }) : h('span.cd-photo-ph', '٤×٦')));
+        photoUrl ? h('img', { src: photoUrl, alt: '' }) : h('span.cd-photo-ph', '4×6')));
     } else if (key === 'qr') {
       // باركودُ التحقق: يُثبت البطاقةَ ولا يُفشي صاحبَها (ملاحظة ٣١٣)
       const src = qrDataUri(cardVerifyUrl(member.member_no, member.card_key),

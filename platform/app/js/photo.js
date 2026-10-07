@@ -56,7 +56,7 @@ export function canvasToBlob(canvas, quality = 0.88) {
 export async function preparePhoto(file) {
   if (!file) throw new Error('اختر صورة');
   if (!/^image\/(jpeg|png|webp)$/.test(file.type)) throw new Error('الصورة بصيغة JPG أو PNG أو WEBP');
-  if (file.size > PHOTO.maxBytes) throw new Error('حجم الصورة أكبر من ٨ ميغابايت');
+  if (file.size > PHOTO.maxBytes) throw new Error('حجم الصورة أكبر من 8 ميغابايت');
   const img = await loadImage(file);
   if (img.naturalWidth < PHOTO.minW || img.naturalHeight < PHOTO.minH) {
     throw new Error(`الصورة صغيرة (${img.naturalWidth}×${img.naturalHeight}) — الحد الأدنى ${PHOTO.minW}×${PHOTO.minH}`);
@@ -114,7 +114,7 @@ export async function prepareMark(file, maxPx = MARK.maxPx) {
   if (!/^image\/(png|jpeg|webp|svg\+xml)$/.test(file.type)) {
     throw new Error('الصورة بصيغة PNG أو JPG أو WEBP أو SVG');
   }
-  if (file.size > MARK.maxBytes) throw new Error('حجم الصورة أكبر من ٤ ميغابايت');
+  if (file.size > MARK.maxBytes) throw new Error('حجم الصورة أكبر من 4 ميغابايت');
   const img = await loadImage(file);
   const w = img.naturalWidth || 1, hgt = img.naturalHeight || 1;
   const k = Math.min(1, maxPx / Math.max(w, hgt));

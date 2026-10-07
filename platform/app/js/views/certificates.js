@@ -9,6 +9,8 @@ import { state, isManager, can } from '../store.js';
 import { printCertificate, certVerifyUrl, CERT_THEMES } from '../certdoc.js';
 import { prepareMark } from '../photo.js';
 
+const AR = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn');
+
 const KIND_LABEL = { course: 'دورة تدريبية', experience: 'خبرة' };
 const STATE = { draft: ['مسوّدة', 'warn'], issued: ['صادرة', 'ok'], revoked: ['ملغاة', 'bad'] };
 
@@ -18,13 +20,16 @@ export async function render() {
   let want = '';
 
   const addBtn = can('cert_draft')
-    ? h('button.btn.sm.primary', { type: 'button', onclick: () => edit(null) }, '＋ منحُ شهادة')
+    ? h('button.btn.sm.primary', { type: 'button', onclick: () => grantDialog() }, '＋ منحُ شهادة')
+    : null;
+  const oldBtn = can('cert_draft')
+    ? h('button.btn.sm.ghost', { type: 'button', onclick: () => edit(null) }, 'شهادةٌ ببيانات')
     : null;
 
   const page = h('div',
     h('div.page-head',
       h('div', h('p.eyebrow', 'الفريق'), h('h2', 'الشهادات')),
-      h('div.row', addBtn)),
+      h('div.row', addBtn, oldBtn)),
     h('p.lead', 'شهاداتُ الدورات التدريبية وشهاداتُ الخبرة. يُنشئها المنسق مسوّدةً، '
       + 'ويعتمدها مديرُ المشروع فتصدر برقمها وباركودِ تحقّقها.'),
     tabs, h('div.card.stack', list));
@@ -48,15 +53,21 @@ export async function render() {
           b.onclick = () => { want = k; drawTabs(); draw(); };
           return b;
         }),
-      // تصميمُ الشهادة شاشةٌ قائمةٌ بذاتها كشاشة بطاقات العمل (ملاحظة ٣١٢)
+      // قوالبُ الشهادات تبويبٌ مستقل (ملاحظة ٣٢٤)
       (isManager() || can('cert_design'))
-        ? h('a.tab', { href: '/app/cert-design', 'aria-selected': 'false' }, '🖌 تصميمُ الشهادة')
+        ? (() => {
+            const b = h('button.tab', { type: 'button',
+              'aria-selected': want === 'templates' ? 'true' : 'false' }, '🖌 قوالبُ الشهادات');
+            b.onclick = () => { want = 'templates'; drawTabs(); draw(); };
+            return b;
+          })()
         : null
     ].filter(Boolean));
   }
 
   async function draw() {
     fill(list, h('p.muted', 'يُحمَّل…'));
+    if (want === 'templates') return drawTemplates();
     let rows = [];
     try { rows = await db.rpc('certificates_list', { p_status: want || null }) || []; }
     catch (err) { fill(list, h('p.muted', err.message)); return; }
@@ -65,6 +76,119 @@ export async function render() {
       return;
     }
     fill(list, rows.map(card));
+  }
+
+  // -------------------------------------------------------------------
+  // قوالبُ الشهادات: بطاقةٌ لكلِّ قالب (ملاحظة ٣٢٤)
+  // -------------------------------------------------------------------
+  async function drawTemplates() {
+    let rows = [];
+    try { rows = await db.rpc('cert_templates_list', { p_active: null }) || []; }
+    catch (err) { fill(list, h('p.muted', err.message)); return; }
+
+    fill(list,
+      h('p.small.muted', 'كلُّ قالبٍ يحمل تصميمَه وبياناتِه الثابتة. '
+        + 'ويُمنَح به فلا يبقى إلا اسمُ صاحب الشهادة.'),
+      h('div.row',
+        h('a.btn.sm.primary', { href: '/app/cert-design' }, '＋ قالبٌ جديد')),
+      rows.length
+        ? h('div.stack', rows.map(t => h('div.card.stack.tpl-card',
+            h('div.row.between.wrap',
+              h('div',
+                h('b', t.name),
+                h('div.small.muted',
+                  `${t.kind === 'experience' ? 'شهادةُ خبرة' : 'شهادةُ دورة'}`
+                  + ` · صدر عنه ${AR(t.issued || 0)}`
+                  + (t.is_active ? '' : ' · معطَّل'))),
+              h('div.row', { style: { gap: '6px' } },
+                h('a.btn.xs', { href: `/app/cert-design?tpl=${t.id}` }, 'حرِّرْه'),
+                can('cert_draft')
+                  ? h('button.btn.xs.primary', { type: 'button',
+                      onclick: () => grantDialog(t.id) }, 'امنحْ به')
+                  : null,
+                isManager()
+                  ? h('button.btn.xs.ghost', { type: 'button',
+                      onclick: () => removeTemplate(t) }, t.issued ? 'عطِّلْه' : 'احذفْه')
+                  : null)))))
+        : emptyState('لا قوالبَ بعد', 'أنشئْ قالبًا ليُمنَح به.'));
+  }
+
+  async function removeTemplate(t) {
+    const issued = Number(t.issued || 0);
+    if (!await confirm(issued ? 'تعطيلُ قالب' : 'حذفُ قالب',
+      issued ? `صدر عن «${t.name}» ${AR(issued)} شهادة، فلا يُحذف — ويُعطَّل فلا يُمنَح به بعدُ.`
+             : `يُحذف قالبُ «${t.name}».`,
+      issued ? 'عطِّلْه' : 'احذفْه', 'danger')) return;
+    try {
+      await db.rpc('delete_cert_template', { p_id: t.id });
+      toast(issued ? 'عُطِّل القالب.' : 'حُذف القالب.', 'ok');
+      draw();
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  // -------------------------------------------------------------------
+  // المنحُ بالقالب: الأسماءُ أوّلًا ثم القالبُ ثم الإصدار (ملاحظة ٣٢٤)
+  // -------------------------------------------------------------------
+  async function grantDialog(tplId) {
+    let tpls = [];
+    try { tpls = await db.rpc('cert_templates_list', { p_active: true }) || []; }
+    catch { tpls = []; }
+    if (!tpls.length) {
+      toast('لا قوالبَ بعد — أنشئْ قالبًا من «قوالبُ الشهادات».', 'warn');
+      return;
+    }
+
+    const q = h('input', { type: 'search', placeholder: 'ابحثْ بالاسم',
+      'aria-label': 'البحث عن عضو' });
+    const box = h('div.pick-list');
+    const chosen = new Set();
+    const paintList = () => {
+      const k = q.value.trim();
+      fill(box, members
+        .filter(m => !k || (m.full_name || '').includes(k))
+        .slice(0, 400)
+        .map(m => {
+          const on = h('input', { type: 'checkbox', checked: chosen.has(m.id),
+            'aria-label': m.full_name });
+          on.onchange = () => { on.checked ? chosen.add(m.id) : chosen.delete(m.id); count(); };
+          return h('label.check.pick-row', on, h('span', m.full_name));
+        }));
+    };
+    const tally = h('span.small.muted');
+    const count = () => { tally.textContent = `اختير ${AR(chosen.size)}`; };
+    q.oninput = paintList; paintList(); count();
+
+    const sel = h('select', { 'aria-label': 'القالب' },
+      tpls.map(t => h('option', { value: t.id, selected: tplId === t.id }, t.name)));
+    const issueNow = h('input', { type: 'checkbox', checked: can('cert_issue') || isManager(),
+      'aria-label': 'إصدار مباشر' });
+
+    let done = null;
+    const res = await dialog({
+      title: 'منحُ شهادة',
+      body: h('div.stack',
+        h('p.small.muted', 'اختَرِ الأسماءَ ثم القالب. وبياناتُ الشهادة تُؤخذ من القالب '
+          + 'وبياناتِ العضو، فلا يُملأ شيءٌ هنا.'),
+        h('label.field', 'الأسماء', q),
+        box, tally,
+        h('label.field', 'القالب', sel),
+        h('label.check', issueNow, h('span', 'أصدِرْها فورًا برقمها وباركودِها'))),
+      buttons: [{ label: 'امنحْ', kind: 'primary',
+        validate: async () => {
+          if (!chosen.size) return 'اختَرْ عضوًا واحدًا على الأقل';
+          try {
+            done = await db.rpc('grant_certificates',
+              { p_template: sel.value, p_members: [...chosen], p_issue: issueNow.checked });
+          } catch (e) { return e.message; }
+          return true;
+        },
+        value: () => done }, { label: 'إلغاء', value: null }]
+    });
+    if (!res) return;
+    toast(`مُنحت ${AR(res.created || 0)} شهادة`
+      + (res.issued ? ` وصدرت ${AR(res.issued)}` : ' مسوّدةً'), 'ok');
+    want = res.issued ? 'issued' : 'draft';
+    drawTabs(); draw();
   }
 
   function card(c) {
@@ -125,6 +249,9 @@ export async function render() {
       const rows = await db.select('certificates', { select: '*', id: `eq.${c.id}` });
       if (rows && rows[0]) full = rows[0];
     } catch { /* تُرسَم بما في اليد */ }
+    // حقولُ صاحبها تُملأ في نصوص القالب الحرّة (ملاحظتا ٣٢٣ و٣٢٤)
+    try { full = { ...full, fields: await db.rpc('cert_fields', { p_cert: c.id }) || {} }; }
+    catch { /* تُرسَم بلا حقول */ }
     if (!printCertificate(full, c.member_name || nameOf(full.member_id))) {
       toast('امنع حجبَ النوافذ لتُفتح الشهادة.', 'bad');
     }
@@ -371,6 +498,8 @@ export async function mine() {
         const r = await db.select('certificates', { select: '*', id: `eq.${c.id}` });
         if (r && r[0]) full = r[0];
       } catch { /* تُرسَم بما في اليد */ }
+      try { full = { ...full, fields: await db.rpc('cert_fields', { p_cert: c.id }) || {} }; }
+      catch { /* تُرسَم بلا حقول */ }
       if (!printCertificate(full, state.profile?.full_name)) {
         toast('امنع حجبَ النوافذ لتُفتح الشهادة.', 'bad');
       }

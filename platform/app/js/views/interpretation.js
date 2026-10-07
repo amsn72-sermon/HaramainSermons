@@ -87,7 +87,7 @@ export function entryDialog({ members, byMember }, row = null) {
       need(f.lang, !f.lang.value, 'اختر اللغة'),
       need(f.date, !f.date.value, 'حدّد تاريخ الفعالية'),
       need(f.hours, !(Number(f.hours.value) > 0), 'اكتب عدد الساعات'),
-      need(f.hours, Number(f.hours.value) > 24, 'الساعات لا تتجاوز ٢٤ في اليوم'),
+      need(f.hours, Number(f.hours.value) > 24, 'الساعات لا تتجاوز 24 في اليوم'),
       need(f.title, !f.title.value.trim(), 'اكتب عنوان الفعالية'),
       need(f.venueNote, f.venue.value === 'other' && !f.venueNote.value.trim(), 'اكتب اسم المكان')
     ].filter(Boolean);

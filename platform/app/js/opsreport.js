@@ -132,8 +132,8 @@ export async function opsSection() {
       title: `الغياب الجماعي — ${r.name}`,
       body: h('div.stack',
         h('p.small.muted', 'نصُّ العقد: إذا تجاوز الغيابُ الجماعي في يومٍ واحد أو فترةٍ '
-          + 'تشغيلية نسبةَ ٤٥٪ من إجمالي العناصر المطلوب تواجدها، حُسم كاملُ القيمة '
-          + 'اليومية لتكلفة التشغيل لذلك اليوم، وزيدت غرامةٌ يومية ٦٠٪ من القيمة اليومية '
+          + 'تشغيلية نسبةَ 45٪ من إجمالي العناصر المطلوب تواجدها، حُسم كاملُ القيمة '
+          + 'اليومية لتكلفة التشغيل لذلك اليوم، وزيدت غرامةٌ يومية 60٪ من القيمة اليومية '
           + 'للفرد الواحد على عدد المتغيبين ضمن النسبة المتجاوزة.'),
         h('p.small.muted', 'والمطلوبُ تواجدُهم من الورديات المجدولة نفسها، '
           + 'ومن غُطّي ببديلٍ معتمد لا يُعدّ متغيبًا. وإذا تجاوز اليومُ كلُّه '
@@ -141,7 +141,7 @@ export async function opsSection() {
         rows.length
           ? h('div.table-wrap', h('table.responsive',
               h('thead', h('tr', ['التاريخ', 'الفترة', 'المطلوب', 'المتغيّب', 'النسبة',
-                'المسموح', 'الزائد', 'القيمة اليومية', 'غرامة ٦٠٪', 'المجموع']
+                'المسموح', 'الزائد', 'القيمة اليومية', 'غرامة 60٪', 'المجموع']
                 .map(t => h('th', t)))),
               h('tbody', rows.map(c => h('tr',
                 h('td', { 'data-label': 'التاريخ' }, fmtDate(c.on_date)),
@@ -153,7 +153,7 @@ export async function opsSection() {
                 h('td', { 'data-label': 'المسموح', dir: 'ltr' }, n0(c.allowed)),
                 h('td', { 'data-label': 'الزائد', dir: 'ltr' }, h('b', n0(c.excess))),
                 h('td', { 'data-label': 'القيمة اليومية', dir: 'ltr' }, n2(c.day_cost)),
-                h('td', { 'data-label': 'غرامة ٦٠٪', dir: 'ltr' }, n2(c.surcharge)),
+                h('td', { 'data-label': 'غرامة 60٪', dir: 'ltr' }, n2(c.surcharge)),
                 h('td', { 'data-label': 'المجموع', dir: 'ltr' },
                   h('b.bad', n2(c.total)))))),
               h('tfoot', h('tr.total-row',
@@ -178,11 +178,11 @@ export async function opsSection() {
           + 'بحدٍّ أقصى مئة نقطة، ثم يُؤخذ متوسطُ الأفراد فتُعرف نسبةُ المستخلص. '
           + 'وهذا ما يصل من مشرفي الهيئة، والمنصة تسجّله وتحتسب المتوسط ولا تُقيّم.'),
         h('p.small.warn', 'وقاعدةُ الفرد غيرُ قاعدة الفريق: من نزلت درجتُه عن السبعين '
-          + 'وُجّه إليه إنذارٌ خطي وحُسم ١٠٪ من إجمالي مستحقاته الشهرية، '
+          + 'وُجّه إليه إنذارٌ خطي وحُسم 10٪ من إجمالي مستحقاته الشهرية، '
           + 'ولا يُحمَّل ذلك على بند الفريق.'),
         rows.length
           ? h('div.table-wrap', h('table.responsive',
-              h('thead', h('tr', ['العضو', 'الأسابيع المسجَّلة', 'الدرجة من ١٠٠', 'ما يلزم']
+              h('thead', h('tr', ['العضو', 'الأسابيع المسجَّلة', 'الدرجة من 100', 'ما يلزم']
                 .map(t => h('th', t)))),
               h('tbody', rows.map(m => h('tr',
                 h('td', { 'data-label': 'العضو' }, m.name || '—'),
@@ -191,7 +191,7 @@ export async function opsSection() {
                     ? h('span.warn', { title: 'أقلُّ من أربعة أسابيع: تُراجع '
                         + 'قبل الاحتساب فالمجموع ينقص بنقصانها' }, n0(m.weeks))
                     : n0(m.weeks)),
-                h('td', { 'data-label': 'الدرجة من ١٠٠', dir: 'ltr' },
+                h('td', { 'data-label': 'الدرجة من 100', dir: 'ltr' },
                   h('b', { class: Number(m.score) < 70 ? 'bad' : 'ok' }, n0(m.score))),
                 h('td', { 'data-label': 'ما يلزم' },
                   m.warn
@@ -252,7 +252,7 @@ export async function opsSection() {
               + `فلم يُحسم، و${n0(r.short_days)} لم يُغطَّ.`)
           : null,
         r.eval_warn
-          ? h('p.small.bad', 'متوسط التقييم أقلُّ من ٧٠: نسبةُ المستخلص ٧٠٪ '
+          ? h('p.small.bad', 'متوسط التقييم أقلُّ من 70: نسبةُ المستخلص 70٪ '
               + 'مع توجيه إنذارٍ خطي، كما نصّ العقد.') : null),
       buttons: [
         { label: 'حفظ', kind: 'primary', value: () => ({ save: true }) },
@@ -352,7 +352,7 @@ export async function opsSection() {
             : h('button.btn.xs', { type: 'button',
                 class: r.eval_pct < 100 ? 'bad' : '',
                 'aria-label': 'درجات الأفراد',
-                title: `متوسط التقييم ${r.eval_avg} من ١٠٠ · ${r.eval_n} أفراد`
+                title: `متوسط التقييم ${r.eval_avg} من 100 · ${r.eval_n} أفراد`
                   + ' — اضغط لدرجات الأفراد',
                 onclick: () => membersDialog(r) }, `${r.eval_pct}٪`),
           r.eval_warn ? h('span.badge.bad', { title: 'إنذارٌ خطي كما نصّ العقد' }, 'إنذار') : null,
@@ -380,7 +380,7 @@ export async function opsSection() {
         h('p.small.muted', { style: { margin: 0 } },
           'بنود هذا التقرير من كراسة المنافسة: فريق الإرشاد المكاني والديني بموقعيه ومواسمه. '
           + 'والحسم بثلاثةٍ كما نصّ العقد: غيابُ الفرد الذي لم يُغطَّ ببديلٍ معتمد، '
-          + 'والغيابُ الجماعي إذا تجاوز ٤٥٪، ونسبةُ المستخلص من متوسط التقييم.'),
+          + 'والغيابُ الجماعي إذا تجاوز 45٪، ونسبةُ المستخلص من متوسط التقييم.'),
         addBtn),
       table,
       shortWeeks
@@ -394,10 +394,10 @@ export async function opsSection() {
         line('حسم الغياب الجماعي', coll, 'bad'),
         line('حسم التقييم', evalCut, 'bad'),
         line('الإجمالي بعد الحسميات', afterDed),
-        line('ضريبة القيمة المضافة ١٥٪', vat),
+        line('ضريبة القيمة المضافة 15٪', vat),
         line('الإجمالي شامل الضريبة', afterDed + vat, 'grand'),
-        h('p.small.muted', 'ونسبة المستخلص من جدول العقد: من ٩٠ إلى ١٠٠ ← ١٠٠٪، '
-          + 'ومن ٨٠ إلى ٨٩ ← ٩٠٪، ومن ٧٠ إلى ٧٩ ← ٨٠٪، وأقلُّ من ٧٠ ← ٧٠٪ مع توجيه إنذار. '
+        h('p.small.muted', 'ونسبة المستخلص من جدول العقد: من 90 إلى 100 ← 100٪، '
+          + 'ومن 80 إلى 89 ← 90٪، ومن 70 إلى 79 ← 80٪، وأقلُّ من 70 ← 70٪ مع توجيه إنذار. '
           + 'والتكلفة اليومية قيمةُ الشهر على عدد الأيام التشغيلية وعدد أفراد الفريق.')),
       );
     lastSheet = () => exportOps(rows, total, absent, coll, evalCut, vat);
@@ -431,7 +431,7 @@ export async function opsSection() {
     };
     out.push(pad('الإجمالي', [9, f2(total)], [13, f2(absent)], [15, f2(coll)],
       [18, f2(evalCut)], [19, f2(afterDed)]));
-    out.push(pad('ضريبة القيمة المضافة ١٥٪', [19, f2(vat)]));
+    out.push(pad('ضريبة القيمة المضافة 15٪', [19, f2(vat)]));
     out.push(pad('الإجمالي شامل الضريبة', [19, f2(afterDed + vat)]));
     const scope = citySel.value ? OPS_MOSQUE[citySel.value] : 'الحرمان معًا';
     const label = `التكاليف التشغيلية — ${month} — ${scope}`;

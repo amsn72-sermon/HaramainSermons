@@ -78,9 +78,9 @@ export function videoPlayer({ videoId, title, subtitle }) {
   const playBtn = iconBtn('play', 'تشغيل', 'Play', playPause, 'main');
   const bar = h('div.vp-bar',
     iconBtn('restart', 'من البداية', 'Restart', () => { stopOthers(wrap); if (!iframe) return mount(true); send('seekTo', [0, true]); }),
-    iconBtn('back15', 'رجوع ١٥ ثانية', '−15s', () => jump(-15)),
+    iconBtn('back15', 'رجوع 15 ثانية', '−15s', () => jump(-15)),
     playBtn,
-    iconBtn('fwd15', 'تقديم ١٥ ثانية', '+15s', () => jump(15)),
+    iconBtn('fwd15', 'تقديم 15 ثانية', '+15s', () => jump(15)),
     iconBtn('full', 'ملء الشاشة', 'Fullscreen', () => {
       const el = wrap;
       if (document.fullscreenElement) document.exitFullscreen?.();

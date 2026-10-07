@@ -54,7 +54,7 @@ export async function render(ctx) {
       state.stages.map(s => h('option', { value: 'stage:' + s.key }, s.name_ar)),
       h('option', { value: 'completed' }, 'مكتملة'),
       h('option', { value: 'late_now' }, 'متأخرة الآن'),
-      h('option', { value: 'due_soon' }, 'تستحق خلال ٢٤ ساعة'),
+      h('option', { value: 'due_soon' }, 'تستحق خلال 24 ساعة'),
       h('option', { value: 'had_late' }, 'سُجّل فيها تأخير'))
   };
   const out = h('div');
@@ -146,7 +146,7 @@ export async function render(ctx) {
         kpi('⏳', 'بانتظار الاستلام', list.filter(r => r.t.status === 'awaiting_receipt').length, 'لم يقبلها المترجم بعد', 'warn', 'awaiting_receipt'),
         kpi('✓', 'بانتظار المنسق', list.filter(r => r.cur?.stage_key === 'coordinator_receipt').length, 'للقبول', '', 'stage:coordinator_receipt'),
         kpi('⏱', 'متأخرة الآن', list.filter(r => isLateNow(r.t)).length, 'تجاوزت موعد مرحلتها الحالية', 'bad', 'late_now'),
-        kpi('◔', 'تستحق خلال ٢٤ ساعة', soon.length, 'اقترب موعد تسليمها', 'warn', 'due_soon'),
+        kpi('◔', 'تستحق خلال 24 ساعة', soon.length, 'اقترب موعد تسليمها', 'warn', 'due_soon'),
         kpi('⟲', 'سُجّل فيها تأخير', list.filter(r => hadLateness(r.t)).length, 'ولو اكتملت لاحقًا', 'warn', 'had_late'),
         kpi('◉', 'الإنجاز الكلي', (totalStages ? Math.round(doneStages / totalStages * 100) : 0) + '٪', `${doneStages} من ${totalStages} مرحلة`, 'ok')),
 
@@ -403,7 +403,7 @@ export async function render(ctx) {
       h('label.field', 'اللغة', filters.lang), h('label.field', 'الحالة', filters.status)));
   const FOCUS_LABEL = {
     awaiting_receipt: 'بانتظار الاستلام', completed: 'مكتملة', late_now: 'متأخرة الآن',
-    due_soon: 'تستحق خلال ٢٤ ساعة', had_late: 'سُجّل فيها تأخير'
+    due_soon: 'تستحق خلال 24 ساعة', had_late: 'سُجّل فيها تأخير'
   };
   const focusLabel = v => (v.startsWith('stage:') ? stageName(v.slice(6)) : FOCUS_LABEL[v] || '');
 

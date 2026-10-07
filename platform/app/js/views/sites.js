@@ -148,7 +148,7 @@ async function periodDialog(row = null) {
   const res = await dialog({
     title: row ? `تحرير «${row.name}»` : 'فترة دوام جديدة',
     body: h('div.stack',
-      h('p.small.muted', 'الفترةُ التي تتجاوز منتصف الليل تُكتب كما هي: ٢٣:٠٠ إلى ٠٧:٠٠.'),
+      h('p.small.muted', 'الفترةُ التي تتجاوز منتصف الليل تُكتب كما هي: 23:00 إلى 07:00.'),
       h('div.grid-2',
         h('label.field', 'اسم الفترة', name),
         h('label.field', 'الترتيب', sort),

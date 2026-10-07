@@ -85,7 +85,7 @@ export async function render(ctx) {
     h('label.field', req('الخطيب'), f.khateeb_id));
   // الخطب والدروس تتبع مسجدًا؛ الكتب والمطويات والإعلانات والتوجيهات عامة (ملاحظة ٦٩)
   const mosqueWrap = h('label.field', req('مكان الخطبة / الموقع'), f.mosque);
-  const pdfWrap = h('label.field', req('ملف الأصل العربي (PDF)'), h('small', 'حتى ٢٠ ميغابايت'), f.pdf);
+  const pdfWrap = h('label.field', req('ملف الأصل العربي (PDF)'), h('small', 'حتى 20 ميغابايت'), f.pdf);
 
   // كلمات الأصل العربي: عليها يُحتسب العمل في العقد، تُحصى آليًّا ويصحّحها
   // المنسق إن أخطأت الآلة (ملاحظة ١٨٨)
@@ -142,7 +142,7 @@ export async function render(ctx) {
   const audioPrev = h('div.stack.src-audio-prev');
   const audioWrap = h('div.field',
     h('label.field', req('المقطع الصوتي العربي'),
-      h('small', `الصيغ المعتمدة ${AUDIO_EXTS.map(x => x.toUpperCase()).join(' أو ')} — حتى ٢٠٠ ميغابايت`), f.audio),
+      h('small', `الصيغ المعتمدة ${AUDIO_EXTS.map(x => x.toUpperCase()).join(' أو ')} — حتى 200 ميغابايت`), f.audio),
     audioPrev,
     h('p.small.muted', 'يسمعه المترجم في مكان الأصل، ويكتب ترجمته على الكليشة أمامه.'));
   f.audio.onchange = async () => {
@@ -278,7 +278,7 @@ export async function render(ctx) {
     h('div.grid-2',
       h('label.field', 'نوع المهمة', f.urgency),
       h('label.field', 'عدد الصفحات',
-        h('small', 'الصفحةُ نحو ٢٥٠ كلمة، فإن تُركت اقتُرحت من الكلمات'), f.pages)),
+        h('small', 'الصفحةُ نحو 250 كلمة، فإن تُركت اقتُرحت من الكلمات'), f.pages)),
     dueNote);
 
   let deadlines = [];
@@ -467,7 +467,7 @@ export async function render(ctx) {
       h('label.field', 'اللغات', langSearch), langBulk, langPills,
       assignBox)
   ];
-  const titles = ['١. بيانات المادة', '٢. الوقت والأهمية', '٣. اللغات والإسناد'];
+  const titles = ['1. بيانات المادة', '2. الوقت والأهمية', '3. اللغات والإسناد'];
   let step = 0;
   const stepNav = h('div.row');
   const body = h('div');
@@ -501,20 +501,20 @@ export async function render(ctx) {
         const file = f.pdf.files[0];
         if (!file) need(f.pdf, true, 'أرفق ملف PDF العربي — لا تُرسَل مادة بلا أصل', e);
         else if (file.type !== 'application/pdf') need(f.pdf, true, 'الملف ليس PDF', e);
-        else if (file.size > 20 * 1024 * 1024) need(f.pdf, true, 'حجم الملف أكبر من ٢٠ ميغابايت', e);
+        else if (file.size > 20 * 1024 * 1024) need(f.pdf, true, 'حجم الملف أكبر من 20 ميغابايت', e);
       }
       if (f.source_mode.value === 'audio') {
         const file = f.audio.files[0];
         if (!file) need(f.audio, true, 'ارفع المقطع الصوتي العربي — لا تُرسَل مادة بلا أصل', e);
         else if (!isAllowedAudio(file)) need(f.audio, true, `صيغة المقطع غير معتمدة — ${AUDIO_EXTS.map(x => x.toUpperCase()).join(' أو ')} فقط`, e);
-        else if (file.size > 200 * 1024 * 1024) need(f.audio, true, 'حجم المقطع أكبر من ٢٠٠ ميغابايت', e);
+        else if (file.size > 200 * 1024 * 1024) need(f.audio, true, 'حجم المقطع أكبر من 200 ميغابايت', e);
       }
     }
     if (i === 1) {
       const sum = slaStages.reduce((a, s) => a + Number(stageInputs[s.key].value || 0), 0);
       if (sum <= 0) e.push('حدد مدة المراحل');
       if (sum > totalMinutes()) e.push('مجموع مدد المراحل يتجاوز المدة الكلية');
-      if (Number(f.receipt.value) < 5) e.push('مهلة الاستلام ٥ دقائق على الأقل');
+      if (Number(f.receipt.value) < 5) e.push('مهلة الاستلام 5 دقائق على الأقل');
     }
     if (i === 2) {
       if (!picked.size) e.push('اختر لغة واحدة على الأقل');

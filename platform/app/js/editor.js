@@ -155,7 +155,7 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
     btn('1.', 'قائمة مرقمة', () => cmd('insertOrderedList')),
     btn('⇲', 'زيادة المسافة البادئة', () => cmd('indent')),
     btn('⇱', 'إنقاص المسافة البادئة', () => cmd('outdent')),
-    sel('إدراج جدول', [['', 'جدول'], ['2x2', '٢ × ٢'], ['3x2', '٣ صفوف × ٢'], ['3x3', '٣ × ٣'], ['4x3', '٤ صفوف × ٣'], ['5x4', '٥ صفوف × ٤']], v => v && insertTable(v)),
+    sel('إدراج جدول', [['', 'جدول'], ['2x2', '2 × 2'], ['3x2', '3 صفوف × 2'], ['3x3', '3 × 3'], ['4x3', '4 صفوف × 3'], ['5x4', '5 صفوف × 4']], v => v && insertTable(v)),
     btn('―', 'خط فاصل', () => cmd('insertHorizontalRule')),
     sep(),
     btn('↶', 'تراجع (Ctrl+Z)', () => cmd('undo')),

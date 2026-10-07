@@ -19,7 +19,7 @@ export async function render(ctx) {
       h('label.field', 'الرمز', h('small', 'رمز ISO 639 بأحرف لاتينية صغيرة'), code), h('label.field', 'الاسم بالعربية', name),
       h('label.field', 'الاسم بلغته', native), h('label.field', 'اتجاه الكتابة', dir), err),
       buttons: [{ label: 'إضافة', kind: 'primary', validate: () => {
-        const e = !/^[a-z]{2,8}$/.test(code.value.trim()) ? 'الرمز أحرف لاتينية صغيرة (٢–٨)' : name.value.trim().length < 2 ? 'اكتب الاسم بالعربية' : !native.value.trim() ? 'اكتب الاسم بلغته' : '';
+        const e = !/^[a-z]{2,8}$/.test(code.value.trim()) ? 'الرمز أحرف لاتينية صغيرة (2–8)' : name.value.trim().length < 2 ? 'اكتب الاسم بالعربية' : !native.value.trim() ? 'اكتب الاسم بلغته' : '';
         err.textContent = e; err.hidden = !e; return !e;
       }, value: () => ({ code: code.value.trim(), name_ar: name.value.trim(), native_name: native.value.trim(), dir: dir.value, sort: 100 }) }, { label: 'إلغاء', value: null }] });
     if (!v) return;

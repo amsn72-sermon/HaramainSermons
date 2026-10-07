@@ -129,10 +129,10 @@ export async function register(ctx) {
     else if (f.id_type.value === 'passport') {
       if (!/^[A-Z0-9]{5,15}$/.test(nid)) e.push('رقم الجواز من خمسة إلى خمسة عشر حرفًا ورقمًا');
     } else if (!/^[12][0-9]{9}$/.test(nid)) {
-      e.push('رقم الهوية أو الإقامة: ١٠ أرقام تبدأ بـ١ (هوية) أو ٢ (إقامة)');
+      e.push('رقم الهوية أو الإقامة: 10 أرقام تبدأ بـ1 (هوية) أو 2 (إقامة)');
     }
     if (f.applied_as.value === 'field' && !f.city.value) e.push('حدّد مدينتك: مكة المكرمة أو المدينة المنورة');
-    if (f.password.value.length < 8) e.push('كلمة المرور ٨ أحرف على الأقل');
+    if (f.password.value.length < 8) e.push('كلمة المرور 8 أحرف على الأقل');
     if (f.password.value !== f.confirm.value) e.push('كلمتا المرور غير متطابقتين');
     if (!f.consent.checked) e.push('يلزم الإقرار بصحة المعلومات');
     return e;
@@ -177,7 +177,7 @@ export async function register(ctx) {
       h('label.field', req('رقم الهوية أو الإقامة'),
         h('small', 'بيان أساسي لا يُعدَّل لاحقًا إلا من المنسق'), f.national_id)),
     h('div.grid-2',
-      h('label.field', req('كلمة المرور'), h('small', '٨ أحرف على الأقل'), f.password),
+      h('label.field', req('كلمة المرور'), h('small', '8 أحرف على الأقل'), f.password),
       h('label.field', req('تأكيد كلمة المرور'), f.confirm)),
     h('p.small.muted', 'وبعد التفعيل تستكمل: الجنسية ومكان الإقامة واللغات والصورة الشخصية '
       + 'وصورة الهوية — ثم يدققها المنسق ويقبلها.'),
@@ -200,7 +200,7 @@ export async function reset(ctx) {
   return frame(h('div.card.auth-card', h('form.stack', { onsubmit: e => {
     e.preventDefault();
     const list = [];
-    if (pw.value.length < 8) list.push('كلمة المرور ٨ أحرف على الأقل');
+    if (pw.value.length < 8) list.push('كلمة المرور 8 أحرف على الأقل');
     if (pw.value !== pw2.value) list.push('كلمتا المرور غير متطابقتين');
     showErrors(errs, list);
     if (list.length) return;
@@ -221,7 +221,7 @@ export async function pending() {
   const upload = h('button.btn', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
     const f = file.files[0];
     if (!f) return toast('اختر الصورة أولًا.', 'bad');
-    if (f.size > 5 * 1024 * 1024) return toast('الحد الأقصى ٥ ميغابايت.', 'bad');
+    if (f.size > 5 * 1024 * 1024) return toast('الحد الأقصى 5 ميغابايت.', 'bad');
     if (!/^image\/(jpeg|png|webp)$/.test(f.type)) return toast('الصيغ المقبولة: JPG أو PNG أو WebP.', 'bad');
     try {
       const path = `${p.id}/iqama-${Date.now()}.${f.type.split('/')[1]}`;

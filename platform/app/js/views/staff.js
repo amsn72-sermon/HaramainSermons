@@ -9,6 +9,7 @@ import { adminList as bankAdmin } from './bank.js';
 
 export const DOC_LABEL = { photo: 'الصورة الشخصية', iqama: 'صورة الهوية أو الإقامة' };
 export const DOC_STATE = {
+  none: ['لم تُرفع', 'bad'],
   pending: ['تحت المراجعة', 'warn'],
   approved: ['معتمَدة', 'ok'],
   rejected: ['أُعيدت للعضو', 'bad']
@@ -51,23 +52,25 @@ export async function render(ctx, group = 'translators') {
 
   const ids = new Set(team.members.map(m => m.id));
   const panel = h('div.staff-panel');
+  // ترتيبٌ واحدٌ في الشاشات الثلاث: الأعضاءُ ثم الهويةُ ثم البنوكُ ثم التدقيق
+  // — فالتدقيقُ آخرُها لأنه الجامعُ لكلِّ الحالات (ملاحظة ٣١٨)
   const TABS = [
     ['team', scr.tab, team.pendingCount],
-    // الهويةُ تبويبٌ مستقلٌّ تُطابَق فيه بياناتُها بصورتها (ملاحظة ٣٠٧)
     ['ids',  'الهوية الشخصية', 0],
-    ['docs', 'تدقيق المستندات', 0],
-    ['bank', 'الحسابات البنكية', 0]
+    ['bank', 'الحسابات البنكية', 0],
+    ['docs', 'تدقيق المستندات', 0]
   ];
+  const T = key => TABS.find(t => t[0] === key);
   // لكل قائمة عدّادها: ما ينتظر تدقيقه فيها هي (ملاحظة ١٢٠)
   const mineCount = byGroup.find(r => r.grp === group);
   if (mineCount) {
     // والبيانات المرفوعة للتدقيق تُعدّ مع المستندات (ملاحظة ١٧٩)
-    TABS[2][2] = Number(mineCount.photos || 0) + Number(mineCount.iqamas || 0);
-    TABS[0][2] = Number(TABS[0][2] || 0) + Number(mineCount.data || 0);
-    TABS[3][2] = Number(mineCount.banks || 0);
+    T('docs')[2] = Number(mineCount.photos || 0) + Number(mineCount.iqamas || 0);
+    T('team')[2] = Number(T('team')[2] || 0) + Number(mineCount.data || 0);
+    T('bank')[2] = Number(mineCount.banks || 0);
   } else if (group === 'translators') {
-    TABS[2][2] = Number(counts.photos || 0) + Number(counts.iqamas || 0);
-    TABS[3][2] = Number(counts.banks || 0);
+    T('docs')[2] = Number(counts.photos || 0) + Number(counts.iqamas || 0);
+    T('bank')[2] = Number(counts.banks || 0);
   }
 
   let current = TABS.some(t => t[0] === want) ? want : 'team';
@@ -213,19 +216,23 @@ async function identitySection(group = 'translators') {
   const filter = h('select', { 'aria-label': 'التصفية' },
     h('option', { value: 'pending' }, 'ما ينتظر التدقيق'),
     h('option', { value: 'expiring' }, 'ما انتهى أو قارب'),
+    h('option', { value: 'none' }, 'من لم يرفعْ هويته'),
     h('option', { value: 'all', selected: true }, 'الكل'));
 
-  let rows = [];
+  let rows = [], denied = false;
   const load = async () => {
-    try { rows = await db.rpc('identity_sheet', { p_group: group }) || []; }
-    catch { rows = []; }
+    try { rows = await db.rpc('identity_sheet', { p_group: group }) || []; denied = false; }
+    catch (e) { rows = []; denied = /42501|إذن|صلاحي/.test(e.message || ''); }
   };
   await load();
 
+  // الخلوُّ غيرُ المنع: لكلٍّ عبارتُه (ملاحظة ٣١٧)
   if (!rows.length) {
     return h('div.card.stack',
       h('h3', 'الهوية الشخصية'),
-      h('p.muted', 'هذا خارجَ نطاقِ عملك الحالي.'));
+      h('p.muted', denied
+        ? 'هذا خارجَ نطاقِ عملك الحالي.'
+        : 'لا أحدَ في هذه الفئة بعد.'));
   }
 
   // البتُّ في الهوية: قبولٌ أو إعادةٌ بسببٍ مكتوب
@@ -338,7 +345,8 @@ async function identitySection(group = 'translators') {
       view.replaceChildren(h('div.id-shot.empty', h('span', 'لم تُرفع')));
     }
 
-    const st = r.iqama_status || 'pending';
+    // من لم يرفعْ هويتَه يظهر بحاله لا منتظرًا للتدقيق (ملاحظة ٣١٧)
+    const st = r.iqama_path ? (r.iqama_status || 'pending') : 'none';
     const [label, tone] = DOC_STATE[st] || DOC_STATE.pending;
 
     return h('div.card.stack.id-card', { class: st === 'pending' ? 'waiting' : '' },
@@ -378,13 +386,16 @@ async function identitySection(group = 'translators') {
 
   function draw() {
     const want = filter.value;
+    const stOf = r => (r.iqama_path ? (r.iqama_status || 'pending') : 'none');
     const list = rows.filter(r => want === 'all'
-      || (want === 'pending' && (r.iqama_status || 'pending') === 'pending')
+      || (want === 'pending' && stOf(r) === 'pending')
+      || (want === 'none' && stOf(r) === 'none')
       || (want === 'expiring' && r.id_expiry != null && Number(r.days_left) <= 90));
-    const pending = rows.filter(r => (r.iqama_status || 'pending') === 'pending').length;
+    const pending = rows.filter(r => stOf(r) === 'pending').length;
+    const none = rows.filter(r => stOf(r) === 'none').length;
     const expiring = rows.filter(r => r.id_expiry != null && Number(r.days_left) <= 90).length;
     const noDate = rows.filter(r => r.id_expiry == null).length;
-    summary.textContent = `${rows.length} هويةً · ينتظر التدقيق: ${pending}`
+    summary.textContent = `${rows.length} عضوًا · لم يرفعْ: ${none} · ينتظر التدقيق: ${pending}`
       + ` · انتهت أو قاربت: ${expiring} · بلا تاريخ: ${noDate}`;
     box.replaceChildren(list.length ? h('div.id-wrap', list.map(card))
       : h('p.muted', 'لا هوياتٍ في هذه التصفية.'));

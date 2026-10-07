@@ -366,7 +366,7 @@ export async function workspace(ctx) {
             [`الصيغ المعتمدة في العقد: ${AUDIO_EXTS.map(x => x.toUpperCase()).join(' أو ')} فقط.`,
              'حوِّل الملف إلى إحداهما، أو سجّل ببرنامج يخرجها — وفي «دليل التسجيل الصوتي» برامج مقترحة.']);
         }
-        if (f.size > 200 * 1024 * 1024) return fail('الملف أكبر من الحد', ['الحد الأقصى ٢٠٠ ميغابايت.']);
+        if (f.size > 200 * 1024 * 1024) return fail('الملف أكبر من الحد', ['الحد الأقصى 200 ميغابايت.']);
 
         let info = null;
         try { info = await audioInfo(f); } catch { info = null; }
@@ -489,7 +489,7 @@ export async function workspace(ctx) {
     const target = h('select', earlier.map(s => h('option', { value: s.stage_key }, `${stageName(s.stage_key)} — ${s.assignee?.full_name}`)));
     target.value = earlier[earlier.length - 1].stage_key;
     const reason = h('textarea', { rows: 4, placeholder: 'وضّح التعديلات المطلوبة (ومنها إعادة التسجيل الصوتي إن لزم)', required: true });
-    const err = h('p.err', { hidden: true }, 'اكتب سبب الإعادة (٣ أحرف على الأقل).');
+    const err = h('p.err', { hidden: true }, 'اكتب سبب الإعادة (3 أحرف على الأقل).');
     const chosen = await dialog({
       title: 'إعادة المهمة للتعديل',
       body: h('div.stack', h('label.field', 'إعادة إلى', target), h('label.field', 'سبب الإعادة — مطلوب', reason), err),

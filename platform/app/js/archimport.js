@@ -1,13 +1,20 @@
-// الرفعُ الجماعيُّ لخطب العام من ملفٍ واحد (ملاحظة ٣٠٥)
+// الرفعُ الجماعيُّ لخطب العام (ملاحظة ٣١٦)
 //
-//   عندَ صاحبِ المشروع مجمَّعاتٌ سنويةٌ من ١٤٤٤ إلى ١٤٤٧، كلُّ ملفٍ
-//   فيه خطبُ عامٍ متتابعةً، وقبلَ كلِّ خطبةٍ في متنِها تاريخُها
-//   ومسجدُها وخطيبُها ولغتُها. فنقرأ الملفَ في المتصفح، ونشقُّه عند
-//   مطالع الخطب، ونستنبطُ ما في مطلعِ كلِّ خطبةٍ، ثم نَعرض ذلك جدولَ
-//   مراجعةٍ يُصحَّح فيه ما أخطأ الاستنباطُ — ولا يُكتب في الأرشيف شيءٌ
-//   حتى يُعتمدَ الجدول. وما اتّفق تاريخُه ومسجدُه ضُمَّ في خطبةٍ
-//   واحدةٍ تتعدّد نسخُها باللغات، فلا تتكرّر الجمعةُ لأنّ لغتَها
-//   جاءت في ملفٍ آخر.
+//   مجمَّعاتُ الأعوام عند صاحب المشروع ملفُّ وورد لكلِّ لغة، وفي كلِّ
+//   ملفٍّ ترويسةٌ عربيةٌ قبل كلِّ خطبة — هكذا هي في الواقع:
+//
+//       ترجمة خطبة الجمعة بالمسجد الحرام (اللغة البنغالية)
+//       التاريخ: 14/01/1444هـ الموافق 12/08/2022م
+//       الخطيب: فضيلة الشيخ/ الدكتور عبد الله عواد الجهني
+//       الموضوع: احرص على ما ينفعك
+//
+//   وبعضُها يفتتح بالبسملة ثم سطرِ التاريخ. فلكلِّ ملفٍّ علامتُه التي
+//   تُؤذن ببدء خطبةٍ جديدة، ونحن نُجرّب العلاماتِ كلَّها عليه ونختار
+//   أضبطَها: أكثرَها تاريخًا وأقربَها إلى عدد جُمَع العام.
+//
+//   ومنها تُستخرج الأربعةُ التي عليها المدار: المسجدُ، وعنوانُ
+//   الخطبة، وتاريخُها، وخطيبُها — ثم تُوضع الخطبةُ في جمعتها.
+//   وجُمَعُ العام تُحسَب من التقويم في المنصة، فلا يُطلب جدولٌ خارجي.
 import { h, dialog, toast } from './ui.js';
 import { db } from './sb.js';
 import { state, MOSQUE, SERMON_TYPES, langByName } from './store.js';
@@ -15,33 +22,29 @@ import { readDocxParagraphs } from './docxread.js';
 import { setSafeHtml } from './sanitize.js';
 
 // ---------------------------------------------------------------------
-// ١) التواريخُ: الهجريُّ كما كُتب، والميلاديُّ ليُحسَب به الأسبوع
+// ١) الحرفُ والرقمُ والتاريخ
 // ---------------------------------------------------------------------
 const AR_DIGITS = { '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9', '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9' };
 const digits = s => String(s ?? '').replace(/[٠-٩۰-۹]/g, c => AR_DIGITS[c] || c);
-const ARY = n => Number(n || 0).toLocaleString('ar-SA', { useGrouping: false });
+const ARY = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn', { useGrouping: false });
 
 const H_MONTHS = [
   ['محرم', 'محرّم'],
   ['صفر'],
-  ['ربيع الاول', 'ربيع الأول', 'ربيعالاول'],
+  ['ربيع الاول', 'ربيع الأول', 'ربيع أول'],
   ['ربيع الثاني', 'ربيع الاخر', 'ربيع الآخر'],
-  ['جمادى الاولى', 'جمادى الأولى', 'جمادي الاولى'],
+  ['جمادى الاولى', 'جمادى الأولى', 'جمادي الاولى', 'جمادى الأول'],
   ['جمادى الاخرة', 'جمادى الآخرة', 'جمادى الثانية', 'جمادي الثانيه'],
-  ['رجب'],
-  ['شعبان'],
-  ['رمضان'],
-  ['شوال', 'شوّال'],
-  ['ذو القعدة', 'ذي القعدة', 'ذوالقعدة', 'ذو القعده'],
-  ['ذو الحجة', 'ذي الحجة', 'ذوالحجة', 'ذو الحجه'],
+  ['رجب'], ['شعبان'], ['رمضان'], ['شوال', 'شوّال'],
+  ['ذو القعدة', 'ذي القعدة', 'ذوالقعدة'],
+  ['ذو الحجة', 'ذي الحجة', 'ذوالحجة'],
 ];
 const bare = s => String(s ?? '').replace(/[ً-ْـ]/g, '')
   .replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').replace(/\s+/g, ' ').trim();
-
 const hijriMonth = name => {
   const k = bare(name);
   for (let i = 0; i < H_MONTHS.length; i++) {
-    if (H_MONTHS[i].some(a => bare(a) === k || k.includes(bare(a)))) return i + 1;
+    if (H_MONTHS[i].some(a => k.includes(bare(a)))) return i + 1;
   }
   return 0;
 };
@@ -54,7 +57,7 @@ const hParts = d => {
   return { y: Number(String(o.year).replace(/\D/g, '')), m: Number(o.month), d: Number(o.day) };
 };
 
-// هجريٌّ ← ميلاديٌّ: تقديرٌ حسابيٌّ ثم تصحيحٌ بتقويم أم القرى
+// هجريٌّ ← ميلاديٌّ بتقويم أم القرى
 export function hijriToDate(y, m, d) {
   if (!y || !m || !d) return null;
   const jd = d + Math.ceil(29.5 * (m - 1)) + (y - 1) * 354
@@ -77,161 +80,291 @@ export const ymd = dt => (dt instanceof Date && !isNaN(dt)
   ? `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
   : '');
 
-// نصٌّ ← { date, hijri_text } إن وُجد فيه تاريخٌ هجريٌّ أو ميلادي
-export function findDate(text, defYear) {
-  const raw = String(text || '');
-  const t = digits(raw);
-
-  // «٧ محرم ١٤٤٦هـ» أو «٧ من ربيع الأول سنة ١٤٤٦»: الشهرُ كلمةٌ أو كلمتان،
-  // ولا يُقبل التاريخُ إلا بسنةٍ أو بعلامةِ الهجرة، كي لا يُحسَب كلُّ رقمٍ تاريخًا
-  const mh = t.match(/(\d{1,2})\s*(?:من\s+)?([ء-ْ]+(?:\s+[ء-ْ]+)?)\s*(?:سنة\s*)?(\d{3,4})?\s*(هـ|هجري|ه)?/);
-  if (mh && (mh[3] || mh[4])) {
-    const mon = hijriMonth(mh[2]);
-    const yr = Number(mh[3] || defYear || 0);
-    const day = Number(mh[1]);
-    if (mon && yr >= 1300 && yr <= 1600 && day >= 1 && day <= 30) {
-      const dt = hijriToDate(yr, mon, day);
-      if (dt) return { date: ymd(dt), hijri_text: raw.trim().slice(0, 80) };
-    }
-  }
-  // ميلاديّ: ١٢/٧/٢٠٢٤ أو ٢٠٢٤-٠٧-١٢
-  const iso = t.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (iso) {
-    const dt = new Date(Date.UTC(+iso[1], +iso[2] - 1, +iso[3]));
-    if (!isNaN(dt)) return { date: ymd(dt), hijri_text: '' };
-  }
-  const sl = t.match(/(\d{1,2})\s*[/\-]\s*(\d{1,2})\s*[/\-]\s*(\d{4})/);
-  if (sl) {
-    const y = +sl[3];
-    if (y >= 1300 && y <= 1600) {
-      const dt = hijriToDate(y, +sl[2], +sl[1]);
-      if (dt) return { date: ymd(dt), hijri_text: raw.trim().slice(0, 80) };
-    }
-    const dt = new Date(Date.UTC(y, +sl[2] - 1, +sl[1]));
-    if (!isNaN(dt)) return { date: ymd(dt), hijri_text: '' };
-  }
-  return null;
-}
-
-// ---------------------------------------------------------------------
-// ٢) الشقُّ: أين تبدأ كلُّ خطبة
-// ---------------------------------------------------------------------
-const MOSQUE_RE = /المسجد\s*(الحرام|النبوي)/;
-const HEAD_RE = /^(خطبة|خطبه|الخطبة)\s/;
-const KHATEEB_RE = /(?:فضيلة\s+)?(?:الشيخ|الدكتور|الخطيب|خطيب[ُاً]?\s+المسجد)\s*[:\-–]?\s*(.{3,60})$/;
-const LANG_RE = /^(?:اللغة|اللغه|ترجمة|الترجمة|بلغة)\s*[:\-–]?\s*(.{2,30})$/;
-const FIRST_KH = /(الخطبة\s*الأولى|الخطبه\s*الاولى)/;
-
-const mosqueOf = text => {
-  const m = String(text || '').match(MOSQUE_RE);
-  if (!m) return '';
-  return m[1].startsWith('الحرام') ? 'makkah' : 'madinah';
+const gFrom = (y, m, d) => {
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return isNaN(dt) ? null : dt;
 };
 
-const typeOf = text => SERMON_TYPES.find(t => bare(text).includes(bare(t))) || '';
+// سطرٌ ← تاريخُه إن كان فيه. يُقدَّم الميلاديُّ المصرَّحُ به لأنه قاطع
+export function findDate(line, defYear) {
+  const raw = String(line || '');
+  const t = digits(raw);
+  let hij = null, greg = null;
 
-// فقراتٌ ← خطبٌ: [{ mosque, title, khateeb, lang, date, hijri_text, html, words }]
-export function splitSermons(paras, { year, fileLang } = {}) {
-  const out = [];
-  let cur = null;
-  const isHead = p => {
-    const t = p.text;
-    if (!t) return false;
-    if (MOSQUE_RE.test(t) && t.length <= 90 && (HEAD_RE.test(t) || p.bold || p.align === 'center' || p.heading)) return true;
-    // صفحةٌ قُطعت وبعدها سطرٌ قصيرٌ فيه تاريخٌ أو مسجد
-    if (p.breakBefore && t.length <= 120 && (findDate(t, year) || MOSQUE_RE.test(t))) return true;
-    return false;
-  };
-
-  paras.forEach(p => {
-    if (isHead(p) && (!cur || cur.body.length)) {
-      cur = { head: [], body: [], words: 0 };
-      out.push(cur);
+  // «الموافق 12/08/2022م» أو «12/08/2022م»
+  let m = t.match(/(?:الموافق\s*)?(\d{1,2})\s*[/\-]\s*(\d{1,2})\s*[/\-]\s*((?:19|20)\d\d)\s*م?/);
+  if (m) greg = gFrom(+m[3], +m[2], +m[1]);
+  // «2022-8-5»
+  if (!greg) {
+    m = t.match(/((?:19|20)\d\d)\s*[/\-年]\s*(\d{1,2})\s*[/\-月]\s*(\d{1,2})/);
+    if (m) greg = gFrom(+m[1], +m[2], +m[3]);
+  }
+  // «14/01/1444هـ»
+  m = t.match(/(\d{1,2})\s*[/\-]\s*(\d{1,2})\s*[/\-]\s*(1[3-5]\d\d)/);
+  if (m) hij = [+m[3], +m[2], +m[1]];
+  // «1444-1-7» و«伊历1444年1月7日»
+  if (!hij) {
+    m = t.match(/(1[3-5]\d\d)\s*[/\-年]\s*(\d{1,2})\s*[/\-月]\s*(\d{1,2})/);
+    if (m) hij = [+m[1], +m[2], +m[3]];
+  }
+  // «7 محرم 1444هـ» و«4 ربيع الأول 1444»
+  if (!hij) {
+    m = t.match(/(\d{1,2})\s*(?:من\s+)?([ء-ْ]+(?:\s+[ء-ْ]+)?)\s*(?:سنة\s*)?(1[3-5]\d\d)?\s*(هـ|هجري|ه)?/);
+    if (m && (m[3] || m[4])) {
+      const mo = hijriMonth(m[2]);
+      if (mo) hij = [Number(m[3] || defYear || 0), mo, +m[1]];
     }
-    if (!cur) { cur = { head: [], body: [], words: 0 }; out.push(cur); }
-    // المطلعُ: ما قبل «الخطبة الأولى» أو أوّلُ ستِّ فقراتٍ قصيرة
-    const short = p.text.length <= 140;
-    if (!cur.started && (cur.head.length < 8 && short && !FIRST_KH.test(p.text))) cur.head.push(p);
-    else { cur.started = true; if (p.text) { cur.body.push(p); cur.words += p.text.split(/\s+/).length; } }
-  });
+  }
 
-  return out.filter(s => s.body.length || s.head.length > 1).map(s => {
-    const heads = s.head.map(p => p.text).filter(Boolean);
-    const joined = heads.join(' • ');
-    let mosque = '', khateeb = '', lang = '', date = '', hijri = '', type = '';
-    const left = [];
-    for (const t of heads) {
-      // سطرُ المسجد ليس عنوانًا، وإن تكرّر في غلافٍ وفي مطلعِ الخطبة
-      if (MOSQUE_RE.test(t)) {
-        if (!mosque) mosque = mosqueOf(t);
-        if (!type) type = typeOf(t);
-        const dm = !date && findDate(t, year);
-        if (dm) { date = dm.date; hijri = dm.hijri_text; }
-        continue;
-      }
-      const d = !date && findDate(t, year);
-      if (d) { date = d.date; hijri = d.hijri_text; continue; }
-      const lm = t.match(LANG_RE);
-      if (lm && !lang) { const c = langByName(lm[1]); if (c) { lang = c; continue; } }
-      const km = t.match(KHATEEB_RE);
-      if (km && !khateeb) { khateeb = km[1].replace(/[«»"]/g, '').trim(); continue; }
-      if (!lang) { const c = langByName(t); if (c) { lang = c; continue; } }
-      left.push(t);
-    }
-    if (!mosque) mosque = mosqueOf(joined);
-    if (!type) type = typeOf(joined) || 'خطبة جمعة';
-    if (!date) { const d = findDate(joined, year); if (d) { date = d.date; hijri = d.hijri_text; } }
-    const title = (left.find(t => t.length >= 6 && t.length <= 120)
-      || left[0] || heads.find(t => !mosqueOf(t)) || '').replace(/^[«"]|[»"]$/g, '').trim();
-    return {
-      mosque, title, khateeb, date, hijri_text: hijri, type,
-      lang: lang || fileLang || '',
-      html: s.body.map(p => p.html).filter(Boolean).join('\n'),
-      words: s.words,
-      head: heads,
-    };
-  }).filter(s => s.html || s.title);
+  if (!greg && hij && hij[0] >= 1300 && hij[0] <= 1600
+      && hij[1] >= 1 && hij[1] <= 12 && hij[2] >= 1 && hij[2] <= 30) {
+    greg = hijriToDate(hij[0], hij[1], hij[2]);
+  }
+  if (!greg) return null;
+  return { date: ymd(greg), hijri_text: hij ? `${hij[2]}/${hij[1]}/${hij[0]}هـ` : '' };
 }
 
 // ---------------------------------------------------------------------
-// ٣) نافذةُ الرفع: اختيارُ الملفات، ثم جدولُ المراجعة، ثم الاعتماد
+// ٢) ما يُقرأ من الترويسة
+// ---------------------------------------------------------------------
+const MOSQUE_RE  = /المسجد\s*(الحرام|النبوي)|الحرم\s*(المكي|المدني)/;
+const KHATEEB_RE = /(?:الخطيب|خطيب\s+المسجد)\s*[:：]\s*(.+)$|ل?(?:فضيلة|معالي|سماحة)\s+(?:الشيخ|الدكتور|الأستاذ)\s*[/\\:]?\s*(.+)$/;
+const TITLE_RE   = /(?:موضوع\s*الخطبة|عنوان\s*الخطبة|الموضوع|العنوان)\s*[:：]\s*(.+)$/;
+const BASMALA_RE = /^بسم\s*الله\s*الرحمن\s*الرحيم\s*$/;
+// حيث يبدأ المتنُ تنتهي الترويسةُ: «الخطبة الأولى» وما يجري مجراها
+const BODY_RE = /^\(?\s*(الخطبة|الخطبه)\s*(الأولى|الاولى|الثانية|الثانيه)|^أمَّا\s*بعد|^أما\s*بعد|^الحمد\s*لله/;
+
+const TYPE_WORDS = [
+  [/عيد\s*الفطر/, 'خطبة عيد الفطر'],
+  [/عيد\s*الأضحى|عيد\s*الاضحى/, 'خطبة عيد الأضحى'],
+  [/عرفة|عرفات/, 'خطبة عرفة'],
+  [/استسقاء/, 'خطبة الاستسقاء'],
+  [/كسوف|خسوف/, 'خطبة الكسوف'],
+];
+
+const mosqueOf = t => {
+  const m = String(t || '').match(MOSQUE_RE);
+  if (!m) return '';
+  const s = m[0];
+  return /الحرام|المكي/.test(s) ? 'makkah' : 'madinah';
+};
+const typeOf = t => {
+  for (const [re, name] of TYPE_WORDS) {
+    if (re.test(String(t || '')) && SERMON_TYPES.includes(name)) return name;
+  }
+  return '';
+};
+// العنوانُ يُنقّى من الأقواس والنقطتين وما شابهها، عربيةً كانت أو صينية
+const cleanTitle = s => String(s || '')
+  .replace(/^[\s(){}\[\]«»"'：:،.\u3008-\u3011（）【】]+/, '')
+  .replace(/[\s(){}\[\]«»"'：:،\u3008-\u3011（）【】]+$/, '')
+  .replace(/\s+/g, ' ').trim();
+
+const cleanName = s => String(s || '')
+  // يُقطع الاسمُ عند أوّل رقمٍ أو كلمةٍ من كلمات الترويسة، فلا يَجرُّ ما بعده
+  .split(/\s(?=\d)|\s(?=خطبة|الخطبة|الموضوع|العنوان|التاريخ|بالمسجد|المسجد)/)[0]
+  .replace(/[-–—(«»"]*\s*(حفظه\s*الله|وفقه\s*الله|رعاه\s*الله|أثابه\s*الله|حفظهم\s*الله)\s*[)»"]*/g, '')
+  .replace(/^(فضيلة|معالي|سماحة)\s+/, '')
+  .replace(/^(الشيخ|الدكتور|الأستاذ|د\.?|أ\.?)\s*[/\\.]?\s*/g, '')
+  .replace(/^(الشيخ|الدكتور|الأستاذ|د\.?|أ\.?)\s*[/\\.]?\s*/g, '')
+  .replace(/[()«»"]/g, '').replace(/\s+/g, ' ').replace(/[\s/،.-]+$/, '').trim();
+
+// عدُّ الكلمات: ما لا يُكتب بمسافاتٍ — كالصينية واليابانية — يُعَدُّ بحروفه
+const CJK = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
+export function countWords(t) {
+  const s = String(t || '').trim();
+  if (!s) return 0;
+  if (CJK.test(s)) return s.replace(/\s+/g, '').length;
+  return s.split(/\s+/).filter(Boolean).length;
+}
+
+// العلاماتُ المرشَّحةُ لبدء خطبةٍ جديدة
+const ANCHORS = [
+  { key: 'tr',  re: /^\s*(ترجمة\s+)?خطب[ةه]\s+(صلاة\s+)?(الجمعة|الجُمعة|العيد|عيد|عرفة|الاستسقاء|الكسوف|الخسوف|المسجد|الحرم)/ },
+  { key: 'bsm', re: BASMALA_RE },
+  { key: 'date', re: null },     // سطرٌ قصيرٌ ليس فيه إلا تاريخ
+];
+
+const isDateOnly = (t, year) => {
+  const s = String(t || '').trim();
+  if (!s || s.length > 40) return false;
+  if (!/\d/.test(digits(s))) return false;
+  return !!findDate(s, year) && !/[ء-ي]{6,}/.test(s.replace(/هـ|الموافق|م/g, ''));
+};
+
+// ---------------------------------------------------------------------
+// ٣) الشقُّ: تُجرَّب العلاماتُ ويُختار أضبطُها
+// ---------------------------------------------------------------------
+export function splitSermons(paras, { year, fileLang, fileMosque, fridays } = {}) {
+  const ps = paras.filter(p => p.text || p.breakBefore);
+  const texts = ps.map(p => p.text || '');
+
+  const hitsOf = key => {
+    const a = ANCHORS.find(x => x.key === key);
+    const out = [];
+    for (let i = 0; i < texts.length; i++) {
+      const t = texts[i];
+      if (!t) continue;
+      if (key === 'date') { if (isDateOnly(t, year)) out.push(i); }
+      else if (a.re.test(t)) out.push(i);
+    }
+    return out;
+  };
+
+  // لكلِّ علامةٍ درجةٌ: كم منها يليه تاريخٌ، وكم تقترب من جُمَع العام
+  // تُجرَّب العلاماتُ كلُّها، وتُقدَّم أوفاها بالبيانات الأربعة وأقربُها
+  // إلى عدد جُمَع العام
+  let best = { key: null, idx: [], score: -1 };
+  for (const a of ANCHORS) {
+    const idx = hitsOf(a.key);
+    if (!idx.length) continue;
+    let dated = 0, titled = 0, named = 0, placed = 0;
+    for (const i of idx) {
+      const hd = readHead(texts, i, year);
+      if (hd.date) dated++;
+      if (hd.title) titled++;
+      if (hd.khateeb) named++;
+      if (hd.mosque) placed++;
+    }
+    const n = idx.length;
+    const near = fridays ? 1 - Math.min(1, Math.abs(n - fridays) / Math.max(8, fridays)) : 0.5;
+    const score = (dated / n) * 2 + (titled / n) + (named / n) * 0.7 + (placed / n) * 0.7
+      + near + Math.min(1, n / 10);
+    if (score > best.score) best = { key: a.key, idx, score, dated };
+  }
+  if (!best.idx.length) return { anchor: null, rows: [] };
+
+  const rows = [];
+  for (let n = 0; n < best.idx.length; n++) {
+    const from = best.idx[n];
+    const to = n + 1 < best.idx.length ? best.idx[n + 1] : ps.length;
+    const head = readHead(texts, from, year);
+    // المتنُ: ما بعد آخرِ سطرٍ من الترويسة
+    const bodyFrom = Math.max(from + 1, head.lastHead + 1);
+    const html = ps.slice(bodyFrom, to).map(p => p.html).filter(Boolean).join('\n');
+    const words = ps.slice(bodyFrom, to).reduce((a, p) => a + countWords(p.text), 0);
+    rows.push({
+      mosque: head.mosque || fileMosque || '',
+      title: head.title || '',
+      khateeb: head.khateeb || '',
+      date: head.date || '',
+      hijri_text: head.hijri_text || '',
+      type: head.type || 'خطبة جمعة',
+      lang: fileLang || '',
+      head: head.lines,
+      html, words,
+    });
+  }
+  return { anchor: best.key, rows, dated: best.dated };
+}
+
+// الترويسةُ: ثمانيةُ أسطرٍ بعد العلامة، يُلتقط منها ما عُرف
+function readHead(texts, from, year) {
+  const out = { lines: [], lastHead: from };
+  let seen = 0;
+  for (let i = from; i < texts.length && seen < 9; i++) {
+    const t = (texts[i] || '').trim();
+    if (!t) continue;
+    if (i > from && BODY_RE.test(t)) break;      // هنا يبدأ المتن
+    seen++;
+    let used = false;
+    if (!out.mosque && mosqueOf(t)) { out.mosque = mosqueOf(t); used = true; }
+    if (!out.type && typeOf(t)) { out.type = typeOf(t); used = true; }
+    if (!out.date) {
+      const d = findDate(t, year);
+      if (d) { out.date = d.date; out.hijri_text = d.hijri_text; used = true; }
+    }
+    const tm = t.match(TITLE_RE);
+    if (tm && !out.title) { out.title = cleanTitle(tm[1]); used = true; }
+    const km = t.match(KHATEEB_RE);
+    if (km && !out.khateeb) { out.khateeb = cleanName(km[1] || km[2]); used = true; }
+    if (BASMALA_RE.test(t)) used = true;
+    if (used) { out.lines.push(t); out.lastHead = i; }
+    // سطرٌ عربيٌّ قصيرٌ لم يُعرَف: يصلح عنوانًا إن لم يُكتب عنوانٌ بلافتته
+    else if (!out.spare && arabicish(t) && t.length >= 4 && t.length <= 120) {
+      out.spare = t; out.spareAt = i;
+    }
+    else if (t.length > 120) break;
+  }
+  // العنوانُ بلافتته أولى، فإن لم يكن فالسطرُ العربيُّ غيرُ المعروف
+  if (!out.title && out.spare) {
+    out.title = cleanTitle(out.spare);
+    out.lines.push(out.spare);
+    out.lastHead = Math.max(out.lastHead, out.spareAt);
+  }
+  return out;
+}
+
+// سطرٌ عربيٌّ في غالبه: يُميَّز به العنوانُ عن متنِ اللغة المترجَم إليها
+function arabicish(t) {
+  const s = String(t || '').replace(/[\s\d\p{P}]/gu, '');
+  if (!s) return false;
+  const ar = (s.match(/[\u0621-\u064A]/g) || []).length;
+  return ar / s.length >= 0.6;
+}
+
+// اللغةُ من اسم الملف: «… (اللغة البنغالية).docx»
+export function langOfName(name) {
+  const m = String(name || '').match(/\(([^)]*لغة[^)]*)\)/) || String(name || '').match(/\(([^)]+)\)/);
+  if (m) { const c = langByName(m[1]); if (c) return c; }
+  for (const l of state.languages || []) {
+    if (String(name || '').includes(l.name_ar)) return l.code;
+  }
+  return '';
+}
+export const mosqueOfName = name => mosqueOf(String(name || ''));
+
+// ---------------------------------------------------------------------
+// ٤) نافذةُ الرفع ثم جدولُ المراجعة
 // ---------------------------------------------------------------------
 export async function importDialog({ sectionId, year, onDone }) {
   const langs = state.languages || [];
   const pick = h('input', { type: 'file', multiple: true, accept: '.docx' });
   const fileLang = h('select', { 'aria-label': 'لغةُ الملفات' },
-    h('option', { value: '' }, 'تُستنبط من المتن'),
+    h('option', { value: '' }, 'من اسم الملف'),
     ...langs.map(l => h('option', { value: l.code }, l.name_ar)));
-
+  const fileMosque = h('select', { 'aria-label': 'المسجد' },
+    h('option', { value: '' }, 'من الترويسة أو اسم الملف'),
+    ...Object.entries(MOSQUE).map(([k, v]) => h('option', { value: k }, v)));
   const note = h('p.small.muted', 'لا يُكتب في الأرشيف شيءٌ حتى تعتمد الجدول.');
-  let rows = [];
 
+  // جُمَعُ العام تُحسَب في المنصة، فتُقاس عليها دقّةُ الشقّ والاكتمال
+  let gaps = [];
+  try { gaps = await db.rpc('arch_year_gaps', { p_year: year }) || []; } catch { gaps = []; }
+  const fridays = gaps.length;
+  const fridaySet = new Set(gaps.map(g => g.friday_on));
+
+  let rows = [], report = [];
   const parse = async () => {
-    rows = [];
+    rows = []; report = [];
     for (const f of [...pick.files]) {
       note.textContent = `نقرأ ${f.name}…`;
       const paras = await readDocxParagraphs(f);
-      for (const r of splitSermons(paras, { year, fileLang: fileLang.value })) {
-        rows.push({ ...r, file: f.name });
-      }
+      const lang = fileLang.value || langOfName(f.name);
+      const mos = fileMosque.value || mosqueOfName(f.name);
+      const r = splitSermons(paras, { year, fileLang: lang, fileMosque: mos, fridays });
+      for (const x of r.rows) rows.push({ ...x, file: f.name });
+      report.push({ file: f.name, lang, found: r.rows.length, anchor: r.anchor });
     }
   };
 
   const res = await dialog({
     title: `رفعُ خطب ${ARY(year)}هـ من ملفات Word`,
     body: h('div.col.gap',
-      h('p.small.muted', 'ارفع المجمَّع السنويَّ كما هو عندك: يُشقُّ عند مطالع الخطب، '
-        + 'ويُستنبط من مطلع كلِّ خطبةٍ تاريخُها ومسجدُها وخطيبُها ولغتُها، '
-        + 'ثم يُعرض عليك جدولُ مراجعةٍ تُصحِّح فيه ما شئت قبل الاعتماد.'),
+      h('p.small.muted', 'ارفع مجمَّعَ العام كما هو عندك — ملفًا لكلِّ لغةٍ أو عدّةَ ملفاتٍ معًا. '
+        + 'يُقرأ في متصفحك، ويُشقُّ عند ترويسة كلِّ خطبة، ويُستخرج منها المسجدُ والعنوانُ '
+        + 'والتاريخُ والخطيب، ثم تُراجعها قبل أن تُكتب.'),
       h('label.field', h('span', 'ملفاتُ Word (.docx)'), pick),
-      h('label.field', h('span', 'لغةُ الملف إن لم تُذكر في المتن'), fileLang),
+      h('div.row.gap.wrap',
+        h('label.field', h('span', 'اللغة'), fileLang),
+        h('label.field', h('span', 'المسجد'), fileMosque)),
       note),
     buttons: [
       { label: 'اقرأ الملفات', kind: 'primary',
         validate: async () => {
           if (!pick.files?.length) return 'اختر ملفًا واحدًا على الأقل';
           try { await parse(); } catch (e) { note.textContent = ''; return e.message; }
-          if (!rows.length) return 'لم تُعرَف في الملفات خطبةٌ — راجع تنسيقَها';
+          if (!rows.length) return 'لم تُعرَف في الملفات ترويسةُ خطبة — راجع تنسيقَها';
           return true;
         },
         value: () => true },
@@ -239,54 +372,88 @@ export async function importDialog({ sectionId, year, onDone }) {
     ],
   });
   if (!res) return;
-
-  await reviewDialog({ sectionId, year, rows, onDone });
+  await reviewDialog({ sectionId, year, rows, report, fridaySet, fridays, onDone });
 }
 
-// جدولُ المراجعة: كلُّ صفٍّ يُصحَّح ويُستبعد
-async function reviewDialog({ sectionId, year, rows, onDone }) {
+// ---------------------------------------------------------------------
+// ٥) جدولُ المراجعة: ما نقص موسومٌ، وما تمَّ مؤشَّر
+// ---------------------------------------------------------------------
+async function reviewDialog({ sectionId, year, rows, report, fridaySet, fridays, onDone }) {
   const langs = state.languages || [];
   const fields = [];
+  // جمعةُ الأسبوع كما تحسبها قاعدةُ البيانات: اليوم + (٥ − ترتيبِه الأسبوعي)
+  const fridayOf = iso => {
+    if (!iso) return '';
+    const d = new Date(iso + 'T12:00:00Z');
+    const isodow = d.getUTCDay() === 0 ? 7 : d.getUTCDay();
+    d.setUTCDate(d.getUTCDate() + (5 - isodow));
+    return ymd(d);
+  };
+
+  const rowEl = (r, i) => {
+    const bad = [], warn = [];
+    if (!r.title) warn.push('بلا عنوان — يُورَث من خطبةِ الجمعة إن كانت');
+    if (!r.date) bad.push('بلا تاريخ');
+    else if (fridaySet.size && !fridaySet.has(fridayOf(r.date))) bad.push('خارج العام');
+    if (!r.mosque) bad.push('بلا مسجد');
+    if (!r.html) bad.push('بلا متن');
+
+    const f = {
+      on: h('input', { type: 'checkbox', checked: !bad.length, 'aria-label': `ضمِّ الصفَّ ${i + 1}` }),
+      title: h('input', { value: r.title || '', 'aria-label': `عنوانُ الصفِّ ${i + 1}` }),
+      mosque: h('select', { 'aria-label': `مسجدُ الصفِّ ${i + 1}` },
+        h('option', { value: '' }, '—'),
+        ...Object.entries(MOSQUE).map(([k, v]) => h('option', { value: k, selected: r.mosque === k }, v))),
+      date: h('input', { type: 'date', value: r.date || '', 'aria-label': `تاريخُ الصفِّ ${i + 1}` }),
+      khateeb: h('input', { value: r.khateeb || '', 'aria-label': `خطيبُ الصفِّ ${i + 1}` }),
+      lang: h('select', { 'aria-label': `لغةُ الصفِّ ${i + 1}` },
+        h('option', { value: '' }, '—'),
+        ...langs.map(l => h('option', { value: l.code, selected: r.lang === l.code }, l.name_ar))),
+      type: h('select', { 'aria-label': `نوعُ الصفِّ ${i + 1}` },
+        ...SERMON_TYPES.map(t => h('option', { value: t, selected: (r.type || 'خطبة جمعة') === t }, t))),
+    };
+    fields.push({ r, f });
+
+    const peek = h('button.link.small', { type: 'button' }, 'استعرِض');
+    peek.onclick = () => dialog({
+      title: f.title.value || 'متنُ الخطبة',
+      body: h('div.col.gap',
+        h('p.small.muted', (r.head || []).join(' · ')),
+        setSafeHtml(h('div.doc-peek', { dir: 'auto' }), r.html || '<p>لا متن</p>')),
+      buttons: [{ label: 'إغلاق', value: null }],
+    });
+
+    return h('tr', { class: bad.length ? 'warn-row' : '' },
+      h('td', f.on), h('td.num', String(i + 1)),
+      h('td', f.title), h('td', f.mosque), h('td', f.date),
+      h('td', f.khateeb), h('td', f.lang), h('td', f.type),
+      h('td.num', String(r.words || 0)),
+      h('td.small.muted', [...bad, ...warn].join('، ') || '—'),
+      h('td', peek));
+  };
 
   const table = h('table.tbl.imp-tbl',
     h('thead', h('tr',
       h('th', '✓'), h('th', '#'), h('th', 'العنوان'), h('th', 'المسجد'),
       h('th', 'التاريخ'), h('th', 'الخطيب'), h('th', 'اللغة'),
-      h('th', 'النوع'), h('th', 'كلمات'), h('th', 'المتن'))),
-    h('tbody', ...rows.map((r, i) => {
-      const f = {
-        on: h('input', { type: 'checkbox', checked: !!(r.title && r.date), 'aria-label': `ضمِّ الصفَّ ${i + 1}` }),
-        title: h('input', { value: r.title || '', 'aria-label': `عنوانُ الصفِّ ${i + 1}` }),
-        mosque: h('select', { 'aria-label': `مسجدُ الصفِّ ${i + 1}` },
-          h('option', { value: '' }, '—'),
-          ...Object.entries(MOSQUE).map(([k, v]) => h('option', { value: k, selected: r.mosque === k }, v))),
-        date: h('input', { type: 'date', value: r.date || '', 'aria-label': `تاريخُ الصفِّ ${i + 1}` }),
-        khateeb: h('input', { value: r.khateeb || '', 'aria-label': `خطيبُ الصفِّ ${i + 1}` }),
-        lang: h('select', { 'aria-label': `لغةُ الصفِّ ${i + 1}` },
-          h('option', { value: '' }, '—'),
-          ...langs.map(l => h('option', { value: l.code, selected: r.lang === l.code }, l.name_ar))),
-        type: h('select', { 'aria-label': `نوعُ الصفِّ ${i + 1}` },
-          ...SERMON_TYPES.map(t => h('option', { value: t, selected: (r.type || 'خطبة جمعة') === t }, t))),
-      };
-      fields.push({ r, f });
-      const peek = h('button.link.small', { type: 'button' }, 'استعرِض');
-      peek.onclick = () => dialog({
-        title: f.title.value || 'متنُ الخطبة',
-        body: setSafeHtml(h('div.doc-peek', { dir: 'auto' }), r.html || '<p>لا متن</p>'),
-        buttons: [{ label: 'إغلاق', value: null }],
-      });
-      return h('tr', { class: r.title && r.date ? '' : 'warn-row' },
-        h('td', f.on), h('td.num', String(i + 1)),
-        h('td', f.title), h('td', f.mosque), h('td', f.date),
-        h('td', f.khateeb), h('td', f.lang), h('td', f.type),
-        h('td.num', String(r.words || 0)), h('td', peek));
-    })));
+      h('th', 'النوع'), h('th', 'كلمات'), h('th', 'ما نقص'), h('th', 'المتن'))),
+    h('tbody', ...rows.map(rowEl)));
 
-  const hint = h('p.small.muted',
-    `${rows.length} خطبةً قُرئت. الصفوفُ المظلَّلةُ ناقصةُ العنوان أو التاريخ: أكملها أو استبعدها.`);
+  const dates = new Set(rows.filter(r => r.date).map(r => fridayOf(r.date)));
+  const covered = [...dates].filter(d => fridaySet.has(d)).length;
+  const hint = h('div.stack', { style: { gap: '4px' } },
+    h('p.small', `قُرئ ${ARY(rows.length)} موضعًا من ${ARY(report.length)} ملفًا، `
+      + `طابق منها ${ARY(covered)} من ${ARY(fridays)} جمعةً في العام.`),
+    h('p.small.muted', report.map(x => `${x.file}: ${ARY(x.found)}`).join(' · ')),
+    h('p.small.muted', 'الصفوفُ المظلَّلةُ ناقصةٌ — أكملْها أو استبعدْها. '
+      + 'وما اتّفق تاريخُه ومسجدُه يُضَمُّ في خطبةٍ واحدةٍ تتعدّد لغاتُها.'));
+
+  const all = h('button.btn.sm.ghost', { type: 'button' }, 'أشِّرْ على التامّ وحدَه');
+  all.onclick = () => fields.forEach(({ f }) => {
+    f.on.checked = !!(f.date.value && f.mosque.value);
+  });
 
   let done = null;
-
   const collect = () => fields.filter(x => x.f.on.checked).map(({ r, f }) => ({
     sermon_date: f.date.value || null,
     hijri_text: r.hijri_text || null,
@@ -302,15 +469,14 @@ async function reviewDialog({ sectionId, year, rows, onDone }) {
 
   const out = await dialog({
     title: `مراجعةُ ما قُرئ — ${ARY(year)}هـ`,
-    body: h('div.col.gap.imp-wrap', hint, h('div.scroll-x', table),
-      h('p.small.muted', 'ما اتّفق تاريخُه ومسجدُه يُضَمُّ في خطبةٍ واحدةٍ تتعدّد لغاتُها.')),
+    body: h('div.col.gap.imp-wrap', hint, h('div.row.gap', all), h('div.scroll-x', table)),
     buttons: [
       { label: 'اعتمدْ واكتبْ في الأرشيف', kind: 'primary',
         validate: async () => {
           const items = collect();
           if (!items.length) return 'لم تَختر صفًّا واحدًا';
-          const bad = items.filter(x => !x.sermon_date || !x.title).length;
-          if (bad) return `${bad} صفًّا ناقصَ العنوان أو التاريخ — أكملْه أو استبعدْه`;
+          const bad = items.filter(x => !x.sermon_date).length;
+          if (bad) return `${ARY(bad)} صفًّا بلا تاريخ — أكملْه أو استبعدْه`;
           try {
             done = await db.rpc('import_arch_sermons',
               { p: { section_id: sectionId, items } });
@@ -323,8 +489,8 @@ async function reviewDialog({ sectionId, year, rows, onDone }) {
   });
   if (!out) return;
 
-  toast(`كُتبت: ${out.created || 0} خطبةً جديدة، وضُمَّ ${out.merged || 0}، `
-    + `و${out.versions || 0} نسخة`, 'ok');
+  toast(`كُتبت: ${ARY(out.created || 0)} خطبةً جديدة، وضُمَّ ${ARY(out.merged || 0)}، `
+    + `و${ARY(out.versions || 0)} نسخة`, 'ok');
   if (onDone) await onDone();
 }
 

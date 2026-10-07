@@ -72,6 +72,34 @@ export const DEFAULT_CERT_MARKS = [
   { src: '/assets/uqu-logo.png',   x: 82, y: 5, h: 18 }
 ];
 
+// الحقولُ التي يملؤها القالبُ من بيانات صاحب الشهادة (ملاحظة ٣٢٤)
+export const CERT_VARS = {
+  'الاسم': (c, n) => n || '',
+  'رقم الهوية': c => (c.fields || {}).national_id || '',
+  'رقم العضوية': c => (c.fields || {}).member_no || '',
+  'الجنسية': c => (c.fields || {}).nationality || '',
+  'الدور': c => (c.fields || {}).role || '',
+  'اللغات': c => (c.fields || {}).langs || '',
+  'عنوان الشهادة': c => c.title || '',
+  'الموضوع': c => c.subject || '',
+  'الساعات': c => (c.hours == null ? '' : String(c.hours)),
+  'المكان': c => c.place || '',
+  'الجهة': c => c.provider || '',
+  'من تاريخ': c => (c.start_on ? fmtHijri(c.start_on) : ''),
+  'إلى تاريخ': c => (c.end_on ? fmtHijri(c.end_on) : ''),
+  'رقم الشهادة': c => c.serial_no || '',
+  'تاريخ الإصدار': c => (c.issued_at ? fmtHijri(String(c.issued_at).slice(0, 10)) : ''),
+  'الموقِّع': c => c.signer_name || '',
+  'صفة الموقِّع': c => c.signer_role || '',
+};
+
+export function fillVars(text, c, memberName) {
+  return String(text || '').replace(/\{\s*([^}]+?)\s*\}/g, (m, k) => {
+    const fn = CERT_VARS[k.trim()];
+    return fn ? String(fn(c || {}, memberName) ?? '') : m;
+  });
+}
+
 export function certHtml(c, memberName) {
   const d = c.design || {};
   const marks = Array.isArray(d.logos) && d.logos.length ? d.logos : DEFAULT_CERT_MARKS;
@@ -106,6 +134,11 @@ export function certHtml(c, memberName) {
   /* شعاراتٌ تُضاف وتُحرَّك بحرية (ملاحظة ٢٨٢) */
   .mark { position: absolute; }
   .mark img { display: block; }
+  /* خلفيةٌ مرفوعةٌ تملأ الورقة (ملاحظة ٣٢٢) */
+  .bg { position: absolute; inset: 0; z-index: 0; }
+  .bg img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* نصوصٌ حرّةٌ تُضاف وتُحرَّك (ملاحظة ٣٢٣) */
+  .tx { position: absolute; z-index: 2; white-space: pre-wrap; line-height: 1.6; }
   /* الاتّزانُ: المتنُ متوسّطٌ كلُّه لا مُزاحٌ إلى حافّة (ملاحظة ٢٨١) */
   .body { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1;
           align-items: center; text-align: center; }
@@ -132,11 +165,25 @@ export function certHtml(c, memberName) {
              font-size: 60pt; color: rgba(180, 40, 40, .12); transform: rotate(-20deg); font-weight: 700; }
   @media print { .sheet { page-break-after: always; } }
 </style></head><body><div class="sheet">
-<div class="spine"></div>
+${d.bg_src ? `<div class="bg"><img src="${esc(d.bg_src)}" alt=""></div>` : ''}
+${d.spine === false || d.bg_src ? '' : '<div class="spine"></div>'}
 ${d.watermark === false ? '' : `<div class="wm"><img src="${esc(d.wm_src || AUTH_LOGO)}" alt=""></div>`}
 ${marks.map(g => `<div class="mark" style="`
   + `top:${Number(g.y) || 0}%; inset-inline-start:${Number(g.x) || 0}%;">`
   + `<img src="${esc(g.src)}" style="height:${Math.max(5, Math.min(60, Number(g.h) || 14))}mm" alt=""></div>`).join('')}
+${(Array.isArray(d.texts) ? d.texts : []).map(t => {
+  const al = ['center', 'end'].includes(t.align) ? t.align : 'start';
+  return `<div class="tx" style="`
+    + `top:${Number(t.y) || 0}%; inset-inline-start:${Number(t.x) || 0}%;`
+    + `width:${Math.max(5, Math.min(100, Number(t.w) || 40))}%;`
+    + `font-size:${Math.max(6, Math.min(60, Number(t.size) || 12))}pt;`
+    + `font-weight:${t.bold ? 700 : 400};`
+    + `color:${esc(t.color || th.ink)};`
+    + `text-align:${al};`
+    + (t.font ? `font-family:${esc(t.font)};` : '')
+    + (t.rotate ? `transform:rotate(${Number(t.rotate) || 0}deg);` : '')
+    + `">${esc(fillVars(t.text || '', c, memberName))}</div>`;
+}).join('')}
 ${c.status === 'revoked' ? '<div class="revoked">ملغاة</div>' : ''}
 <div class="body">
 ${d.header === false ? '<div style="height:20mm"></div>' : `<header>

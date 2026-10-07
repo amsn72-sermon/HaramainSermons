@@ -1772,3 +1772,57 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .imp-tbl td.num { text-align: center; white-space: nowrap; }
 .doc-peek { max-height: 56vh; overflow: auto; line-height: 1.9;
   border: 1px solid var(--border); border-radius: 8px; padding: 10px; min-width: min(80vw, 760px); }
+
+/* بطاقاتُ الأعوام: ثلاثٌ في الصفّ بأرقامها (ملاحظتا ٣٢٨ و٣٢٩) */
+.year-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px; direction: rtl; }
+@media (max-width: 900px) { .year-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .year-grid { grid-template-columns: 1fr; } }
+.year-tile { padding: 18px 16px; }
+.year-tile .year-no { font-size: 2.4rem; letter-spacing: .02em; }
+.year-bar { height: 6px; border-radius: 3px; background: var(--line, #2a3442);
+  margin: 10px 0 12px; overflow: hidden; }
+.year-bar span { display: block; height: 100%; background: var(--gold); }
+.year-bar span.ok { background: var(--ok, #2f6b52); }
+.year-bar span.warn { background: var(--gold); }
+.year-bar span.bad { background: var(--bad, #8a3b3b); }
+.year-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 6px; }
+.year-stat { text-align: center; }
+.year-stat b { display: block; font-size: 1.15rem; }
+.year-stat span { display: block; font-size: .78rem; color: var(--muted); }
+.year-stat i { display: block; font-style: normal; font-size: .7rem; }
+.year-stat.bad b { color: var(--bad, #c06c6c); }
+.year-stat.ok b { color: var(--ok, #6fbf96); }
+
+/* طيُّ صفوف الحرمين (ملاحظة ٣٢٦) */
+.mosque-group { border-top: 1px solid var(--border); }
+.mosque-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; }
+.mosque-group.shut .mosque-head { opacity: .85; }
+.fold-btn { background: none; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--muted); cursor: pointer; width: 26px; height: 24px; line-height: 1; }
+.fold-btn:hover { color: var(--text); border-color: var(--gold); }
+.fold-bar { margin: 6px 0 10px; align-items: center; }
+
+/* نافذةُ الخطبة مضغوطة (ملاحظة ٣٢١) */
+.stack.tight { gap: 8px; }
+.sermon-form .field { margin: 0; }
+.sermon-form input, .sermon-form select, .sermon-form textarea { padding: 5px 8px; }
+.sermon-form textarea { min-height: 64px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 620px) { .grid-3 { grid-template-columns: 1fr 1fr; } }
+
+/* مقابضُ النصوص الحرّة فوق لوحة الشهادة (ملاحظة ٣٢٣) */
+.cert-handle.text { border-style: solid; border-color: rgba(188,150,97,.45);
+  background: rgba(188,150,97,.10); font-size: .62rem; padding: 1px 4px; }
+.cert-handle.text.on { border-color: var(--gold); background: rgba(188,150,97,.25); }
+.vars summary { cursor: pointer; color: var(--muted); }
+.pick-list { max-height: 34vh; overflow: auto; border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 8px; }
+.pick-row { display: flex; gap: 8px; align-items: center; padding: 2px 0; }
+.tpl-card { padding: 10px 12px; }
+
+/* لوحةُ الشهادة تحفظ نسبتها ولو طال عمودُ الأدوات بجوارها */
+.cert-stage-wrap { align-items: flex-start; }
+.cert-stage { align-self: flex-start; }
+.cd-wrap > .cd-props, .cd-wrap > .cd-stage { align-content: start; }

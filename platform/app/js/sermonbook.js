@@ -13,14 +13,14 @@ import { db } from './sb.js';
 import { langName, langDir, MOSQUE } from './store.js';
 import { qrDataUri } from './qr.js';
 
-const AR = n => Number(n || 0).toLocaleString('ar-SA');
-const ARY = n => Number(n || 0).toLocaleString('ar-SA', { useGrouping: false });
+const AR = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn');
+const ARY = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn', { useGrouping: false });
 
 // المقاساتُ تُختار عند التصدير لا تُثبَّت في الأرشفة (ملاحظة ٣٠٥)
 export const SIZES = {
-  a4:   { w: 210, h: 297, name: 'A4 — ٢١٠×٢٩٧ مم' },
-  a5:   { w: 148, h: 210, name: 'A5 — ١٤٨×٢١٠ مم' },
-  book: { w: 170, h: 240, name: '١٧×٢٤ سم — مقاسُ المطابع' }
+  a4:   { w: 210, h: 297, name: 'A4 — 210×297 مم' },
+  a5:   { w: 148, h: 210, name: 'A5 — 148×210 مم' },
+  book: { w: 170, h: 240, name: '17×24 سم — مقاسُ المطابع' }
 };
 
 // مكتبةُ خلفياتِ الغلاف: نماذجُك الثلاثةُ جاهزةً تُنتقى بالاسم (ملاحظة ٣١٠)

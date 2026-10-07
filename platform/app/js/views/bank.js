@@ -50,7 +50,7 @@ export async function bankSection(ctx) {
   f.scope.addEventListener('change', sync);
 
   localOnly.append(
-    h('p.small.muted', 'الآيبان السعودي يبدأ بـ SA ويتكوّن من ٢٤ خانة. انسخه من تطبيق بنكك أو من شهادة الآيبان.'));
+    h('p.small.muted', 'الآيبان السعودي يبدأ بـ SA ويتكوّن من 24 خانة. انسخه من تطبيق بنكك أو من شهادة الآيبان.'));
 
   // الإرشاد خلف رابط صغير لا يشغل الشاشة
   const guideBtn = h('button.btn.sm.ghost', { type: 'button' }, 'ما يلزم للحساب خارج المملكة؟');
@@ -95,7 +95,7 @@ export async function bankSection(ctx) {
     if (f.account_holder.value.trim().length < 3) e.push('اكتب اسم صاحب الحساب كما هو في البنك');
     if (f.bank_name.value.trim().length < 2) e.push('اكتب اسم البنك');
     if (!intl) {
-      if (!/^SA[0-9]{22}$/.test(iban)) e.push('الآيبان السعودي يبدأ بـ SA ويتكوّن من ٢٤ خانة');
+      if (!/^SA[0-9]{22}$/.test(iban)) e.push('الآيبان السعودي يبدأ بـ SA ويتكوّن من 24 خانة');
     } else {
       if (!iban && !f.account_number.value.trim()) e.push('اكتب الآيبان أو رقم الحساب');
       if (iban && !/^[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}$/.test(iban)) e.push('صيغة الآيبان غير صحيحة');
@@ -123,13 +123,13 @@ export async function bankSection(ctx) {
   const drawDoc = () => {
     const view = h('div');
     if (acc?.doc_path) storage.signedUrl('bank-docs', acc.doc_path, 600)
-      .then(url => view.replaceChildren(h('a.btn.sm', { href: url, target: '_blank', rel: 'noopener' }, 'عرض الخطاب (رابط مؤقت ١٠ دقائق)')))
+      .then(url => view.replaceChildren(h('a.btn.sm', { href: url, target: '_blank', rel: 'noopener' }, 'عرض الخطاب (رابط مؤقت 10 دقائق)')))
       .catch(() => view.replaceChildren(h('span.small.muted', 'تعذّر فتح الملف')));
     else view.replaceChildren(h('span.small.muted', 'لم يُرفع خطاب البنك بعد'));
     const up = h('input', { type: 'file', accept: 'application/pdf,image/*', 'aria-label': 'رفع خطاب البنك' });
     up.onchange = () => busy(up, async () => {
       const file = up.files[0]; if (!file) return;
-      if (file.size > 10 * 1024 * 1024) return toast('الحد الأقصى ١٠ ميغابايت.', 'bad');
+      if (file.size > 10 * 1024 * 1024) return toast('الحد الأقصى 10 ميغابايت.', 'bad');
       try {
         const ext = (file.name.split('.').pop() || 'pdf').toLowerCase().replace(/[^a-z0-9]/g, '');
         const path = `${me.id}/bank-${Date.now()}.${ext}`;
@@ -140,7 +140,7 @@ export async function bankSection(ctx) {
       } catch (e3) { toast(e3.message, 'bad'); }
     });
     docBox.replaceChildren(view,
-      h('label.field', 'رفع خطاب البنك أو شهادة الآيبان', h('small', 'PDF أو صورة، حتى ١٠ ميغابايت'), up));
+      h('label.field', 'رفع خطاب البنك أو شهادة الآيبان', h('small', 'PDF أو صورة، حتى 10 ميغابايت'), up));
   };
   drawDoc();
 
