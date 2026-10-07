@@ -7032,3 +7032,58 @@ begin
     where h_year = 1447 and title = 'عنوانٌ من البنغالية'));
   raise notice 'PASS: الرفعُ الجماعي: التاريخُ لازمٌ، والعنوانُ يُورَث من جمعتِه';
 end $$;
+
+-- =====================================================================
+-- ٧٠) ما لا مسجدَ له لا يضيع، ولا يدخل بالرفع الجماعي (إصلاح ٣١٦)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_sec uuid; v_id uuid; v_g jsonb; v_n int;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select id into v_sec from public.arch_sections where h_year = 1448 and name = 'الخطب';
+
+  -- خطبةٌ حُفظت بلا مسجد: تُعرَض في أسبوعها صفًّا موسومًا
+  v_id := public.save_arch_sermon(jsonb_build_object(
+    'section_id', v_sec, 'sermon_date', '2026-07-03',
+    'title', 'خطبةٌ بلا مسجد',
+    'versions', jsonb_build_array(jsonb_build_object(
+      'language_code', 'en', 'body_html', '<p>x</p>'))));
+  if (select mosque from public.arch_sermons where id = v_id) is not null then
+    raise exception 'FAIL: نُسب المسجدُ من تلقاء نفسه';
+  end if;
+  if not exists (select 1 from public.arch_weeks(1448) w
+                  where w.others @> jsonb_build_array(jsonb_build_object('title', 'خطبةٌ بلا مسجد'))) then
+    raise exception 'FAIL: غابت الخطبةُ التي لا مسجدَ لها عن أسبوعها';
+  end if;
+  if not exists (select 1 from public.arch_no_mosque(1448) n where n.id = v_id) then
+    raise exception 'FAIL: لم تظهر في كشف ما لا مسجدَ له';
+  end if;
+  -- ومتى حُدِّد مسجدُها أخذت صفَّها
+  perform public.save_arch_sermon(jsonb_build_object(
+    'id', v_id, 'section_id', v_sec, 'sermon_date', '2026-07-03',
+    'mosque', 'makkah', 'title', 'خطبةٌ بلا مسجد'));
+  if exists (select 1 from public.arch_no_mosque(1448) n where n.id = v_id) then
+    raise exception 'FAIL: بقيت في كشف ما لا مسجدَ له بعد تحديده';
+  end if;
+  if not exists (select 1 from public.arch_weeks(1448) w
+                  where w.makkah ->> 'title' = 'خطبةٌ بلا مسجد') then
+    raise exception 'FAIL: لم تأخذْ صفَّ الحرام بعد تحديد مسجدها';
+  end if;
+
+  -- والرفعُ الجماعي يَردُّ ما لا مسجدَ له ويُبيّن سببَه
+  v_g := public.import_arch_sermons(jsonb_build_object(
+    'section_id', v_sec, 'items', jsonb_build_array(jsonb_build_object(
+      'sermon_date', '2026-07-10', 'title', 'بندٌ بلا مسجد',
+      'versions', jsonb_build_array(jsonb_build_object(
+        'language_code', 'en', 'body_html', '<p>y</p>'))))));
+  if (v_g ->> 'skipped')::int <> 1 then
+    raise exception 'FAIL: دخل بندٌ بلا مسجد (%)', v_g;
+  end if;
+  if (v_g -> 'rows' -> 0 ->> 'why') <> 'بلا مسجد' then
+    raise exception 'FAIL: لم يُبيَّن أنّ سببَ الردِّ خلوُّه من المسجد (%)', v_g;
+  end if;
+
+  perform public.delete_arch_sermon(v_id);
+  raise notice 'PASS: ما لا مسجدَ له يُعرَض ليُصحَّح، ولا يدخل بالرفع الجماعي';
+end $$;
