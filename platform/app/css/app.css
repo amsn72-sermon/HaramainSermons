@@ -1746,7 +1746,7 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .week-body { display: grid; gap: 6px; padding: 8px 12px; }
 .sm-row { padding: 6px 0; }
 .sm-row + .sm-row { border-top: 1px dashed var(--border); }
-.sm-row.empty { opacity: .72; }
+.sm-row.gone { opacity: .72; }
 .sm-no { display: inline-block; min-width: 2.2em; color: var(--muted); font-size: .78rem;
   direction: ltr; }
 .sm-title { color: var(--gold); }
@@ -1826,3 +1826,28 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .cert-stage-wrap { align-items: flex-start; }
 .cert-stage { align-self: flex-start; }
 .cd-wrap > .cd-props, .cd-wrap > .cd-stage { align-content: start; }
+
+/* الصفُّ الذي منع الاعتماد: يُظلَّل ويُقفَز إليه (ملاحظة ٣١٦) */
+.imp-tbl tr.bad-row { background: color-mix(in srgb, var(--bad, #8a3b3b) 22%, transparent);
+  outline: 1px solid var(--bad, #8a3b3b); }
+
+/* ما لم يُعرَفْ مسجدُه: صفٌّ ثالثٌ موسومٌ ليُصحَّح (إصلاح ٣١٦) */
+.mosque-group.nomosque { border-top: 1px solid var(--bad, #8a3b3b); }
+.mosque-group.nomosque .mosque-head b { color: var(--bad, #c06c6c); }
+
+/* الأسابيعُ مضغوطةٌ على قدر نصِّها، فتُمرَّر الخمسون بيُسر (ملاحظة ٣٢٦) */
+.weeks { gap: 6px; }
+.week-card .week-head { padding: 3px 8px; margin: 0; border-bottom: 0; min-height: 0;
+  align-items: center; gap: 8px; font-size: .9rem; line-height: 1.5; }
+.week-card .week-head .badge { padding: 0 6px; font-size: .72rem; }
+.week-card .mosque-head { padding: 2px 8px; min-height: 0; gap: 6px;
+  font-size: .86rem; line-height: 1.5; }
+.week-card .week-body { padding: 2px 8px 4px; gap: 2px; }
+.week-card .sm-row { padding: 1px 0; min-height: 0; }
+.week-card .sm-row.gone { padding: 0; }
+.week-card .fold-btn { width: 22px; height: 20px; font-size: .7rem; padding: 0; }
+.week-card .icon-btn { padding: 1px 4px; }
+.week-card .lang-chips { margin-top: 1px; }
+.week-card .lang-chip { padding: 0 7px; font-size: .72rem; }
+.week-card .mosque-head .btn { padding: 1px 7px; font-size: .74rem; line-height: 1.5; }
+.week-card .badge { line-height: 1.5; }
