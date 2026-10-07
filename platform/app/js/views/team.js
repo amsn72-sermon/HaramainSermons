@@ -975,7 +975,13 @@ export async function render(ctx, opts = {}) {
     table.replaceChildren(list.length ? h('div.table-wrap', h('table.responsive',
       h('thead', h('tr', ['الاسم', 'الدور', 'اللغات', showPerf ? 'التقييم' : 'رقم العضوية', 'السرية', 'الحالة', ''].map(t => h('th', t)))),
       h('tbody', list.map(m => h('tr',
-        h('td', { 'data-label': 'الاسم' }, h('b', m.full_name), h('span.sub', { dir: 'ltr' }, m.email)),
+        // الاسمُ نفسُه يفتح الملفَّ: لا يُبحَث عن زرٍّ في طرف الصفّ (ملاحظة ٣٠١)
+        h('td', { 'data-label': 'الاسم' },
+          canManage(m)
+            ? h('button.name-link', { type: 'button', title: 'افتحْ ملفَّه',
+                onclick: () => edit(m) }, m.full_name)
+            : h('b', m.full_name),
+          h('span.sub', { dir: 'ltr' }, m.email)),
         h('td', { 'data-label': 'الدور' }, roleLabel(m),
           m.admin_title ? h('div.small.muted', 'بصلاحية منسق') : null,
           leadScope(m) ? h('div.small.muted', leadScope(m)) : null,

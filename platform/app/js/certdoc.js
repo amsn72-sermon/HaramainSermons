@@ -64,8 +64,17 @@ function facts(c) {
   return rows;
 }
 
+// الشعاراتُ الثلاثةُ الافتراضية: الهيئةُ والشؤونُ الدينيةُ يمينًا،
+//   وجامعةُ أمِّ القرى يسارًا (ملاحظتا ٣١٠ و٣١٢)
+export const DEFAULT_CERT_MARKS = [
+  { src: AUTH_LOGO,                x: 6,  y: 5, h: 18 },
+  { src: '/assets/presidency.png', x: 22, y: 5, h: 18 },
+  { src: '/assets/uqu-logo.png',   x: 82, y: 5, h: 18 }
+];
+
 export function certHtml(c, memberName) {
   const d = c.design || {};
+  const marks = Array.isArray(d.logos) && d.logos.length ? d.logos : DEFAULT_CERT_MARKS;
   const th = CERT_THEMES[d.theme] || CERT_THEMES.classic;
   const land = d.landscape !== false;        // الأفقيُّ هو الأصل
   const qr = c.serial_no ? qrDataUri(certVerifyUrl(c), { margin: 1, dark: th.ink }) : null;
@@ -125,14 +134,14 @@ export function certHtml(c, memberName) {
 </style></head><body><div class="sheet">
 <div class="spine"></div>
 ${d.watermark === false ? '' : `<div class="wm"><img src="${esc(d.wm_src || AUTH_LOGO)}" alt=""></div>`}
-${(Array.isArray(d.logos) ? d.logos : []).map(g => `<div class="mark" style="`
+${marks.map(g => `<div class="mark" style="`
   + `top:${Number(g.y) || 0}%; inset-inline-start:${Number(g.x) || 0}%;">`
   + `<img src="${esc(g.src)}" style="height:${Math.max(5, Math.min(60, Number(g.h) || 14))}mm" alt=""></div>`).join('')}
 ${c.status === 'revoked' ? '<div class="revoked">ملغاة</div>' : ''}
 <div class="body">
-<header>
+${d.header === false ? '<div style="height:20mm"></div>' : `<header>
   <img class="auth" src="${esc(d.header_src || AUTH_LOGO)}" alt="الهيئة العامة للعناية بشؤون المسجد الحرام والمسجد النبوي">
-</header>
+</header>`}
 <div class="kind">${esc(KIND[c.kind] || '')}</div>
 <h1>${esc(c.title || '')}</h1>
 ${ORNAMENT(th.gold)}

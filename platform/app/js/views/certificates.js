@@ -29,6 +29,10 @@ export async function render() {
       + 'ويعتمدها مديرُ المشروع فتصدر برقمها وباركودِ تحقّقها.'),
     tabs, h('div.card.stack', list));
 
+  // قالبُ التصميم المحفوظ: يسري على كلِّ شهادةٍ تُصدَر (ملاحظة ٣١٢)
+  let tpl = {};
+  try { tpl = (await db.rpc('cert_design')) || {}; } catch { tpl = {}; }
+
   let members = [];
   try {
     members = await db.select('profiles', { select: 'id,full_name,role,status',
@@ -37,12 +41,18 @@ export async function render() {
   const nameOf = id => members.find(m => m.id === id)?.full_name || '';
 
   function drawTabs() {
-    fill(tabs, [['', 'الكل'], ['draft', 'المسوّدات'], ['issued', 'الصادرة'], ['revoked', 'الملغاة']]
-      .map(([k, label]) => {
-        const b = h('button.tab', { type: 'button', 'aria-selected': want === k ? 'true' : 'false' }, label);
-        b.onclick = () => { want = k; drawTabs(); draw(); };
-        return b;
-      }));
+    fill(tabs, [
+      ...[['', 'الكل'], ['draft', 'المسوّدات'], ['issued', 'الصادرة'], ['revoked', 'الملغاة']]
+        .map(([k, label]) => {
+          const b = h('button.tab', { type: 'button', 'aria-selected': want === k ? 'true' : 'false' }, label);
+          b.onclick = () => { want = k; drawTabs(); draw(); };
+          return b;
+        }),
+      // تصميمُ الشهادة شاشةٌ قائمةٌ بذاتها كشاشة بطاقات العمل (ملاحظة ٣١٢)
+      (isManager() || can('cert_design'))
+        ? h('a.tab', { href: '/app/cert-design', 'aria-selected': 'false' }, '🖌 تصميمُ الشهادة')
+        : null
+    ].filter(Boolean));
   }
 
   async function draw() {
@@ -154,8 +164,8 @@ export async function render() {
       body:     h('textarea', { rows: 3, 'aria-label': 'ما باشره' }, cur.body || '')
     };
 
-    // تبويبُ تصميم الشهادة (ملاحظة ٢٦٧ هـ و ك)
-    const d = cur.design || {};
+    // القالبُ المحفوظُ هو الأصل، وما في الشهادة يعلوه (ملاحظة ٣١٢)
+    const d = { ...(tpl || {}), ...(cur.design || {}) };
     const theme = h('select', { 'aria-label': 'القالب' },
       Object.entries(CERT_THEMES).map(([k, v]) =>
         h('option', { value: k, selected: (d.theme || 'classic') === k }, v.name)));
@@ -316,7 +326,7 @@ export async function render() {
             role_text: f.role_text.value.trim(), body: f.body.value.trim(),
             signer_name: signer.value.trim(), signer_role: signerRole.value.trim(),
             signature: sign.value,
-            design: { theme: theme.value, landscape: landscape.checked,
+            design: { ...d, theme: theme.value, landscape: landscape.checked,
                       signature_src: signSrc.value.trim() || null,
                       watermark: wmOn.checked,
                       wm_size: Number(wmSize.value), wm_opacity: Number(wmOp.value) / 100,

@@ -156,6 +156,17 @@ export async function render(ctx) {
     } catch (e) { toast(e.message, 'bad'); }
   });
 
+  // تاريخُ انتهاء الهوية: يحفظه العضوُ لنفسه (ملاحظة ٣٠٧)
+  const expiry = h('input', { type: 'date', value: priv.id_expiry || '',
+    'aria-label': 'تاريخ انتهاء الهوية' });
+  expiry.onchange = () => busy(expiry, async () => {
+    try {
+      await db.rpc('set_my_id_expiry', { p_expiry: expiry.value || null });
+      priv.id_expiry = expiry.value || null;
+      toast('حُفظ تاريخُ انتهاء الهوية.', 'ok');
+    } catch (e) { toast(e.message, 'bad'); }
+  });
+
   // صورة الهوية أو الإقامة
   const idFile = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp,application/pdf',
     'aria-label': 'صورة الهوية أو الإقامة' });
@@ -209,7 +220,10 @@ export async function render(ctx) {
       h('b', 'صورة الهوية أو الإقامة'),
       h('p.small.muted', 'صورةٌ أو ملف PDF، ولا يطّلع عليها إلا المنسق ومدير المشروع.'),
       h('div.row', idFile, idUp),
-      priv.iqama_path ? h('span.small.ok', 'مرفوعة') : null),
+      priv.iqama_path ? h('span.small.ok', 'مرفوعة') : null,
+      // تاريخُ الانتهاء يُطلب منك لتُنبَّه قبل أن تقف أعمالُك (ملاحظة ٣٠٧)
+      h('label.field', 'تاريخُ انتهاء الهوية', expiry,
+        h('small', 'نُنبّهك قبل انتهائها بمدّة، فتُجدّدها في وقتها'))),
     h('p.small.muted', 'والجنسية ومكان الإقامة والصورة الشخصية من بطاقتيهما في هذه الصفحة.'),
     h('div.row', sendBtn,
       dataState === 'submitted' ? h('span.small.muted', 'بياناتك عند المنسق الآن.') : null));
@@ -333,6 +347,76 @@ export async function render(ctx) {
     contribCard({ own: true }).catch(() => null)          // مشاركتي في الدليل (ملاحظة ٢٣٥)
   ]);
 
+  // ------------------------------------------------------------------
+  // مستنداتي وتجديدُها: يبتدئه العضوُ متى شاء، وتطلبه الإدارةُ بسبب
+  //   مكتوب. والقديمُ معمولٌ به حتى يُعتمد الجديد (ملاحظة ٣٠٨)
+  // ------------------------------------------------------------------
+  const DOC_NAME = { iqama: 'الهوية أو الإقامة', photo: 'الصورة الشخصية',
+    bank: 'الحساب البنكي' };
+  const docsCard = h('div.card.stack');
+  (async () => {
+    let rows = [];
+    try { rows = await db.rpc('my_docs_state') || []; } catch { return; }
+    rows = rows.filter(r => r.status || r.renewal_open);
+    if (!rows.length) return;
+
+    const askOwn = async r => {
+      const why = h('input', { 'aria-label': 'السبب',
+        placeholder: 'جدّدتُ هويتي · بدّلتُ حسابي…' });
+      const res = await dialog({
+        title: `تجديدُ ${DOC_NAME[r.kind] || r.kind}`,
+        body: h('div.stack',
+          h('p.small.muted', 'يُفتح لك بابُ الرفع، ويبقى القديمُ معمولًا به حتى '
+            + 'يُعتمد الجديد. ولا يلزمك إذنٌ سابق.'),
+          h('label.field', 'لِمَ تُجدّده؟ (اختياري)', why)),
+        buttons: [
+          { label: 'اطلبِ التجديد', kind: 'primary', value: () => ({ why: why.value.trim() }) },
+          { label: 'إلغاء', value: null }
+        ]
+      });
+      if (!res) return;
+      try {
+        await db.rpc('ask_renewal',
+          { p_member: me.id, p_kind: r.kind, p_reason: res.why || null });
+        toast('فُتح بابُ التجديد — ارفعِ الجديد.', 'ok');
+        ctx.navigate('/app/me', { replace: true });
+      } catch (e) { toast(e.message, 'bad'); }
+    };
+
+    const row = r => {
+      const expired = r.days_left != null && Number(r.days_left) < 0;
+      const soon = r.days_left != null && Number(r.days_left) >= 0 && Number(r.days_left) <= 90;
+      return h('div.row.between.wrap.doc-row',
+        h('div.stack', { style: { gap: '2px' } },
+          h('b', DOC_NAME[r.kind] || r.kind),
+          r.id_expiry
+            ? h('span.small', { class: expired ? 'bad' : soon ? 'warn' : 'muted' },
+                expired ? `انتهت في ${fmtDate(r.id_expiry)}`
+                  : `تنتهي في ${fmtDate(r.id_expiry)}`)
+            : null,
+          r.renewal_open
+            ? h('span.small.warn', r.asked_by_admin
+                ? `طُلب منك تجديدُها${r.renewal_reason ? ` — ${r.renewal_reason}` : ''}`
+                : 'طلبُ تجديدٍ مفتوح — ارفعِ الجديد')
+            : null,
+          r.note ? h('span.small.bad', `سببُ الإعادة: ${r.note}`) : null),
+        h('div.row', { style: { gap: '6px' } },
+          h('span.badge', { class: r.status === 'approved' ? 'ok'
+            : r.status === 'rejected' ? 'bad' : 'warn' },
+            r.status === 'approved' ? 'معتمَد'
+              : r.status === 'rejected' ? 'أُعيد إليك' : 'تحت المراجعة'),
+          (!r.renewal_open && r.status === 'approved')
+            ? h('button.btn.xs', { type: 'button', onclick: () => askOwn(r) }, 'تجديد')
+            : null));
+    };
+
+    docsCard.replaceChildren(
+      h('b', 'مستنداتي'),
+      h('p.small.muted', 'ما اعتُمد منها يبقى معمولًا به. وإن جدّدتَ هويتَك أو بدّلتَ '
+        + 'حسابك فاطلبِ التجديدَ من هنا، ثم ارفعِ الجديد.'),
+      h('div.stack', { style: { gap: '8px' } }, rows.map(row)));
+  })();
+
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'حسابي'), h('h1', 'بياناتي'),
       h('p.muted', 'بياناتك كما هي مسجّلة في المشروع، وصورتك الشخصية، وحسابك البنكي.'))),
@@ -345,6 +429,7 @@ export async function render(ctx) {
         rules),
       fixed),
     completeCard,
+    docsCard,
     shifts,
     salary,
     editable,

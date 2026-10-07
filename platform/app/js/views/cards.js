@@ -6,8 +6,10 @@ import { urlToDataUrl } from '../photo.js';
 import {
   CARD, HARAMAIN_LOGO, ITEM_LABEL, ITEM_ORDER, COLORS, PRESETS, PRESET_LAYOUT,
   DEFAULT_LAYOUT, normalizeLayout, clampLayout, photoH, itemText, itemStyle,
-  bandStyle, ruleStyle, scaleStyle, logoExtra, newCustom, customLabel, CARD_FONTS, fontStack
+  bandStyle, ruleStyle, scaleStyle, logoExtra, newCustom, customLabel, CARD_FONTS, fontStack,
+  cardVerifyUrl
 } from '../carddesign.js';
+import { qrDataUri } from '../qr.js';
 
 const SCALE = 6;                           // بكسل لكل مليمتر على الشاشة
 const px = mm => `${mm * SCALE}px`;
@@ -15,7 +17,7 @@ const round = v => Math.round(v * 10) / 10;
 
 export async function render(ctx) {
   const [members, priv, langRows, settingsRows, cardRows] = await Promise.all([
-    db.select('profiles', { select: 'id,full_name,role,status,member_no,email,track', order: 'full_name.asc' }),
+    db.select('profiles', { select: 'id,full_name,role,status,member_no,email,track,card_key', order: 'full_name.asc' }),
     db.select('profile_private', { select: 'id,photo_path' }).catch(() => []),
     db.select('member_languages', { select: 'member_id,language_code' }).catch(() => []),
     db.select('card_settings', { select: '*' }).catch(() => []),
@@ -89,6 +91,13 @@ export async function render(ctx) {
       inner = (member && photoOf[member.id])
         ? h('img.cd-photo-img', { alt: '' })
         : h('span.cd-photo-ph', '٤×٦');
+    } else if (key === 'qr') {
+      // باركودُ التحقق (ملاحظة ٣١٣) — في اللوحة يُرسَم برمزٍ تجريبي
+      style.height = px(it.w);
+      inner = h('img', { alt: 'رمز التحقق',
+        src: qrDataUri(cardVerifyUrl(member?.member_no ?? 0, member?.card_key || 'preview'),
+          { margin: 0, dark: it.color || '#1c1a17' }),
+        style: { width: '100%', height: '100%', display: 'block' } });
     } else {
       const text = itemText(key, {
         member: member || { full_name: 'اسم المترجم' }, cfg: cfg(),
@@ -665,6 +674,12 @@ function printCards(rows, cfg, layout, logoData, customData = {}) {
     if (key === 'photo') {
       return `<div class="cd-item cd-photo" style="${style}">${
         row.photo ? `<img src="${row.photo}" alt="">` : '<span>٤×٦</span>'}</div>`;
+    }
+    if (key === 'qr') {
+      const src = qrDataUri(cardVerifyUrl(row.member.member_no, row.member.card_key),
+        { margin: 0, dark: it.color || '#1c1a17' });
+      return `<div class="cd-item" style="${style};height:${it.w}mm">`
+        + `<img src="${src}" alt="" style="width:100%;height:100%;display:block"></div>`;
     }
     const text = itemText(key, {
       member: row.member, cfg,

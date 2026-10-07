@@ -13,6 +13,8 @@ const routes = [
   ['/about', () => import('./views/about.js'), false],
   ['/verify', () => import('./views/verify.js'), false],
   ['/verify-cert', () => import('./views/certverify.js'), false],
+  // التحقّقُ من بطاقة العمل بالباركود المطبوع عليها (ملاحظة ٣١٣)
+  ['/verify-card', () => import('./views/cardverify.js'), false],
   ['/initiative', () => import('./views/about.js').then(m => ({ render: m.initiative })), false],
   ['/policy', () => import('./views/policy.js'), true],
   ['/mfa', () => import('./views/mfa.js'), true],
@@ -28,7 +30,9 @@ const routes = [
   ['/app/team', () => import('./views/staff.js'), true, true],
   ['/app/field', () => import('./views/staff.js').then(m => ({ render: m.field })), true, true],
   ['/app/answers', () => import('./views/staff.js').then(m => ({ render: m.answers })), true, true],
-  ['/app/repo', () => import('./views/repo.js'), true, true],
+  // أرشيفُ الخطب السنوي: أعوامٌ وأسابيعُ جُمَع (ملاحظة ٣٠٣)
+  ['/app/sermons', () => import('./views/sermons.js'), true, 'rp_archive'],
+  ['/app/sermons/:year', () => import('./views/sermons.js'), true, 'rp_archive'],
   // «حضوري» شاشةُ العضو لنفسه: تُفتح لكل مفعَّل، ولا تُعلَّق بصلاحية
   // إدارةِ الحضور — فتلك للاطّلاع على غيره (ملاحظة ٢٣٨)
   ['/app/attend', () => import('./views/attend.js'), true],
@@ -55,6 +59,8 @@ const routes = [
   // لغةٌ بعينها: مصطلحاتُها ومنها يُصدَر قاموسُها (ملاحظة ٢٩٥)
   ['/app/glossary/:lang', () => import('./views/glossary.js'), true],
   ['/app/certificates', () => import('./views/certificates.js'), true, true],
+  // مصمِّمُ الشهادات شاشةٌ قائمةٌ بذاتها كمصمِّم البطاقات (ملاحظة ٣١٢)
+  ['/app/cert-design', () => import('./views/certdesign.js'), true, true],
   ['/app/my-certificates', () => import('./views/certificates.js').then(m => ({ render: m.mine })), true],
   ['/app/roles', () => import('./views/roles.js'), true, 'manager'],
   ['/app/rooms', () => import('./views/rooms.js'), true],
@@ -66,7 +72,7 @@ const routes = [
 const PERM_OF = {
   '/app/new': 'mat_add',
   '/app/staff': 'tm_view', '/app/staff/admins': 'tm_view', '/app/team': 'tm_view',
-  '/app/field': 'tm_view', '/app/answers': 'tm_view', '/app/repo': 'rp_archive',
+  '/app/field': 'tm_view', '/app/answers': 'tm_view',
   '/app/cards': 'cards',
   '/app/payroll': 'pay_view',
   '/app/bank-accounts': 'bank_view',

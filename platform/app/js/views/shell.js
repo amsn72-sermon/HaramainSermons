@@ -119,7 +119,7 @@ export function staffShell(view, path) {
   const flow = extra => group('سير العمل', [
     link('/app', 'المتابعة'),
     ...(extra || []),
-    link('/app/repo', 'مستودع الترجمة'),
+    link('/app/sermons', 'أرشيف الخطب'),
     link('/app/archive', 'أرشيف الترجمة'),
     link('/app/stats', 'دليل الإنتاج'),
     link('/app/interpretation', 'الترجمة الفورية')], { open: true });

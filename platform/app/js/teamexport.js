@@ -371,7 +371,6 @@ function dictPdf(parts, title, opts = {}) {
     }
 
     const WIN_PX = mm2px(WIN);
-    const idxAll = [];
 
     for (const part of parts) {
       const blocks = [{ kind: 'head',
@@ -417,7 +416,6 @@ function dictPdf(parts, title, opts = {}) {
             cur.last = b.ar;
           };
         } else if (b.kind === 'letter') {
-          b.onPlace = () => idxAll.push([part.name, b.letter, out.length + sheets.length]);
         }
       }
       flowBlocks(blocks, WIN_PX, nextBox);
@@ -436,22 +434,9 @@ function dictPdf(parts, title, opts = {}) {
       out.push(...sheets.map(s => s.sheet));
     }
 
-    // ٣) فهرسُ الحروف: الحرفُ ورقمُ صفحته (ملاحظة ٢٩٥ ز)
-    if (letters && idxAll.length) {
-      const sh = el('div', 'sheet');
-      sh.append(img(LETTERHEAD));
-      const win = el('div', 'win');
-      win.append(el('h1', null, 'فهرسُ الحروف'));
-      const box = el('div', 'idx');
-      for (const [lang, L, pg] of idxAll) {
-        box.append(el('div', null,
-          `${escapeHtml(parts.length > 1 ? lang + ' — ' : '')}${escapeHtml(L)} … ${pg}`));
-      }
-      win.append(box);
-      sh.append(win);
-      sh.append(el('div', 'pageno', String(out.length + 1)));
-      out.push(sh);
-    }
+    // ولا صفحةَ «فهرسِ الحروف» في آخره: الفاصلةُ الحرفيةُ في صدر كلِّ
+    //   حرفٍ داخلَ المتن تُغني عنها، وصفحاتٌ كهذه تمتلئ بأرقامٍ لا
+    //   يُراجعها أحد (ملاحظة ٣٠٦)
 
     pages.replaceChildren(...out);
     measure.remove();

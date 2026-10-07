@@ -1,7 +1,7 @@
 // شؤون الفريق: الانضمام والأعضاء، وتدقيق المستندات، والحسابات البنكية في شاشة واحدة (ملاحظة ٩٨)
 // وتحت «الفريق» ثلاث قوائم مستقلة: الإداريون، والمترجمون المتخصصون،
 // والمرشدون المكانيون (ملاحظتا ٩٩ و١٠١)
-import { h, toast, busy, dialog, fmtDateTime, confirm } from '../ui.js';
+import { h, toast, busy, dialog, fmtDate, fmtDateTime, confirm } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { state, isManager } from '../store.js';
 import { render as teamRender } from './team.js';
@@ -53,6 +53,8 @@ export async function render(ctx, group = 'translators') {
   const panel = h('div.staff-panel');
   const TABS = [
     ['team', scr.tab, team.pendingCount],
+    // الهويةُ تبويبٌ مستقلٌّ تُطابَق فيه بياناتُها بصورتها (ملاحظة ٣٠٧)
+    ['ids',  'الهوية الشخصية', 0],
     ['docs', 'تدقيق المستندات', 0],
     ['bank', 'الحسابات البنكية', 0]
   ];
@@ -60,12 +62,12 @@ export async function render(ctx, group = 'translators') {
   const mineCount = byGroup.find(r => r.grp === group);
   if (mineCount) {
     // والبيانات المرفوعة للتدقيق تُعدّ مع المستندات (ملاحظة ١٧٩)
-    TABS[1][2] = Number(mineCount.photos || 0) + Number(mineCount.iqamas || 0);
+    TABS[2][2] = Number(mineCount.photos || 0) + Number(mineCount.iqamas || 0);
     TABS[0][2] = Number(TABS[0][2] || 0) + Number(mineCount.data || 0);
-    TABS[2][2] = Number(mineCount.banks || 0);
+    TABS[3][2] = Number(mineCount.banks || 0);
   } else if (group === 'translators') {
-    TABS[1][2] = Number(counts.photos || 0) + Number(counts.iqamas || 0);
-    TABS[2][2] = Number(counts.banks || 0);
+    TABS[2][2] = Number(counts.photos || 0) + Number(counts.iqamas || 0);
+    TABS[3][2] = Number(counts.banks || 0);
   }
 
   let current = TABS.some(t => t[0] === want) ? want : 'team';
@@ -90,6 +92,7 @@ export async function render(ctx, group = 'translators') {
         group === 'admins' ? registrationCard(ctx) : null,
         group === 'admins' ? securityCard(ctx) : null,
         team.joins, team.cityTabs, team.filters, team.table].filter(Boolean));
+      else if (key === 'ids') panel.replaceChildren(await identitySection(group));
       else if (key === 'docs') panel.replaceChildren(await docsSection(ctx, team, scr, group));
       else panel.replaceChildren(await bankAdmin(ctx, { parts: true, only: ids, reloadPath: `${scr.path}?tab=bank` }));
     } catch (err) { panel.replaceChildren(h('p.small.bad', err.message)); }
@@ -196,6 +199,208 @@ function securityCard(ctx0) {
 const GROUP_OF = m => (['manager', 'coordinator', 'supervisor'].includes(m.role) ? 'admins'
   : m.track === 'answers' ? 'answers' : (m.track === 'field' ? 'field' : 'translators'));
 const GROUP_NAME = { admins: 'الحسابات الإدارية', translators: 'المترجمون المتخصصون', field: 'المرشدون المكانيون' };
+
+// ---------------------------------------------------------------------
+// الهوية الشخصية: البياناتُ والصورةُ مجتمعةً فتُطابَق، ثم قبولٌ أو إعادة
+//   (ملاحظة ٣٠٧). ولا يُفتح إلا لمن مُنح مفتاحَ الاطّلاع، ومنحُه بيد
+//   مدير المشروع — ومن لا يملكه لا يرى التبويبَ شيئًا (ملاحظة ٢٩٤).
+// ---------------------------------------------------------------------
+const ID_TYPE_LABEL = { national: 'هوية وطنية أو إقامة', passport: 'جواز سفر' };
+
+async function identitySection(group = 'translators') {
+  const box = h('div.stack');
+  const summary = h('p.small.muted');
+  const filter = h('select', { 'aria-label': 'التصفية' },
+    h('option', { value: 'pending' }, 'ما ينتظر التدقيق'),
+    h('option', { value: 'expiring' }, 'ما انتهى أو قارب'),
+    h('option', { value: 'all', selected: true }, 'الكل'));
+
+  let rows = [];
+  const load = async () => {
+    try { rows = await db.rpc('identity_sheet', { p_group: group }) || []; }
+    catch { rows = []; }
+  };
+  await load();
+
+  if (!rows.length) {
+    return h('div.card.stack',
+      h('h3', 'الهوية الشخصية'),
+      h('p.muted', 'هذا خارجَ نطاقِ عملك الحالي.'));
+  }
+
+  // البتُّ في الهوية: قبولٌ أو إعادةٌ بسببٍ مكتوب
+  const decide = async (r, decision) => {
+    let note = null;
+    if (decision === 'rejected') {
+      const why = h('textarea', { rows: 2, 'aria-label': 'سبب الإعادة' });
+      const res = await dialog({
+        title: `إعادةُ هوية ${r.full_name}`,
+        body: h('div.stack',
+          h('p.small.muted', 'يُكتب السببُ فيصل صاحبَه، ويُطلب منه تجديدُها.'),
+          h('label.field', 'السبب', why)),
+        buttons: [
+          { label: 'أعِدْها', kind: 'bad',
+            validate: () => (why.value.trim().length >= 5 ? true : 'اكتب السبب'),
+            value: () => why.value.trim() },
+          { label: 'إلغاء', value: null }
+        ]
+      });
+      if (!res) return;
+      note = res;
+    }
+    try {
+      await db.rpc('review_member_doc',
+        { p_member: r.member_id, p_kind: 'iqama', p_decision: decision, p_note: note });
+      if (decision === 'rejected') {
+        await db.rpc('ask_renewal',
+          { p_member: r.member_id, p_kind: 'iqama', p_reason: note }).catch(() => {});
+      }
+      toast(decision === 'approved' ? 'اعتُمدت الهوية.' : 'أُعيدت الهويةُ للعضو.', 'ok');
+      await load(); draw();
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+
+  // تعديلُ ما قرأتَه في الصورة: الرقمُ والنوعُ والجنسيةُ والتاريخ
+  const editData = async r => {
+    const kind = h('select', { 'aria-label': 'نوع الهوية' },
+      Object.entries(ID_TYPE_LABEL).map(([k, v]) =>
+        h('option', { value: k, selected: (r.id_type || 'national') === k }, v)));
+    const no = h('input', { dir: 'ltr', value: r.national_id || '', maxlength: 15,
+      'aria-label': 'رقم الهوية' });
+    const nat = h('input', { value: r.nationality || '', 'aria-label': 'الجنسية' });
+    const exp = h('input', { type: 'date', value: r.id_expiry || '',
+      'aria-label': 'تاريخ الانتهاء' });
+    const res = await dialog({
+      title: `بياناتُ هوية ${r.full_name}`,
+      body: h('div.stack',
+        h('p.small.muted', 'تُقرأ من الصورة وتُكتب هنا، فتُطابَق عند كلِّ مراجعة.'),
+        h('div.grid-2',
+          h('label.field', 'نوع الهوية', kind),
+          h('label.field', 'رقم الهوية', no),
+          h('label.field', 'الجنسية', nat),
+          h('label.field', 'تاريخ الانتهاء', exp))),
+      buttons: [{ label: 'حفظ', kind: 'primary',
+        value: () => ({ kind: kind.value, no: no.value.trim(),
+          nat: nat.value.trim(), exp: exp.value || null }) }, { label: 'إلغاء', value: null }]
+    });
+    if (!res) return;
+    try {
+      await db.rpc('set_identity', { p_member: r.member_id, p_id_type: res.kind,
+        p_national_id: res.no || null, p_nationality: res.nat || null, p_expiry: res.exp });
+      toast('حُفظت بياناتُ الهوية.', 'ok');
+      await load(); draw();
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+
+  // طلبُ تجديدٍ من الإدارة بسببٍ مكتوب (ملاحظة ٣٠٨)
+  const askRenew = async r => {
+    const why = h('input', { value: 'قاربت هويتُك على الانتهاء',
+      'aria-label': 'سبب الطلب' });
+    const res = await dialog({
+      title: `طلبُ تجديدٍ من ${r.full_name}`,
+      body: h('div.stack',
+        h('p.small.muted', 'يصل العضوَ إشعارٌ بالسبب، ويظهر له المطلوبُ في «بياناتي». '
+          + 'والقديمُ معمولٌ به حتى يُعتمد الجديد.'),
+        h('label.field', 'السبب', why)),
+      buttons: [{ label: 'أرسِلْ', kind: 'primary',
+        value: () => why.value.trim() || 'يُرجى تجديدُ الهوية' }, { label: 'إلغاء', value: null }]
+    });
+    if (!res) return;
+    try {
+      await db.rpc('ask_renewal', { p_member: r.member_id, p_kind: 'iqama', p_reason: res });
+      toast('أُرسل طلبُ التجديد.', 'ok');
+      await load(); draw();
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+
+  const expiryBadge = r => {
+    if (r.id_expiry == null) return h('span.badge.warn', { title: 'لم يُسجَّل' }, 'بلا تاريخ');
+    const d = Number(r.days_left);
+    if (d < 0) return h('span.badge.bad', `انتهت قبل ${Math.abs(d)} يومًا`);
+    if (d <= 90) return h('span.badge.warn', `يبقى ${d} يومًا`);
+    return h('span.badge.ok', fmtDate(r.id_expiry));
+  };
+
+  const card = r => {
+    const view = h('div.id-view');
+    if (r.iqama_path) {
+      const img = h('img.id-shot', { alt: `صورةُ هوية ${r.full_name}` });
+      storage.signedUrl('private-docs', r.iqama_path, 600)
+        .then(u => { img.src = u; })
+        .catch(() => view.replaceChildren(h('span.small.muted', 'تعذّر عرضُ الصورة')));
+      const open = h('button.btn.xs.ghost', { type: 'button' }, 'افتحْها كبيرة');
+      open.onclick = () => busy(open, async () => {
+        try { window.open(await storage.signedUrl('private-docs', r.iqama_path, 600), '_blank', 'noopener'); }
+        catch (e) { toast(e.message, 'bad'); }
+      });
+      view.replaceChildren(img, open);
+    } else {
+      view.replaceChildren(h('div.id-shot.empty', h('span', 'لم تُرفع')));
+    }
+
+    const st = r.iqama_status || 'pending';
+    const [label, tone] = DOC_STATE[st] || DOC_STATE.pending;
+
+    return h('div.card.stack.id-card', { class: st === 'pending' ? 'waiting' : '' },
+      h('div.id-grid',
+        view,
+        h('div.stack', { style: { gap: '4px' } },
+          h('div.row.between.wrap',
+            h('b', r.full_name),
+            h('div.row', { style: { gap: '6px' } },
+              h('span.badge', { class: tone }, label),
+              r.renewal_open ? h('span.badge.warn', 'طلبُ تجديدٍ مفتوح') : null)),
+          h('span.small.muted', { dir: 'ltr' }, r.email || ''),
+          h('span.small.muted', GROUP_NAME[GROUP_OF(r)]
+            + (r.member_no ? ` · ${r.member_no}` : '')),
+          h('div.id-facts',
+            h('span', h('small', 'النوع'), h('b', ID_TYPE_LABEL[r.id_type] || '—')),
+            h('span', h('small', 'الرقم'), h('b', { dir: 'ltr' }, r.national_id || '—')),
+            h('span', h('small', 'الجنسية'), h('b', r.nationality || '—')),
+            h('span', h('small', 'الانتهاء'), expiryBadge(r))),
+          r.iqama_note ? h('p.small.bad', { style: { margin: 0 } },
+            'سببُ الإعادة: ', r.iqama_note) : null,
+          r.renewal_reason ? h('p.small.muted', { style: { margin: 0 } },
+            'سببُ التجديد: ', r.renewal_reason) : null,
+          r.iqama_at ? h('span.small.muted', fmtDateTime(r.iqama_at)) : null,
+          h('div.row.wrap', { style: { gap: '6px' } },
+            h('button.btn.xs', { type: 'button', onclick: () => editData(r) }, 'بياناتُ الهوية'),
+            st !== 'approved' && r.iqama_path
+              ? h('button.btn.xs.primary', { type: 'button',
+                  onclick: () => decide(r, 'approved') }, 'اعتماد') : null,
+            st !== 'rejected' && r.iqama_path
+              ? h('button.btn.xs.danger', { type: 'button',
+                  onclick: () => decide(r, 'rejected') }, 'إعادةٌ للعضو') : null,
+            !r.renewal_open
+              ? h('button.btn.xs.ghost', { type: 'button',
+                  onclick: () => askRenew(r) }, 'اطلبْ تجديدًا') : null))));
+  };
+
+  function draw() {
+    const want = filter.value;
+    const list = rows.filter(r => want === 'all'
+      || (want === 'pending' && (r.iqama_status || 'pending') === 'pending')
+      || (want === 'expiring' && r.id_expiry != null && Number(r.days_left) <= 90));
+    const pending = rows.filter(r => (r.iqama_status || 'pending') === 'pending').length;
+    const expiring = rows.filter(r => r.id_expiry != null && Number(r.days_left) <= 90).length;
+    const noDate = rows.filter(r => r.id_expiry == null).length;
+    summary.textContent = `${rows.length} هويةً · ينتظر التدقيق: ${pending}`
+      + ` · انتهت أو قاربت: ${expiring} · بلا تاريخ: ${noDate}`;
+    box.replaceChildren(list.length ? h('div.id-wrap', list.map(card))
+      : h('p.muted', 'لا هوياتٍ في هذه التصفية.'));
+  }
+  filter.onchange = draw;
+  draw();
+
+  return h('div.card.stack',
+    h('div.row.between.wrap',
+      h('h3', 'الهوية الشخصية'),
+      h('label.field', 'التصفية', filter)),
+    h('p.small.muted', 'تُطابَق بياناتُ الهوية بصورتها: النوعُ والرقمُ والجنسيةُ وتاريخُ الانتهاء. '
+      + 'وما لا يُطابق يُعاد للعضو بسببٍ مكتوب، فيُطلب منه تجديدُها.'),
+    summary,
+    box);
+}
 
 async function docsSection(ctx, team, scr, group = 'translators') {
   let people = [];

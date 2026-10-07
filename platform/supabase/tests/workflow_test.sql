@@ -5156,28 +5156,117 @@ begin
     raise exception 'FAIL: بقي الفريقُ معلَّقًا بمن خرج من القيادة';
   end if;
 
-  -- ========== ٢١٨: المستودع — خارج الحساب، وله رقمُ توثيق ==========
-  v_work := public.save_repo_work(jsonb_build_object(
-    'title', 'خطبة قديمة', 'material_type', 'خطب', 'sermon_type', 'خطبة جمعة',
-    'mosque', 'makkah', 'work_date', '2023-03-10',
-    'items', jsonb_build_array(
+  -- ========== ٣٠٣: أرشيفُ الخطب السنوي حلَّ محلَّ المستودع ==========
+  --   الخطبةُ تُحفَظ في أسبوعها، ولها نسخٌ بلغات، ولا تدخل أساسَ العقد
+  v_work := public.save_arch_sermon(jsonb_build_object(
+    'section_id', (select id from public.arch_sections where h_year = 1446 and name = 'الخطب'),
+    'sermon_date', '2024-07-12', 'mosque', 'makkah',
+    'sermon_type', 'خطبة جمعة', 'title', 'خطبة قديمة', 'khateeb', 'الشريم',
+    'versions', jsonb_build_array(
       jsonb_build_object('language_code', 'ar', 'is_source', true, 'body_html', 'نصٌّ عربي', 'words', 2),
-      jsonb_build_object('language_code', 'en', 'media_url', 'https://example.com/a.mp3'))));
-  if v_work is null then raise exception 'FAIL: لم يُحفظ عملُ المستودع'; end if;
-  select count(*) into v_n from public.repo_items where work_id = v_work;
-  if v_n <> 2 then raise exception 'FAIL: نسخُ العمل (%)', v_n; end if;
-  select doc_no into v_no from public.repo_items where work_id = v_work and language_code = 'en';
-  if v_no is null or v_no !~ '^H[0-9]{2}-EN-' then
-    raise exception 'FAIL: رقمُ التوثيق في المستودع (%)', coalesce(v_no, 'ø');
+      jsonb_build_object('language_code', 'en', 'body_html', 'English text'))));
+  if v_work is null then raise exception 'FAIL: لم تُحفظ خطبةُ الأرشيف'; end if;
+  select count(*) into v_n from public.arch_versions where sermon_id = v_work;
+  if v_n <> 2 then raise exception 'FAIL: نسخُ الخطبة (%)', v_n; end if;
+  if (select week_no from public.arch_sermons where id = v_work) is null then
+    raise exception 'FAIL: لم تُنسَب الخطبةُ إلى أسبوعها';
   end if;
-  -- ولا يدخل في أساس العقد
-  if exists (select 1 from public.production_rows r
-              where r.title = 'خطبة قديمة') then
-    raise exception 'FAIL: دخل عملُ المستودع في دليل الإنتاج';
+  if not exists (select 1 from public.arch_weeks(1446) w
+                  where w.makkah ->> 'title' = 'خطبة قديمة') then
+    raise exception 'FAIL: لم تظهرِ الخطبةُ في أسبوعها';
   end if;
-  if (select translations from public.repo_rows where id = v_work) <> 1 then
-    raise exception 'FAIL: عدُّ ترجمات المستودع';
+  if (select count(*) from public.arch_book(1446, 'en')) <> 1 then
+    raise exception 'FAIL: لم تدخلِ الخطبةُ في المجمَّع';
   end if;
+  -- ولا تدخل في أساس العقد
+  if exists (select 1 from public.production_rows r where r.title = 'خطبة قديمة') then
+    raise exception 'FAIL: دخلت خطبةُ الأرشيف في دليل الإنتاج';
+  end if;
+  raise notice 'PASS: أرشيفُ الخطب السنوي: الخطبةُ في أسبوعها، ونسخُها بلغاتها، ومنها المجمَّع';
+
+  -- ========== ٣٠٥: الرفعُ الجماعي: ملفٌ واحدٌ يُشقُّ خطبًا، وما اتّفق ضُمّ ==========
+  --   بندان في جدول المراجعة: أحدُهما جمعةُ خطبةٍ قائمةٍ بلغةٍ أخرى
+  --   فيُضَمُّ إليها، والآخرُ جمعةٌ جديدةٌ فتُنشأ. والناقصُ يُترك.
+  v_g := public.import_arch_sermons(jsonb_build_object(
+    'section_id', (select id from public.arch_sections where h_year = 1446 and name = 'الخطب'),
+    'items', jsonb_build_array(
+      jsonb_build_object(
+        'sermon_date', '2024-07-12', 'mosque', 'makkah', 'title', 'عنوانٌ مرفوع',
+        'khateeb', 'المعيقلي', 'hijri_text', '٦ محرّم ١٤٤٦هـ',
+        'versions', jsonb_build_array(jsonb_build_object(
+          'language_code', 'ur', 'body_html', '<p>اردو متن</p>', 'words', 3))),
+      jsonb_build_object(
+        'sermon_date', '2024-07-19', 'mosque', 'madinah', 'title', 'خطبةٌ جديدةٌ بالرفع',
+        'khateeb', 'القاسم',
+        'versions', jsonb_build_array(jsonb_build_object(
+          'language_code', 'en', 'body_html', '<p>new English</p>'))),
+      jsonb_build_object('mosque', 'makkah', 'title', 'بلا تاريخ'))));
+
+  if (v_g ->> 'created')::int <> 1 then
+    raise exception 'FAIL: المنشأُ بالرفع الجماعي (%)', v_g;
+  end if;
+  if (v_g ->> 'merged')::int <> 1 then
+    raise exception 'FAIL: لم تُضَمَّ اللغةُ إلى خطبةِ الجمعةِ القائمة (%)', v_g;
+  end if;
+  if (v_g ->> 'skipped')::int <> 1 then
+    raise exception 'FAIL: كُتب بندٌ ناقصُ التاريخ (%)', v_g;
+  end if;
+  -- والضمُّ لا يُفسد ما كُتب: العنوانُ القديمُ باقٍ، واللغةُ زادت
+  if (select title from public.arch_sermons where id = v_work) <> 'خطبة قديمة' then
+    raise exception 'FAIL: أفسد الضمُّ عنوانَ الخطبة';
+  end if;
+  select count(*) into v_n from public.arch_versions where sermon_id = v_work;
+  if v_n <> 3 then raise exception 'FAIL: نسخُ الخطبة بعد الضمّ (%)', v_n; end if;
+  if not exists (select 1 from public.arch_sermons
+                  where h_year = 1446 and title = 'خطبةٌ جديدةٌ بالرفع' and mosque = 'madinah') then
+    raise exception 'FAIL: لم تُنشأ خطبةُ الجمعة الجديدة';
+  end if;
+  if exists (select 1 from public.arch_sermons where title = 'بلا تاريخ') then
+    raise exception 'FAIL: كُتبت خطبةٌ بلا تاريخ';
+  end if;
+  -- والرفعُ بإذنٍ: المترجمُ لا يرفع جماعةً
+  perform set_config('request.jwt.claim.sub', v_yus::text, true);
+  begin
+    perform public.import_arch_sermons(jsonb_build_object(
+      'section_id', (select id from public.arch_sections where h_year = 1446 and name = 'الخطب'),
+      'items', '[]'::jsonb));
+    raise exception 'FAIL: رفع المترجمُ خطبًا جماعةً';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.delete_arch_sermon((select id from public.arch_sermons
+    where h_year = 1446 and title = 'خطبةٌ جديدةٌ بالرفع'));
+  raise notice 'PASS: الرفعُ الجماعي: ما اتّفقت جمعتُه ضُمَّ، والجديدُ أُنشئ، والناقصُ تُرك';
+
+  -- ========== ٣١٤ب: المفتاحُ الإداريُّ لا يفيض على غير الإدارة ==========
+  --   فُتح للمنسّق استيرادُ الدليل وتدقيقُ المستندات واللغاتُ كي لا
+  --   تُنزَع منه، ولا يَلزم من ذلك انفتاحُها للمترجم.
+  if not public.perm_allowed(v_crd, 'gl_import') then
+    raise exception 'FAIL: نُزع من المنسّق استيرادُ الدليل';
+  end if;
+  if not public.perm_allowed(v_crd, 'docs_check')
+     or not public.perm_allowed(v_crd, 'st_languages') then
+    raise exception 'FAIL: نُزع من المنسّق تدقيقُ المستندات أو اللغات';
+  end if;
+  if public.perm_allowed(v_yus, 'gl_import')
+     or public.perm_allowed(v_yus, 'docs_check')
+     or public.perm_allowed(v_yus, 'st_languages')
+     or public.perm_allowed(v_yus, 'circ_send') then
+    raise exception 'FAIL: فاض المفتاحُ الإداريُّ على المترجم';
+  end if;
+  -- ومن مُنح صريحًا عمِل: الوسمُ يُقيّد الأصلَ لا المنح
+  insert into public.member_perms (member_id, perm_key, allowed, granted_by)
+  values (v_yus, 'gl_import', true, v_mgr)
+  on conflict (member_id, perm_key) do update set allowed = true;
+  if not public.perm_allowed(v_yus, 'gl_import') then
+    raise exception 'FAIL: لم ينفعِ المنحُ الصريحُ في مفتاحٍ إداري';
+  end if;
+  delete from public.member_perms where member_id = v_yus and perm_key = 'gl_import';
+  if public.perm_allowed(v_yus, 'gl_import') then
+    raise exception 'FAIL: بقي المفتاحُ مفتوحًا بعد سحب المنح';
+  end if;
+  raise notice 'PASS: المفتاحُ الإداريُّ يبقى للمنسّق ولا يفيض على المترجم إلا بمنحٍ صريح';
 
   -- ========== ٢١٩: الحضور بالموقع ==========
   select id into v_site from public.work_sites where city = 'makkah' and is_default limit 1;
@@ -5227,7 +5316,8 @@ begin
     raise exception 'FAIL: لم تُطلب المدينةُ من المترجم';
   end if;
 
-  delete from public.repo_works where id = v_work;
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.delete_arch_sermon(v_work);
   delete from auth.users where id = v_lead;
   perform set_config('request.jwt.claim.sub', v_mgr::text, true);
   perform public.set_member_perms(v_crd, '{}'::jsonb);
@@ -5509,93 +5599,9 @@ begin
   delete from public.shifts where member_id = v_fld and shift_date >= v_m;
   raise notice 'PASS: مواقعُ العمل بيد مدير المشروع، والمناوباتُ تُولَّد وتُعرض قبل الاعتماد';
 end $$;
-
 -- =====================================================================
--- ٦١) المستودعُ بأنواعه ورفعُه الجماعي (ملاحظة ٢٢٦)
+-- ٦١) أُلغي المستودعُ وحلَّ محلَّه أرشيفُ الخطب السنوي (ملاحظة ٣٠٣)
 -- =====================================================================
-do $$
-declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
-        v_tr  uuid := '00000000-0000-0000-0000-00000000000c';
-        v_g jsonb; v_b uuid; v_u1 uuid; v_u2 uuid; v_out jsonb; v_n int;
-begin
-  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
-
-  -- الاستنباطُ من اسم الملف
-  v_g := public.repo_guess('خطبة الجمعة - الحرم المكي - 2024-03-15 - التقوى.pdf');
-  if (v_g ->> 'material_type') <> 'خطب' or (v_g ->> 'sermon_type') <> 'خطبة جمعة'
-     or (v_g ->> 'mosque') <> 'makkah' or (v_g ->> 'language_code') <> 'ar'
-     or (v_g ->> 'work_date') <> '2024-03-15' then
-    raise exception 'FAIL: الاستنباطُ من اسم الملف (%)', v_g;
-  end if;
-  v_g := public.repo_guess('Friday_Sermon_English_Makkah_2024-03-15.docx');
-  if (v_g ->> 'language_code') <> 'en' or (v_g ->> 'is_source') <> 'false' then
-    raise exception 'FAIL: لغةُ الملف الأجنبي (%)', v_g;
-  end if;
-
-  -- الرفعُ إلى صفِّ الانتظار، ثم الاعتماد
-  insert into public.repo_batches (label) values ('دفعةُ اختبار') returning id into v_b;
-  v_u1 := public.stage_repo_upload(jsonb_build_object(
-    'batch_id', v_b, 'file_name', 'خطبة الجمعة - الحرم المكي - 2024-03-15 - التقوى.pdf',
-    'file_path', 'x/ar.pdf'));
-  v_u2 := public.stage_repo_upload(jsonb_build_object(
-    'batch_id', v_b, 'file_name', 'Friday_Sermon_English_Makkah_2024-03-15.pdf',
-    'file_path', 'x/en.pdf'));
-  if v_u1 is null or v_u2 is null then raise exception 'FAIL: لم يُسجَّل المرفوع'; end if;
-
-  -- ولا يُكتب في المستودع شيءٌ قبل الاعتماد
-  if exists (select 1 from public.repo_works where title = 'خطبة الجمعة الحرم المكي التقوى') then
-    raise exception 'FAIL: كُتب العملُ قبل الاعتماد';
-  end if;
-
-  -- يُصحَّح ما أخطأ الاستنباط، ويُوحَّد المفتاحُ فيجتمعان في عملٍ واحد
-  perform public.save_repo_upload(jsonb_build_object(
-    'id', v_u1, 'title', 'خطبة التقوى', 'work_key', 'خطبة التقوى|2024-03-15'));
-  perform public.save_repo_upload(jsonb_build_object(
-    'id', v_u2, 'title', 'خطبة التقوى', 'work_key', 'خطبة التقوى|2024-03-15',
-    'material_type', 'خطب', 'mosque', 'makkah', 'work_date', '2024-03-15'));
-
-  v_out := public.commit_repo_uploads(v_b);
-  if (v_out ->> 'works')::int <> 1 or (v_out ->> 'items')::int <> 2 then
-    raise exception 'FAIL: الاعتمادُ لم يجمعهما في عملٍ واحدٍ بلغتين (%)', v_out;
-  end if;
-  if exists (select 1 from public.repo_uploads where batch_id = v_b and status = 'pending') then
-    raise exception 'FAIL: بقي في الانتظار ما اعتُمد';
-  end if;
-
-  -- ولكلِّ نسخةٍ رقمُ توثيقها
-  select count(*) into v_n from public.repo_items i
-    join public.repo_works w on w.id = i.work_id
-   where w.title = 'خطبة التقوى' and i.doc_no is not null;
-  if v_n <> 2 then raise exception 'FAIL: أرقامُ التوثيق في المرفوع (%)', v_n; end if;
-
-  -- وما نقصه العنوانُ أو النوعُ أو اللغةُ يُتخطّى
-  v_u1 := public.stage_repo_upload(jsonb_build_object(
-    'batch_id', v_b, 'file_name', 'ملفٌ بلا بيانات.pdf', 'file_path', 'x/none.pdf'));
-  perform public.save_repo_upload(jsonb_build_object('id', v_u1, 'material_type', ''));
-  v_out := public.commit_repo_uploads(v_b);
-  if (v_out ->> 'skipped')::int < 1 then
-    raise exception 'FAIL: لم يُتخطَّ الناقص (%)', v_out;
-  end if;
-
-  -- وعددُ كلِّ نوعٍ لأيقونات الشاشة
-  if not exists (select 1 from public.repo_type_counts() c where c.material_type = 'خطب') then
-    raise exception 'FAIL: لم تُحتسب أنواعُ المستودع';
-  end if;
-
-  -- والرفعُ للإدارة لا لغيرها
-  perform set_config('request.jwt.claim.sub', v_tr::text, true);
-  begin
-    perform public.stage_repo_upload(jsonb_build_object(
-      'file_name', 'a.pdf', 'file_path', 'x/a.pdf'));
-    raise exception 'FAIL: رفع المترجمُ إلى المستودع';
-  exception when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
-  end;
-
-  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
-  delete from public.repo_works where title = 'خطبة التقوى';
-  delete from public.repo_batches where id = v_b;
-  raise notice 'PASS: المستودعُ يستنبط من أسماء الملفات، ويُراجَع قبل الاعتماد، ويجمع اللغات في عمل';
-end $$;
 
 -- =====================================================================
 -- ٦٢) مرصدُ المصطلحات، والمعاني بسياقها، وسجلُّ المشاركة (٢٣٤ و٢٣٥)
@@ -6680,4 +6686,133 @@ begin
     raise exception 'FAIL: بقي المرشَّحُ معروضًا بعد توليده';
   end if;
   raise notice 'PASS: المرصدُ لا يقترح ما في الدليل، ومرشَّحُه يُولَّد مصطلحًا';
+end $$;
+
+-- =====================================================================
+-- المفاتيحُ المفصَّلةُ تعمل: المنحُ يُغيّر، والمجهولُ لا يُجيز (ملاحظة ٣١٤)
+-- =====================================================================
+do $$
+declare v_mgr uuid; v_crd uuid; v_tr uuid; v_ok boolean;
+begin
+  select id into v_mgr from public.profiles where role = 'manager' limit 1;
+  select id into v_crd from public.profiles where role = 'coordinator' limit 1;
+  select id into v_tr  from public.profiles where role = 'translator' and status = 'active' limit 1;
+
+  -- ١) المفتاحُ المجهولُ لا يُجيز
+  if public.perm_allowed(v_crd, 'لا-وجود-لهذا-المفتاح') then
+    raise exception 'FAIL: المفتاحُ المجهولُ أجاز';
+  end if;
+  raise notice 'PASS: المفتاحُ المجهولُ ممنوعٌ لا مأذون';
+
+  -- ٢) قبلَ المنح: المنسّقُ لا يوثّق حسابًا مصرفيًّا
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_perm(v_crd, 'bank_verify', null, null, null);
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  begin
+    perform public.verify_bank_account(v_tr, true);
+    raise exception 'FAIL: وثّق المنسّقُ بلا منح';
+  exception when sqlstate '42501' then null;
+  end;
+
+  -- ٣) وبعد المنح: يوثّق
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_perm(v_crd, 'bank_verify', true, null, 'اختبار');
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  if not public.is_admin_for('bank_verify') then
+    raise exception 'FAIL: لم يسرِ المنحُ على المنسّق';
+  end if;
+  raise notice 'PASS: مَنحُ «التحقّق من الحساب المصرفي» يعمل بعد الربط';
+
+  -- ٤) والمترجمُ لا ينال بالمفتاح المفتوحِ أصلًا عملًا إداريًّا
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  if public.is_admin_for('tm_edit') then
+    raise exception 'FAIL: فُتح للمترجم تعديلُ الأعضاء بمفتاحٍ مفتوح';
+  end if;
+  raise notice 'PASS: المفتاحُ المفتوحُ لا يُصيّر المترجمَ إداريًّا';
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_perm(v_crd, 'bank_verify', null, null, null);
+end $$;
+
+-- =====================================================================
+-- الهويةُ الشخصيةُ تُدقَّق، والمستندُ يُجدَّد (ملاحظتا ٣٠٧ و٣٠٨)
+-- =====================================================================
+do $$
+declare v_mgr uuid; v_crd uuid; v_tr uuid; v_n int; v_rid uuid; v_row record;
+begin
+  select id into v_mgr from public.profiles where role = 'manager' limit 1;
+  select id into v_crd from public.profiles where role = 'coordinator' limit 1;
+  select id into v_tr  from public.profiles where role = 'translator' and status = 'active' limit 1;
+
+  -- ١) كشفُ الهويات لا يُفتح إلا بمفتاحه
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  select count(*) into v_n from public.identity_sheet('all');
+  if v_n <> 0 then raise exception 'FAIL: فُتح كشفُ الهويات بلا مفتاح'; end if;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select count(*) into v_n from public.identity_sheet('all');
+  if v_n = 0 then raise exception 'FAIL: كشفُ الهويات خالٍ لمدير المشروع'; end if;
+  raise notice 'PASS: كشفُ الهويات لمدير المشروع ولمن مُنح مفتاحَه وحدَهما';
+
+  -- ٢) ومنحُ المفتاح يفتحه للمنسّق
+  perform public.set_member_perm(v_crd, 'docs_id_view', true, null, 'اختبار');
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  select count(*) into v_n from public.identity_sheet('all');
+  if v_n = 0 then raise exception 'FAIL: لم ينفعِ المنسّقَ مفتاحُ الهوية'; end if;
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_perm(v_crd, 'docs_id_view', null, null, null);
+
+  -- ٣) تاريخُ الانتهاء يُحفَظ ويُحسَب ما بقي منه
+  perform public.set_identity(v_tr, 'national', null, 'سعودي', current_date + 30);
+  select * into v_row from public.identity_sheet('all') where member_id = v_tr;
+  if v_row.days_left is null or v_row.days_left > 31 or v_row.days_left < 29 then
+    raise exception 'FAIL: لم يُحسب ما بقي من الهوية (%)', v_row.days_left;
+  end if;
+  if not exists (select 1 from public.expiring_ids(90) where member_id = v_tr) then
+    raise exception 'FAIL: لم تُعرَض الهويةُ المقاربةُ للانتهاء';
+  end if;
+  raise notice 'PASS: تاريخُ انتهاء الهوية يُحفَظ، وما قارب يُعرَض على الإدارة';
+
+  -- ٤) التجديد: يبتدئه العضوُ لنفسه
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  v_rid := public.ask_renewal(v_tr, 'iqama', 'جدّدتُ هويتي');
+  if v_rid is null then raise exception 'FAIL: لم يستطع العضوُ طلبَ التجديد'; end if;
+  if (select asked_by from public.doc_renewals where id = v_rid) is not null then
+    raise exception 'FAIL: نُسب طلبُ العضو إلى الإدارة';
+  end if;
+
+  -- ولا طلبَ ثانٍ ما دام الأولُ مفتوحًا
+  if public.ask_renewal(v_tr, 'iqama', 'مرةً أخرى') <> v_rid then
+    raise exception 'FAIL: فُتح طلبُ تجديدٍ ثانٍ';
+  end if;
+
+  -- والعضوُ لا يطلب لغيره
+  begin
+    perform public.ask_renewal(v_crd, 'iqama', null);
+    raise exception 'FAIL: طلب العضوُ تجديدًا لغيره';
+  exception when sqlstate '42501' then null;
+  end;
+  raise notice 'PASS: المترجمُ يبتدئ تجديدَ مستنده، ولا يطلب لغيره، ولا يتكرّر الطلب';
+
+  -- ٥) واعتمادُ المستند يُغلق طلبَه، وتُحفَظ نسختُه السابقة
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  update public.profile_private set iqama_path = 'x/iqama-new.jpg' where id = v_tr;
+  perform public.snapshot_doc(v_tr, 'iqama');
+  if not exists (select 1 from public.doc_history where member_id = v_tr and kind = 'iqama') then
+    raise exception 'FAIL: لم تُحفَظ النسخةُ السابقة';
+  end if;
+  perform public.review_member_doc(v_tr, 'iqama', 'approved', null);
+  if exists (select 1 from public.doc_renewals
+              where member_id = v_tr and kind = 'iqama' and state = 'open') then
+    raise exception 'FAIL: بقي طلبُ التجديد مفتوحًا بعد الاعتماد';
+  end if;
+  raise notice 'PASS: اعتمادُ المستند يُغلق طلبَ تجديده، والنسخةُ السابقةُ محفوظة';
+
+  -- ٦) والإدارةُ تطلب التجديدَ بسببٍ مكتوب
+  v_rid := public.ask_renewal(v_tr, 'bank', 'خطابُ البنك غيرُ واضح');
+  if (select asked_by from public.doc_renewals where id = v_rid) is null then
+    raise exception 'FAIL: لم يُسجَّل أنّ الإدارةَ طلبت التجديد';
+  end if;
+  perform public.cancel_renewal(v_rid);
+  raise notice 'PASS: الإدارةُ تطلب التجديدَ بسببٍ مكتوب، ويُلغى الطلب';
 end $$;

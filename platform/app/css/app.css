@@ -1676,3 +1676,99 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .repo-acts { gap: 4px; }
 .repo-view .repo-text { font-size: .86rem; color: var(--muted); max-height: 9rem;
   overflow: auto; white-space: pre-wrap; }
+
+/* الهوية الشخصية: الصورةُ والبياناتُ متجاورتان فتُطابَقان (ملاحظة ٣٠٧) */
+.id-wrap { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 12px; }
+.id-card { padding: 12px; }
+.id-card.waiting { border-inline-start: 3px solid var(--gold); }
+.id-grid { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 12px; align-items: start; }
+.id-view { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.id-shot { width: 100%; height: 110px; object-fit: cover; border-radius: 8px;
+  border: 1px solid var(--border); background: #fff; }
+.id-shot.empty { display: flex; align-items: center; justify-content: center;
+  background: var(--bg); color: var(--muted); font-size: .8rem; }
+.id-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 6px 10px; margin: 4px 0; }
+.id-facts span { display: flex; flex-direction: column; gap: 1px; }
+.id-facts small { font-size: .68rem; color: var(--muted); }
+.id-facts b { font-size: .84rem; }
+@media (max-width: 700px) {
+  .id-wrap { grid-template-columns: 1fr; }
+  .id-grid { grid-template-columns: 1fr; }
+}
+
+/* اسمُ العضو يُضغط فيفتح ملفَّه (ملاحظة ٣٠١) */
+.name-link { border: 0; background: none; padding: 0; font: inherit; font-weight: 700;
+  color: inherit; cursor: pointer; text-align: start; }
+.name-link:hover { color: var(--gold); text-decoration: underline; text-underline-offset: 3px; }
+
+/* مصمِّمُ الشهادة: اللوحةُ تُرسَم بالمولِّد نفسِه (ملاحظة ٣١٢) */
+.cert-stage-wrap { display: flex; justify-content: center; padding: 10px 0;
+  background: repeating-conic-gradient(rgba(127,127,127,.10) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+  border-radius: 10px; }
+.cert-stage { position: relative; width: 100%; max-width: 560px; aspect-ratio: 297 / 210;
+  border: 1px solid #d8cfbd; border-radius: 8px; overflow: hidden;
+  box-shadow: 0 4px 18px rgba(0,0,0,.28); background: #fff; }
+.cert-stage.portrait { aspect-ratio: 210 / 297; max-width: 400px; }
+.cert-frame { position: absolute; inset: 0; width: 297mm; height: 210mm; border: 0;
+  transform-origin: top right; pointer-events: none; }
+.cert-stage.portrait .cert-frame { width: 210mm; height: 297mm; }
+.cert-handles { position: absolute; inset: 0; }
+.cert-handle { position: absolute; border: 1.5px dashed transparent; border-radius: 4px;
+  cursor: grab; touch-action: none; }
+.cert-handle:hover { border-color: var(--gold); background: rgba(188,150,97,.12); }
+.cert-handle.on { border-color: var(--gold); background: rgba(188,150,97,.2); }
+
+/* أرشيفُ الخطب السنوي (ملاحظة ٣٠٣) */
+.year-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.year-tile { display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 18px 12px; border: 1px solid var(--border); border-radius: 14px;
+  background: var(--card); text-decoration: none; color: inherit; transition: .15s; }
+.year-tile:hover { border-color: var(--gold); transform: translateY(-2px); }
+.year-no { font-size: 1.9rem; line-height: 1; color: var(--gold); }
+.year-h { font-size: .7rem; color: var(--muted); }
+.year-meta { display: flex; flex-direction: column; align-items: center; gap: 1px;
+  margin-top: 8px; font-size: .72rem; color: var(--muted); }
+
+.sec-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.sec-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--card); cursor: pointer; font: inherit; color: inherit; }
+.sec-tile.on { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold) inset; }
+.sec-tile.add { border-style: dashed; color: var(--muted); }
+.sec-ico { display: inline-flex; }
+
+.weeks { display: grid; gap: 10px; }
+.week-card { border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  background: var(--card); }
+.week-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 12px; background: var(--bg); border-bottom: 1px solid var(--border); }
+.week-body { display: grid; gap: 6px; padding: 8px 12px; }
+.sm-row { padding: 6px 0; }
+.sm-row + .sm-row { border-top: 1px dashed var(--border); }
+.sm-row.empty { opacity: .72; }
+.sm-no { display: inline-block; min-width: 2.2em; color: var(--muted); font-size: .78rem;
+  direction: ltr; }
+.sm-title { color: var(--gold); }
+.lang-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.lang-chip { border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px;
+  font-size: .74rem; background: transparent; color: var(--muted); cursor: pointer; font: inherit;
+  font-size: .74rem; }
+.lang-chip.on { border-color: var(--ok, #2f6b52); color: var(--text); }
+.lang-chip.add { border-style: dashed; }
+.lang-chip:hover { border-color: var(--gold); color: var(--text); }
+.arch-text { max-height: 40vh; overflow: auto; white-space: pre-wrap; font-size: .9rem;
+  line-height: 1.9; border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+
+/* جدولُ مراجعة الرفع الجماعي (ملاحظة ٣٠٥) */
+.imp-wrap { min-width: min(92vw, 1100px); }
+.scroll-x { overflow-x: auto; max-height: 56vh; overflow-y: auto; }
+.imp-tbl { width: 100%; font-size: .85rem; }
+.imp-tbl th, .imp-tbl td { padding: 4px 6px; vertical-align: middle; }
+.imp-tbl input[type="text"], .imp-tbl input:not([type]), .imp-tbl select,
+.imp-tbl input[type="date"] { width: 100%; min-width: 92px; padding: 3px 6px; font-size: .85rem; }
+.imp-tbl td:nth-child(3) input { min-width: 220px; }
+.imp-tbl tr.warn-row { background: color-mix(in srgb, var(--warn, #8a6d1f) 12%, transparent); }
+.imp-tbl td.num { text-align: center; white-space: nowrap; }
+.doc-peek { max-height: 56vh; overflow: auto; line-height: 1.9;
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px; min-width: min(80vw, 760px); }

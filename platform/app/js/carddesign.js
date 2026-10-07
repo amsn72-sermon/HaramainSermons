@@ -1,4 +1,5 @@
 // نموذج تصميم بطاقة العمل: مقاسات بالمليمتر وخطوط بالنقطة (ملاحظة ٨٦)
+import { qrDataUri } from './qr.js';
 // يشترك فيه المصمِّم على الشاشة وصفحة الطباعة، فما تراه هو ما يُطبع.
 
 export const CARD = { w: 85.6, h: 54 };        // مقاس ISO/IEC 7810 ID-1
@@ -15,10 +16,16 @@ export const ITEM_LABEL = {
   langs: 'اللغات',
   member_no: 'رقم العضوية',
   official: 'المسؤول والتوقيع',
-  valid: 'الصلاحية'
+  valid: 'الصلاحية',
+  qr: 'باركود التحقق'
 };
-export const ITEM_ORDER = ['logo', 'title', 'subtitle', 'photo', 'name', 'role', 'langs', 'member_no', 'official', 'valid'];
-export const TEXT_ITEMS = ITEM_ORDER.filter(k => k !== 'logo' && k !== 'photo');
+export const ITEM_ORDER = ['logo', 'title', 'subtitle', 'photo', 'name', 'role', 'langs', 'member_no', 'official', 'valid', 'qr'];
+export const TEXT_ITEMS = ITEM_ORDER.filter(k => k !== 'logo' && k !== 'photo' && k !== 'qr');
+
+// صفحةُ التحقق من البطاقة: تُثبتها ولا تُفشي صاحبَها (ملاحظة ٣١٣)
+export const cardVerifyUrl = (no, key) =>
+  `https://haramainsermons.com/verify-card?no=${encodeURIComponent(no ?? '')}`
+  + `&k=${encodeURIComponent(key || '')}`;
 
 // خطوط البطاقة: خط المنصة المرفق، وخطوط النظام الشائعة في الطباعة (ملاحظة ١٠٠)
 export const CARD_FONTS = [
@@ -68,7 +75,8 @@ export const PRESET_LAYOUT = {
       langs:     { x: 6,    y: 30.8, w: 56,   size: 6.6, bold: false, align: 'right', color: '#55503f', show: true },
       member_no: { x: 6,    y: 35,   w: 56,   size: 6.8, bold: false, align: 'right', color: '#6b6257', show: true },
       official:  { x: 44,   y: 42.6, w: 37,   size: 6.4, bold: true,  align: 'right', color: '#55503f', show: true },
-      valid:     { x: 5,    y: 42.6, w: 36,   size: 6.2, bold: false, align: 'left',  color: '#55503f', show: true }
+      valid:     { x: 5,    y: 42.6, w: 36,   size: 6.2, bold: false, align: 'left',  color: '#55503f', show: true },
+      qr:        { x: 4,    y: 40,   w: 11,   show: false }
     }
   }),
 
@@ -91,7 +99,8 @@ export const PRESET_LAYOUT = {
       langs:     { x: 6,    y: 28.4, w: 58,   size: 6.4, bold: false, align: 'right', color: '#55503f', show: true },
       member_no: { x: 6,    y: 32.8, w: 58,   size: 6.6, bold: false, align: 'right', color: '#6b6257', show: true },
       official:  { x: 44,   y: 41.4, w: 38,   size: 6.6, bold: true,  align: 'right', color: '#55503f', show: true },
-      valid:     { x: 5,    y: 47,   w: 36,   size: 6.2, bold: false, align: 'left',  color: '#55503f', show: true }
+      valid:     { x: 5,    y: 47,   w: 36,   size: 6.2, bold: false, align: 'left',  color: '#55503f', show: true },
+      qr:        { x: 4,    y: 40,   w: 11,   show: false }
     }
   }),
   // ٢) شريط رأسي على يمين البطاقة يجمع الشعار والصورة
@@ -113,7 +122,8 @@ export const PRESET_LAYOUT = {
       langs:     { x: 4,    y: 28.8, w: 54,   size: 6.4, bold: false, align: 'right', color: '#55503f', show: true },
       member_no: { x: 4,    y: 33.4, w: 54,   size: 6.6, bold: false, align: 'right', color: '#6b6257', show: true },
       official:  { x: 26,   y: 41.6, w: 32,   size: 6.4, bold: true,  align: 'right', color: '#55503f', show: true },
-      valid:     { x: 4,    y: 47,   w: 30,   size: 6,   bold: false, align: 'left',  color: '#55503f', show: true }
+      valid:     { x: 4,    y: 47,   w: 30,   size: 6,   bold: false, align: 'left',  color: '#55503f', show: true },
+      qr:        { x: 4,    y: 40,   w: 11,   show: false }
     }
   }),
   // ٣) بطاقة فاتحة بخطين ذهبيين بلا شريط داكن
@@ -135,7 +145,8 @@ export const PRESET_LAYOUT = {
       langs:     { x: 6,    y: 29,   w: 58,   size: 6.4, bold: false, align: 'right', color: '#55503f', show: true },
       member_no: { x: 6,    y: 33.4, w: 58,   size: 6.6, bold: false, align: 'right', color: '#6b6257', show: true },
       official:  { x: 44,   y: 41.4, w: 38,   size: 6.6, bold: true,  align: 'right', color: '#55503f', show: true },
-      valid:     { x: 5,    y: 47,   w: 36,   size: 6.2, bold: false, align: 'left',  color: '#55503f', show: true }
+      valid:     { x: 5,    y: 47,   w: 36,   size: 6.2, bold: false, align: 'left',  color: '#55503f', show: true },
+      qr:        { x: 4,    y: 40,   w: 11,   show: false }
     }
   })
 };
@@ -328,6 +339,13 @@ export function staticCard(h, { layout, member, cfg, roleLabel, langsText, logoS
     } else if (key === 'photo') {
       kids.push(h('div.cd-item.cd-photo', { style },
         photoUrl ? h('img', { src: photoUrl, alt: '' }) : h('span.cd-photo-ph', '٤×٦')));
+    } else if (key === 'qr') {
+      // باركودُ التحقق: يُثبت البطاقةَ ولا يُفشي صاحبَها (ملاحظة ٣١٣)
+      const src = qrDataUri(cardVerifyUrl(member.member_no, member.card_key),
+        { margin: 0, dark: it.color || '#1c1a17' });
+      kids.push(h('div.cd-item', { style: { ...style, height: px(it.w) } },
+        h('img', { src, alt: 'رمز التحقق',
+          style: { width: '100%', height: '100%', display: 'block' } })));
     } else {
       const text = itemText(key, { member, cfg, roleLabel, langsText });
       if (text) kids.push(h('div.cd-item', { style }, text));

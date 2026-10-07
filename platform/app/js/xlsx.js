@@ -211,7 +211,7 @@ export function downloadBlob(blob, name) {
 const dec = new TextDecoder();
 
 // إدخالات ZIP من الفهرس المركزي: الاسم ← البايتات (مفكوكة الضغط)
-async function unzip(buf) {
+export async function unzip(buf) {
   const dv = new DataView(buf), u8 = new Uint8Array(buf);
   // نهاية الفهرس المركزي: توقيعها في آخر ٦٦ كيلوبايت
   let end = -1;
