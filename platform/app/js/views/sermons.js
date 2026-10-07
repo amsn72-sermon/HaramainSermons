@@ -181,7 +181,7 @@ async function yearPage(ctx, year) {
   // صفُّ الخطبة — على نسق أرشيف أعمال الترجمة
   const sermonRow = (s, mosque, friday) => {
     if (!s) {
-      return h('div.row.between.wrap.sm-row.empty',
+      return h('div.row.between.wrap.sm-row.gone',
         h('span.small.muted', `${MOSQUE_ICON[mosque]} ${MOSQUE[mosque]} — لم تُضَف`),
         mayUpload()
           ? h('button.btn.xs', { type: 'button',
@@ -193,7 +193,9 @@ async function yearPage(ctx, year) {
       h('div.row.between.wrap',
         h('div', { style: { flex: 1, minWidth: '240px' } },
           h('span.sm-no', AR(s.seq || 0)),
-          h('b', `${MOSQUE_ICON[mosque]} ${s.sermon_type} من ${MOSQUE[mosque]}`),
+          h('b', mosque
+            ? `${MOSQUE_ICON[mosque]} ${s.sermon_type} من ${MOSQUE[mosque]}`
+            : `⚠ ${s.sermon_type} — لم يُعرَفْ مسجدُها`),
           h('b.sm-title', ` (${s.title})`),
           h('div.small.muted',
             [s.khateeb, s.hijri_text || (s.sermon_date ? fmtHijri(s.sermon_date) : null),
@@ -264,7 +266,7 @@ async function yearPage(ctx, year) {
     const s = w[mosque];
     // الغائبُ صفٌّ واحدٌ لا يُطوى: عنوانُه بيانُه، وفيه زرُّ رفعه
     if (!s) {
-      return h('div.mosque-group.empty',
+      return h('div.mosque-group.gone',
         h('div.mosque-head',
           h('b', `${MOSQUE_ICON[mosque]} ${MOSQUE[mosque]}`),
           h('span.small.bad', 'لم تُضَفْ'),
@@ -302,17 +304,47 @@ async function yearPage(ctx, year) {
   const weekCard = w => {
     const total = Number(w.langs || 0);
     const have = (w.makkah ? 1 : 0) + (w.madinah ? 1 : 0);
+    // وما لم يُعرَف مسجدُه يُعرَض ليُصحَّح، ولا يبقى غائبًا (إصلاح ٣١٦)
+    const others = Array.isArray(w.others) ? w.others : [];
+    const inner = h('div.week-inner',
+      mosqueLine(w, 'makkah'),
+      mosqueLine(w, 'madinah'),
+      others.length
+        ? h('div.mosque-group.nomosque',
+            h('div.mosque-head',
+              h('b', '⚠ بلا مسجد'),
+              h('span.small.bad', 'حدِّدْ مسجدَها لتأخذ صفَّها')),
+            h('div.week-body', others.map(o => sermonRow(o, null, w.friday_on))))
+        : null);
+
+    // والأسبوعُ نفسُه يُطوى بسهمٍ في صدره، فتُمرَّر الأسابيعُ كلُّها بيُسر
+    const wShut = isShut(w.friday_on, 'week');
+    inner.hidden = wShut;
+    const arrow = h('button.fold-btn', { type: 'button',
+      'aria-expanded': wShut ? 'false' : 'true',
+      title: wShut ? 'افتحْ هذا الأسبوع' : 'اطوِ هذا الأسبوع' }, wShut ? '▾' : '▴');
+    arrow.onclick = () => {
+      const now = !inner.hidden;
+      inner.hidden = now;
+      arrow.textContent = now ? '▾' : '▴';
+      arrow.setAttribute('aria-expanded', now ? 'false' : 'true');
+      setShut(w.friday_on, 'week', now);
+    };
+
     return h('section.week-card',
       h('div.week-head',
+        arrow,
         h('b', `الأسبوع ${AR(w.week_no)}`),
-        h('span.small.muted', `الجمعة ${fmtHijri(w.friday_on)} — ${fmtDate(w.friday_on)}`),
+        h('span.small.muted', `${fmtHijri(w.friday_on)} — ${fmtDate(w.friday_on)}`),
         h('span.row', { style: { gap: '6px', marginInlineStart: 'auto' } },
+          others.length
+            ? h('span.badge.bad', `${AR(others.length)} بلا مسجد`)
+            : null,
           h('span.badge', { class: total ? (total >= 20 ? 'ok' : 'warn') : '' },
             total ? `${AR(total)} نسخة` : 'خالٍ'),
           h('span.badge', { class: have === 2 ? 'ok' : have ? 'warn' : 'bad' },
             have === 2 ? '✓✓' : have ? '✓' : '—'))),
-      mosqueLine(w, 'makkah'),
-      mosqueLine(w, 'madinah'));
+      inner);
   };
 
   // طيُّ الكلِّ وفتحُه لكلِّ حرمٍ على حِدة
@@ -604,10 +636,12 @@ async function yearPage(ctx, year) {
       h('button.btn.xs', { type: 'button', onclick: () => foldAll(k, true) }, `اطوِ ${v}`),
       h('button.btn.xs.ghost', { type: 'button', onclick: () => foldAll(k, false) }, `افتحْ ${v}`),
     ]),
+    h('button.btn.xs', { type: 'button', onclick: () => foldAll('week', true) }, 'اطوِ الأسابيع'),
+    h('button.btn.xs.ghost', { type: 'button', onclick: () => foldAll('week', false) }, 'افتحِ الأسابيع'),
     h('button.btn.xs', { type: 'button',
-      onclick: () => { Object.keys(MOSQUE).forEach(k => foldAll(k, true)); } }, 'اطوِ الكلَّ'),
+      onclick: () => { ['week', ...Object.keys(MOSQUE)].forEach(k => foldAll(k, true)); } }, 'اطوِ الكلَّ'),
     h('button.btn.xs.ghost', { type: 'button',
-      onclick: () => { Object.keys(MOSQUE).forEach(k => foldAll(k, false)); } }, 'افتحِ الكلَّ'));
+      onclick: () => { ['week', ...Object.keys(MOSQUE)].forEach(k => foldAll(k, false)); } }, 'افتحِ الكلَّ'));
 
   // إعادةُ ترقيم العام بالتاريخ (ملاحظة ٣٢٧)
   const numBtn = mayEdit()
