@@ -5268,6 +5268,37 @@ begin
   end if;
   raise notice 'PASS: المفتاحُ الإداريُّ يبقى للمنسّق ولا يفيض على المترجم إلا بمنحٍ صريح';
 
+  -- ========== إصلاحٌ: تقويمُ الأعوام مستوفًى، فلا يَخفى عامٌ رُفعت خطبُه ==========
+  --   كان الجدولُ يبدأ من ١٤٤٥، فعامُ ١٤٤٤ لا تُعرَف بدايتُه فتخلو
+  --   أسابيعُه وتَخفى خطبُه المرفوعة
+  if (select starts_on from public.hijri_year_bounds(1444)) <> date '2022-07-30' then
+    raise exception 'FAIL: بدايةُ ١٤٤٤ (%)', (select starts_on from public.hijri_year_bounds(1444));
+  end if;
+  for v_n in select count(*)::int from public.arch_weeks(1444) loop
+    if v_n < 50 then raise exception 'FAIL: أسابيعُ ١٤٤٤ (%)', v_n; end if;
+  end loop;
+  -- وعامٌ ليس في الجدول أصلًا لا يُخلي الشاشة: الحسابُ الاحتياطي
+  for v_n in select count(*)::int from public.arch_weeks(1470) loop
+    if v_n < 50 then raise exception 'FAIL: الحسابُ الاحتياطيُّ لعامٍ غيرِ مجدول (%)', v_n; end if;
+  end loop;
+
+  -- وخطبةٌ في ١٤٤٤ تنزل في جمعتها ورقمِ أسبوعها
+  v_work := public.save_arch_sermon(jsonb_build_object(
+    'section_id', (select id from public.arch_sections where h_year = 1444 and name = 'الخطب'),
+    'sermon_date', '2022-09-02', 'mosque', 'makkah',
+    'title', 'خطبةٌ من ١٤٤٤', 'khateeb', 'المعيقلي',
+    'versions', jsonb_build_array(jsonb_build_object(
+      'language_code', 'en', 'body_html', '<p>text</p>'))));
+  if (select week_no from public.arch_sermons where id = v_work) is null then
+    raise exception 'FAIL: لم يُحسَب أسبوعُ خطبةِ ١٤٤٤';
+  end if;
+  if not exists (select 1 from public.arch_weeks(1444) w
+                  where w.makkah ->> 'title' = 'خطبةٌ من ١٤٤٤') then
+    raise exception 'FAIL: لم تظهر خطبةُ ١٤٤٤ في أسبوعها';
+  end if;
+  perform public.delete_arch_sermon(v_work);
+  raise notice 'PASS: تقويمُ الأعوام مستوفًى، وخطبُ ١٤٤٤ في أسابيعها، والعامُ غيرُ المجدول له حسابٌ احتياطي';
+
   -- ========== ٢١٩: الحضور بالموقع ==========
   select id into v_site from public.work_sites where city = 'makkah' and is_default limit 1;
   if v_site is null then raise exception 'FAIL: لا نطاقَ افتراضيًّا لمكة'; end if;
