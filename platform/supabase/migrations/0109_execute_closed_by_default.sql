@@ -87,15 +87,20 @@ grant execute on function public.count_pages(int) to anon;
 --         grant execute on functions to anon, authenticated, service_role;
 --   وهذا منحٌ مخزَّنٌ يُنزَع بالباب نفسِه، فيُنزَع عن anon وحدَه،
 --   ويبقى authenticated فلا تنكسر هجرةٌ نسي كاتبُها سطرَ المنح.
+--   ولا يملك المنفِّذُ تغييرَ صلاحيات دورٍ ليس عضوًا فيه، فما تعذّر
+--   منها يُتجاوَز: الحارسُ أدناه يكفي، وكلُّ منحٍ لـ anon مكتوبٌ صريح.
 do $do$
 declare r text;
 begin
   if not exists (select 1 from pg_roles where rolname = 'anon') then return; end if;
   foreach r in array array['postgres', 'supabase_admin', current_user] loop
-    if exists (select 1 from pg_roles where rolname = r) then
+    if not exists (select 1 from pg_roles where rolname = r) then continue; end if;
+    begin
       execute format('alter default privileges for role %I in schema public '
                      'revoke execute on functions from anon', r);
-    end if;
+    exception when insufficient_privilege or wrong_object_type then
+      raise notice 'تُرك الدورُ % — لا صلاحيةَ لتغيير افتراضيّاته', r;
+    end;
   end loop;
 end $do$;
 
@@ -127,10 +132,10 @@ begin
   create event trigger lock_new_function on ddl_command_end
     when tag in ('CREATE FUNCTION', 'ALTER FUNCTION')
     execute function public.lock_new_function();
-exception when insufficient_privilege or feature_not_supported then
+exception when others then
   -- لا صلاحيةَ لمُطلِقات الأحداث في هذا التنصيب: تبقى النزعاتُ الصريحةُ
-  --   أعلاه، ويُكتَب في كلِّ هجرةٍ جديدةٍ منحُها بيدها
-  raise warning 'تعذّر تثبيتُ حارس الدوال الجديدة — راجِعِ المنحَ يدويًّا';
+  --   أعلاه نافذةً، ويُكتَب في كلِّ هجرةٍ جديدةٍ منحُها بيدها
+  raise warning 'تعذّر تثبيتُ حارس الدوال الجديدة (%) — أبلِغْ به', sqlerrm;
 end $do$;
 
 -- ---------------------------------------------------------------------
