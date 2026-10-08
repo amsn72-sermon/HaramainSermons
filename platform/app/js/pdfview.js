@@ -192,6 +192,37 @@ export async function pdfPageImage(src, { page = 1, mmWide = 297, dpi = 300 } = 
   return out;
 }
 
+// صفحاتُ ملفٍّ كلُّها صورًا — تُبنى منها نسخةٌ موسومةٌ تُطبَع أو
+// تُحفَظ PDF (ملاحظة ٣٧٢)
+export async function pdfPageImages(src, { dpi = 150, max = 400 } = {}) {
+  const js = await pdfjs();
+  const data = typeof src === 'string'
+    ? await (await fetch(src)).arrayBuffer()
+    : await src.arrayBuffer();
+  // كما في العارض: الحروفُ تُرسَم مساراتٍ من الخط المضمَّن في الملف،
+  //   فتظهر العربيةُ موصولةً على كل المتصفحات (ملاحظة ٣٠)
+  const doc = await js.getDocument({ data, isEvalSupported: false,
+    disableFontFace: true, useSystemFonts: false,
+    standardFontDataUrl: '/vendor/pdfjs/standard_fonts/' }).promise;
+  const n = Math.min(doc.numPages, max);
+  const out = [];
+  for (let i = 1; i <= n; i++) {
+    const pg = await doc.getPage(i);
+    const base = pg.getViewport({ scale: 1 });
+    // ٧٢ نقطةً في البوصة هي وحدةُ PDF، فالمقياسُ نسبةُ الدقّة إليها
+    const vp = pg.getViewport({ scale: Math.min(4, Math.max(0.5, dpi / 72)) });
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    await pg.render({ canvasContext: ctx, viewport: vp }).promise;
+    out.push({ url: cv.toDataURL('image/jpeg', 0.88),
+      w: cv.width, h: cv.height,
+      mmW: (base.width / 72) * 25.4, mmH: (base.height / 72) * 25.4 });
+  }
+  return { pages: out, total: doc.numPages };
+}
+
 // صورةُ خلفيةٍ عادية (PNG/JPG) تُقرأ كما هي
 export async function fileImage(src) {
   if (typeof src === 'string') return { url: src };

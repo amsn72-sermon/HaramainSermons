@@ -6,17 +6,28 @@ import { h, toast, dialog, fmtDate, confirm } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { state, isAdmin } from '../store.js';
 
-const LEVEL = { onboarding: 'تأهيلُ الملتحقين', development: 'تطويرٌ مستمر',
-  specialized: 'تخصصيٌّ متقدم' };
-const STATUS = { enrolled: 'ملتحق', in_progress: 'قيد التدريب', done: 'أتمّه', dropped: 'انقطع' };
-const KIND = { pdf: 'PDF', slides: 'عرض تقديمي', other: 'ملف' };
+const AR = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn');
 
-const mayTrain = () => isAdmin() || state.profile?.is_trainer === true;
+export const LEVEL = { onboarding: 'تأهيلُ الملتحقين', development: 'تطويرٌ مستمر',
+  specialized: 'تخصصيٌّ متقدم' };
+export const STATUS = { enrolled: 'ملتحق', in_progress: 'قيد التدريب',
+  done: 'أتمّه', dropped: 'انقطع' };
+export const KIND = { pdf: 'PDF', slides: 'عرض تقديمي', other: 'ملف' };
+
+// مستهدَفو الخطة: فئاتٌ أو أشخاصٌ بأسمائهم (ملاحظة ٣٦٠)
+export const TARGET_GROUPS = {
+  admins: 'الإداريّون',
+  translators: 'المترجمون',
+  specialists: 'المتخصِّصون',
+  field: 'الميكانيكيّون (الميدان)'
+};
+
+export const mayTrain = () => isAdmin() || state.profile?.is_trainer === true;
 
 // ---------------------------------------------------------------------
 // ١) خطط التدريب
 // ---------------------------------------------------------------------
-async function planDialog(row = null) {
+export async function planDialog(row = null) {
   const title = h('input', { value: row?.title || '', 'aria-label': 'عنوان الخطة' });
   const goal = h('textarea', { rows: 2, 'aria-label': 'الهدف' }, row?.goal || '');
   const audience = h('input', { value: row?.audience || '', 'aria-label': 'الجمهور' });
@@ -42,6 +53,38 @@ async function planDialog(row = null) {
   (row?.units || []).forEach(addUnit);
   if (!(row?.units || []).length) addUnit();
 
+  // المستهدَفون: فئاتٌ بعلامات، وأشخاصٌ يُنتقون بأسمائهم (ملاحظة ٣٦٠)
+  const tg = (row?.targets && typeof row.targets === 'object') ? row.targets : {};
+  const groups = new Set(Array.isArray(tg.groups) ? tg.groups : []);
+  const picked = new Set(Array.isArray(tg.members) ? tg.members : []);
+  const groupBoxes = Object.entries(TARGET_GROUPS).map(([k, label]) => {
+    const i = h('input', { type: 'checkbox', checked: groups.has(k) ? true : null,
+      'aria-label': label });
+    i.onchange = () => { i.checked ? groups.add(k) : groups.delete(k); };
+    return h('label.check', i, h('span', label));
+  });
+  let people = [];
+  try {
+    people = await db.select('profiles', { select: 'id,full_name', status: 'eq.active',
+      order: 'full_name.asc' }).catch(() => []);
+  } catch { people = []; }
+  const q = h('input', { type: 'search', placeholder: 'ابحث باسم العضو',
+    'aria-label': 'بحث عن عضو' });
+  const chips = h('div.chips');
+  const drawChips = () => {
+    const term = q.value.trim();
+    chips.replaceChildren(...people
+      .filter(m => picked.has(m.id) || (term && m.full_name.includes(term)))
+      .slice(0, 60)
+      .map(m => {
+        const b = h('button.btn.xs' + (picked.has(m.id) ? '.primary' : '.ghost'),
+          { type: 'button' }, m.full_name);
+        b.onclick = () => { picked.has(m.id) ? picked.delete(m.id) : picked.add(m.id); drawChips(); };
+        return b;
+      }));
+  };
+  q.oninput = drawChips; drawChips();
+
   const res = await dialog({
     title: row ? `تحرير «${row.title}»` : 'خطة تدريب جديدة',
     body: h('div.stack',
@@ -51,6 +94,11 @@ async function planDialog(row = null) {
         h('label.field', 'الجمهور', audience),
         h('label.field', 'عدد الساعات', hours)),
       h('label.field', 'الهدف', goal),
+      h('fieldset.stack', h('legend', 'المستهدَفون'),
+        h('p.small.muted', 'فئةٌ أو أكثر، أو أشخاصٌ بأسمائهم — ومنهم يُلحَقون بالخطة.'),
+        h('div.check-grid', ...groupBoxes),
+        h('label.field', 'أشخاصٌ بأسمائهم', q),
+        chips),
       h('fieldset.stack', h('legend', 'وحدات الخطة'),
         unitsBox,
         h('button.btn.xs', { type: 'button', onclick: () => addUnit() }, '＋ وحدة'))),
@@ -60,6 +108,7 @@ async function planDialog(row = null) {
         value: () => ({ id: row?.id || null, title: title.value.trim(),
           goal: goal.value.trim() || null, audience: audience.value.trim() || null,
           level: level.value, hours: hours.value || null,
+          targets: { groups: [...groups], members: [...picked] },
           units: [...unitsBox.children].map(c => c._get()).filter(Boolean) }) },
       { label: 'إلغاء', value: null }
     ]
@@ -69,38 +118,61 @@ async function planDialog(row = null) {
   catch (e) { toast(e.message, 'bad'); return false; }
 }
 
+// الخططُ مربَّعاتٌ تُفتَح صفحةً لها، وفيها مكتبتُها وسجلُّها (ملاحظة ٣٦٠)
 async function plansCard() {
   const box = h('div.stack');
   const load = async () => {
-    let plans = [], units = [];
-    try {
-      [plans, units] = await Promise.all([
-        db.select('training_plans', { select: '*', order: 'level.asc,title.asc' }),
-        db.select('training_units', { select: '*', order: 'sort.asc' }).catch(() => [])
-      ]);
-    } catch (e) { box.replaceChildren(h('p.small.warn', e.message)); return; }
+    let plans = [];
+    try { plans = await db.rpc('training_plan_tiles') || []; }
+    catch (e) { box.replaceChildren(h('p.small.warn', e.message)); return; }
 
-    box.replaceChildren(plans.length ? h('div.stack', plans.map(p => {
-      const mine = units.filter(u => u.plan_id === p.id);
-      return h('article.card.stack', { style: { padding: '12px' } },
-        h('div.row.between',
-          h('div', h('b', p.title), h('span.sub', LEVEL[p.level] || ''),
-            p.is_active ? null : h('span.badge.warn', 'موقوفة')),
-          mayTrain() ? h('div.row',
-            h('button.btn.xs', { type: 'button', onclick: async () => {
-              if (await planDialog({ ...p, units: mine })) load();
-            } }, 'حرّر'),
-            isAdmin() ? h('button.btn.xs.ghost', { type: 'button', onclick: async () => {
-              if (!await confirm(`حذفُ خطة «${p.title}»؟`)) return;
-              try { await db.rpc('delete_training_plan', { p_id: p.id }); load(); }
-              catch (e) { toast(e.message, 'bad'); }
-            } }, 'احذف') : null) : null),
-        p.goal ? h('p.small', p.goal) : null,
-        h('p.small.muted', [p.audience, p.hours ? `${p.hours} ساعة` : null,
-          `${mine.length} وحدة`].filter(Boolean).join(' · ')),
-        mine.length ? h('ol.ab-chips', mine.map((u, i) =>
-          h('li', h('span.ab-chip-num', String(i + 1)), u.title))) : null);
-    })) : h('p.muted', 'لا خطط بعد.'));
+    box.replaceChildren(plans.length
+      ? h('div.plan-grid', plans.map(p => {
+          const tg = (p.targets && typeof p.targets === 'object') ? p.targets : {};
+          const gs = (Array.isArray(tg.groups) ? tg.groups : [])
+            .map(k => TARGET_GROUPS[k]).filter(Boolean);
+          const ms = (Array.isArray(tg.members) ? tg.members : []).length;
+          return h('article.plan-tile' + (p.is_active ? '' : '.off'),
+            h('a.plan-open', { href: `/app/training/${p.id}` },
+              h('b.plan-title', p.title),
+              h('span.sub', LEVEL[p.level] || ''),
+              p.goal ? h('p.small.plan-goal', p.goal) : null,
+              h('div.plan-stats',
+                h('span.badge', `${AR(p.units)} وحدة`),
+                h('span.badge', { class: Number(p.materials) ? 'ok' : '' },
+                  `${AR(p.materials)} مادة`),
+                h('span.badge', { class: Number(p.enrolled) ? 'ok' : '' },
+                  `${AR(p.enrolled)} ملتحق`),
+                Number(p.done) ? h('span.badge.ok', `${AR(p.done)} أتمّها`) : null),
+              h('div.small.muted.plan-targets',
+                (gs.length || ms)
+                  ? `المستهدَفون: ${[...gs, ms ? `${AR(ms)} بأسمائهم` : null]
+                      .filter(Boolean).join('، ')}`
+                  : 'لم يُحدَّد المستهدَفون'),
+              p.room_name
+                ? h('div.small.muted.plan-room', `🏛 ${p.room_name}`)
+                : null,
+              p.is_active ? null : h('span.badge.warn', 'موقوفة')),
+            mayTrain()
+              ? h('div.plan-acts',
+                  h('button.btn.xs', { type: 'button', onclick: async () => {
+                    let full = p;
+                    try {
+                      const r = await db.rpc('training_plan', { p_id: p.id });
+                      full = (Array.isArray(r) ? r[0] : r) || p;
+                    } catch { /* يُحرَّر بما في البطاقة */ }
+                    if (await planDialog({ ...full, units: full.units || [] })) load();
+                  } }, 'حرّر'),
+                  isAdmin()
+                    ? h('button.btn.xs.ghost', { type: 'button', onclick: async () => {
+                        if (!await confirm(`حذفُ خطة «${p.title}»؟`)) return;
+                        try { await db.rpc('delete_training_plan', { p_id: p.id }); load(); }
+                        catch (e) { toast(e.message, 'bad'); }
+                      } }, 'احذف')
+                    : null)
+              : null);
+        }))
+      : h('p.muted', 'لا خطط بعد.'));
   };
   await load();
 
@@ -108,30 +180,32 @@ async function plansCard() {
     h('div.row.between', h('h3', 'خطط التدريب'),
       mayTrain() ? h('button.btn.sm.primary', { type: 'button',
         onclick: async () => { if (await planDialog(null)) load(); } }, '＋ خطة') : null),
-    h('p.small.muted', 'يتولّى إعدادَها المدرِّبون من خبراء المترجمين: لكل خطةٍ هدفُها '
-      + 'وجمهورُها ومدّتُها ووحداتُها.'),
+    h('p.small.muted', 'كلُّ خطةٍ مربَّعٌ يُفتَح صفحةً لها: وحداتُها ومكتبةُ موادِّها '
+      + 'وسجلُّ تأهيلها ومستهدَفوها وقاعتُها الخاصة.'),
     box);
 }
 
 // ---------------------------------------------------------------------
-// ٢) مكتبة المواد
+// ٢) موادُّ التدريب: تُرفَع في خطتها، وتُشارَك بمفتاحها
 // ---------------------------------------------------------------------
-const kindOf = (name) => {
+export const kindOf = (name) => {
   const n = String(name || '').toLowerCase();
   if (n.endsWith('.pdf')) return 'pdf';
   if (n.endsWith('.ppt') || n.endsWith('.pptx')) return 'slides';
   return 'other';
 };
 
-async function uploadDialog(plans, rooms) {
+export async function uploadDialog(plans, rooms, preset = {}) {
   const file = h('input', { type: 'file', accept: '.pdf,.ppt,.pptx', 'aria-label': 'الملف' });
   const title = h('input', { 'aria-label': 'عنوان المادة' });
   const planSel = h('select', { 'aria-label': 'الخطة' },
     h('option', { value: '' }, '— بلا خطة —'),
-    plans.map(p => h('option', { value: p.id }, p.title)));
+    plans.map(p => h('option', { value: p.id,
+      selected: preset.plan_id === p.id }, p.title)));
   const roomSel = h('select', { 'aria-label': 'القاعة' },
     h('option', { value: '' }, '— بلا قاعة —'),
-    rooms.map(r => h('option', { value: r.id }, r.name)));
+    rooms.map(r => h('option', { value: r.id,
+      selected: preset.room_id === r.id }, r.name)));
   const note = h('input', { 'aria-label': 'ملاحظة' });
   file.onchange = () => {
     if (!title.value.trim() && file.files[0]) {
@@ -173,7 +247,7 @@ async function uploadDialog(plans, rooms) {
   } catch (e) { toast(e.message, 'bad'); return false; }
 }
 
-async function shareDialog(mat) {
+export async function shareDialog(mat) {
   let members = [], rooms = [];
   try {
     [members, rooms] = await Promise.all([
@@ -232,7 +306,7 @@ async function shareDialog(mat) {
 }
 
 // عرضُ المادة: للمشاهدة فقط بعلامةٍ مائيةٍ باسم قارئها
-async function viewMaterial(mat, mayDownload) {
+export async function viewMaterial(mat, mayDownload) {
   try { await db.rpc('log_material_open', { p_material: mat.id, p_download: false }); }
   catch (e) { toast(e.message, 'bad'); return; }
 
@@ -244,7 +318,8 @@ async function viewMaterial(mat, mayDownload) {
   try { url = await storage.signedUrl('training', mat.file_path, mayDownload ? 3600 : 300); }
   catch (e) { toast(e.message, 'bad'); return; }
 
-  const who = state.profile?.full_name || '';
+  const { markerOf } = await import('../trainmark.js');
+  const who = markerOf();
   await dialog({
     title: mat.title,
     body: h('div.stack',
@@ -258,106 +333,71 @@ async function viewMaterial(mat, mayDownload) {
   });
 }
 
-async function downloadMaterial(mat) {
-  try {
-    await db.rpc('log_material_open', { p_material: mat.id, p_download: true });
-    const url = await storage.signedUrl('training', mat.file_path, 600);
-    window.open(url, '_blank', 'noopener');
-  } catch (e) { toast(e.message, 'bad'); }
+// التنزيلُ لا يخرج إلا موسومًا ببريد مَن نزَّله (ملاحظة ٣٧٢)
+export async function downloadMaterial(mat) {
+  const { downloadMarked } = await import('../trainmark.js');
+  await downloadMarked(mat, {
+    log: () => db.rpc('log_material_open', { p_material: mat.id, p_download: true }),
+    signedUrl: () => storage.signedUrl('training', mat.file_path, 600)
+  });
 }
 
-async function libraryCard() {
-  const box = h('div.stack');
+
+// ـــ ما لا خطةَ له من الموادّ: يبقى بابُه هنا فلا يضيع، وما سواه
+//   صار في صفحة خطته (ملاحظة ٣٦٠)
+async function orphanCard() {
   let plans = [], rooms = [];
   try {
     [plans, rooms] = await Promise.all([
       db.select('training_plans', { select: 'id,title', order: 'title.asc' }).catch(() => []),
       db.select('rooms', { select: 'id,name', order: 'sort.asc' }).catch(() => [])
     ]);
-  } catch { /* يُعرض ما أمكن */ }
-
+  } catch { plans = []; rooms = []; }
+  const box = h('div.stack');
   const load = async () => {
-    let mats = [], shares = [];
+    let rows = [];
     try {
-      [mats, shares] = await Promise.all([
-        db.select('training_materials', { select: '*', order: 'created_at.desc' }),
-        db.select('training_shares', { select: '*' }).catch(() => [])
-      ]);
-    } catch (e) { box.replaceChildren(h('p.small.warn', e.message)); return; }
-
-    box.replaceChildren(mats.length ? h('div.table-wrap', h('table.responsive',
-      h('thead', h('tr', ['المادة', 'النوع', 'الخطة', 'المشاركات', ''].map(t => h('th', t)))),
-      h('tbody', mats.map(m => {
-        const mine = shares.filter(s => s.material_id === m.id);
-        const dlN = mine.filter(s => s.may_download).length;
-        return h('tr',
-          h('td', { 'data-label': 'المادة' }, h('b', m.title),
-            m.note ? h('span.sub', m.note) : null),
-          h('td', { 'data-label': 'النوع' }, KIND[m.kind] || 'ملف'),
-          h('td', { 'data-label': 'الخطة' },
-            plans.find(p => p.id === m.plan_id)?.title || h('span.muted', '—')),
-          h('td', { 'data-label': 'المشاركات' }, mine.length
-            ? h('span', `${mine.length}`, dlN ? h('span.sub', `${dlN} بالتنزيل`) : h('span.sub', 'مشاهدةً فقط'))
-            : h('span.muted', 'لم تُشارَك')),
-          h('td', h('div.row',
-            h('button.btn.xs', { type: 'button', onclick: () => viewMaterial(m, true) }, 'افتح'),
-            h('button.btn.xs', { type: 'button',
-              onclick: async () => { if (await shareDialog(m)) load(); } }, 'شارِك'),
-            h('button.btn.xs.ghost', { type: 'button', onclick: async () => {
-              if (!await confirm(`حذفُ «${m.title}»؟`)) return;
-              try { await db.rpc('delete_training_material', { p_id: m.id }); load(); }
-              catch (e) { toast(e.message, 'bad'); }
-            } }, 'احذف'))));
-      }))))
-      : h('p.muted', 'لا مواد بعد.'));
+      rows = await db.select('training_materials', { select: '*', plan_id: 'is.null',
+        order: 'created_at.desc' }).catch(() => []);
+    } catch { rows = []; }
+    box.replaceChildren(rows.length
+      ? h('div.table-wrap', h('table.responsive',
+          h('thead', h('tr', ['المادة', 'النوع', ''].map(t => h('th', t)))),
+          h('tbody', rows.map(m => h('tr',
+            h('td', { 'data-label': 'المادة' }, h('b', m.title),
+              m.note ? h('span.sub', m.note) : null),
+            h('td', { 'data-label': 'النوع' }, KIND[m.kind] || 'ملف'),
+            h('td', h('div.row',
+              h('button.btn.xs', { type: 'button',
+                onclick: () => viewMaterial(m, false) }, 'افتح'),
+              h('button.btn.xs.ghost', { type: 'button',
+                onclick: () => downloadMaterial(m) }, '⤓ نزِّلْ موسومةً'),
+              h('button.btn.xs', { type: 'button', onclick: async () => {
+                if (await shareDialog(m)) load();
+              } }, 'شارِك'),
+              isAdmin() ? h('button.btn.xs.ghost', { type: 'button', onclick: async () => {
+                if (!await confirm(`حذفُ «${m.title}»؟`)) return;
+                try { await db.rpc('delete_training_material', { p_id: m.id }); load(); }
+                catch (e) { toast(e.message, 'bad'); }
+              } }, 'احذف') : null)))))))
+      : h('p.small.muted', 'لا موادَّ خارجَ الخطط — وكلُّ مادةٍ تُرفَع في خطتها.'));
   };
   await load();
-
   return h('section.card.stack',
-    h('div.row.between', h('h3', 'مكتبة المواد'),
-      h('button.btn.sm.primary', { type: 'button',
-        onclick: async () => { if (await uploadDialog(plans, rooms)) load(); } }, '＋ ارفع مادة')),
-    h('p.small.muted', 'تُرفع هنا موادُّ التدريب ثم تُشارَك مع الأعضاء أو مع قاعةٍ بعينها. '
-      + 'ولكلِّ مشاركةٍ مفتاحُها: يُتاح التنزيلُ أو تكون للمشاهدة فقط.'),
+    h('div.row.between', h('h3', 'موادٌّ خارجَ الخطط'),
+      h('button.btn.sm.ghost', { type: 'button', onclick: async () => {
+        if (await uploadDialog(plans, rooms)) load();
+      } }, '＋ ارفعْ مادةً عامّة')),
+    h('p.small.muted', 'مكتبةُ الموادِّ وسجلُّ التأهيل صارا داخلَ كلِّ خطة. '
+      + 'وما بقي هنا موادٌّ لم تُنسَبْ إلى خطةٍ بعد.'),
     box);
 }
 
 // ---------------------------------------------------------------------
 // ٣) سجل التأهيل
 // ---------------------------------------------------------------------
-async function recordCard() {
-  const box = h('div.stack');
-  const load = async () => {
-    let rows = [];
-    try { rows = await db.rpc('training_record', { p_member: null }); }
-    catch (e) { box.replaceChildren(h('p.small.warn', e.message)); return; }
 
-    box.replaceChildren(rows.length ? h('div.table-wrap', h('table.responsive',
-      h('thead', h('tr', ['العضو', 'الخطة', 'المدرِّب', 'الحال', 'من', 'إلى', ''].map(t => h('th', t)))),
-      h('tbody', rows.map(r => h('tr',
-        h('td', { 'data-label': 'العضو' }, r.full_name),
-        h('td', { 'data-label': 'الخطة' }, r.plan_title, h('span.sub', LEVEL[r.level] || '')),
-        h('td', { 'data-label': 'المدرِّب' }, r.trainer_name || '—'),
-        h('td', { 'data-label': 'الحال' }, r.status === 'done'
-          ? h('span.badge.ok', STATUS[r.status])
-          : h('span.badge', STATUS[r.status] || r.status)),
-        h('td', { 'data-label': 'من' }, r.started_at ? fmtDate(r.started_at) : '—'),
-        h('td', { 'data-label': 'إلى' }, r.done_at ? fmtDate(r.done_at) : '—'),
-        h('td', mayTrain() ? h('button.btn.xs', { type: 'button',
-          onclick: async () => { if (await enrollDialog(r)) load(); } }, 'حرّر') : null))))))
-      : h('p.muted', 'لا سجلّات بعد.'));
-  };
-  await load();
-
-  return h('section.card.stack',
-    h('div.row.between', h('h3', 'سجل التأهيل'),
-      mayTrain() ? h('button.btn.sm.primary', { type: 'button',
-        onclick: async () => { if (await enrollDialog(null)) load(); } }, '＋ التحاق') : null),
-    h('p.small.muted', 'لكلِّ عضوٍ سجلٌّ بما التحق به من خطط وما أتمّه ومن درّبه ومتى.'),
-    box);
-}
-
-async function enrollDialog(row = null) {
+export async function enrollDialog(row = null, preset = {}) {
   let members = [], plans = [], trainers = [];
   try {
     [members, plans] = await Promise.all([
@@ -370,8 +410,10 @@ async function enrollDialog(row = null) {
 
   const member = h('select', { 'aria-label': 'العضو', disabled: row ? true : null },
     members.map(m => h('option', { value: m.id, selected: row?.member_id === m.id }, m.full_name)));
-  const plan = h('select', { 'aria-label': 'الخطة', disabled: row ? true : null },
-    plans.map(p => h('option', { value: p.id, selected: row?.plan_id === p.id }, p.title)));
+  const plan = h('select', { 'aria-label': 'الخطة',
+      disabled: (row || preset.plan_id) ? true : null },
+    plans.map(p => h('option', { value: p.id,
+      selected: (row?.plan_id || preset.plan_id) === p.id }, p.title)));
   const trainer = h('select', { 'aria-label': 'المدرِّب' },
     h('option', { value: '' }, '— أنا —'),
     trainers.map(t => h('option', { value: t.id, selected: row?.trainer_id === t.id }, t.full_name)));
@@ -455,6 +497,6 @@ export async function render() {
   if (!mayTrain()) return h('div', head, await myCard());
 
   const cards = h('div.stack');
-  cards.append(await plansCard(), await libraryCard(), await recordCard());
+  cards.append(await plansCard(), await orphanCard());
   return h('div', head, cards);
 }

@@ -35,34 +35,84 @@ const ORNAMENT = gold => `<svg class="orn" viewBox="0 0 120 24" aria-hidden="tru
     <rect x="52" y="4" width="16" height="16" transform="rotate(45 60 12)"/>
   </g></svg>`;
 
-function lines(c) {
+const PRE_TEXT = 'تشهد الهيئةُ العامة للعناية بشؤون المسجد الحرام والمسجد النبوي، '
+  + 'في مشروع خادم الحرمين الشريفين لترجمة خطب الحرمين،';
+
+// ---------------------------------------------------------------------
+// نصوصُ الشهادة مصفوفةٌ بترتيبها من أعلى إلى أسفل (ملاحظة ٣٥٦)
+//
+//   أمامَ كلِّ نصٍّ علامةُ صحٍّ: مرفوعةً يَظهر، مخفوضةً يُحجَب — وما
+//   بعده يرتفع مكانَه فلا يبقى بياضٌ في موضعه. وكلُّ نصٍّ يُحرَّر،
+//   فما كُتب هنا مقترَحٌ لا محتوم، وعناوينُ الجدول كذلك.
+// ---------------------------------------------------------------------
+export const CERT_BLOCKS = kind => (kind === 'experience'
+  ? [
+      { key: 'kind',  on: true, text: 'شهادةُ خبرة',  label: 'سطرُ نوع الشهادة' },
+      { key: 'title', on: true, text: '',             label: 'عنوانُ الشهادة (من بياناتها)' },
+      { key: 'orn',   on: true, text: '',             label: 'الحليةُ الهندسية' },
+      { key: 'pre',   on: true, text: PRE_TEXT,       label: 'سطرُ الشهادة' },
+      { key: 'bian',  on: true, text: 'بأنّ',          label: 'بأنّ' },
+      { key: 'name',  on: true, text: '',             label: 'اسمُ صاحب الشهادة' },
+      { key: 'done',  on: true, text: 'قد باشر العملَ الآتي بيانُه',
+        label: 'سطرُ الإتمام' },
+      { key: 'f.role',   on: true, text: 'الدور',     label: 'بيان: الدور' },
+      { key: 'f.period', on: true, text: 'المدّة',     label: 'بيان: المدّة' },
+      { key: 'f.body',   on: true, text: 'ما باشره',  label: 'بيان: ما باشره' },
+      { key: 'sign',   on: true, text: '', label: 'كتلةُ التوقيع' },
+      { key: 'serial', on: true, text: '', label: 'رقمُ الشهادة وتاريخُها' },
+      { key: 'qr',     on: true, text: 'للتحقق من الشهادة', label: 'رمزُ التحقُّق' }
+    ]
+  : [
+      { key: 'kind',  on: true, text: 'شهادةُ حضورِ دورةٍ تدريبية', label: 'سطرُ نوع الشهادة' },
+      { key: 'title', on: true, text: '',       label: 'عنوانُ الشهادة (من بياناتها)' },
+      { key: 'orn',   on: true, text: '',       label: 'الحليةُ الهندسية' },
+      { key: 'pre',   on: true, text: PRE_TEXT, label: 'سطرُ الشهادة' },
+      { key: 'bian',  on: true, text: 'بأنّ',    label: 'بأنّ' },
+      { key: 'name',  on: true, text: '',       label: 'اسمُ صاحب الشهادة' },
+      { key: 'done',  on: true, text: 'قد أتمَّ حضورَ الدورة التدريبية بنجاح',
+        label: 'سطرُ الإتمام' },
+      { key: 'f.hours',    on: true, text: 'مدّةُ البرنامج',   label: 'بيان: المدّة' },
+      { key: 'f.dates',    on: true, text: 'تاريخُه',          label: 'بيان: التاريخ' },
+      { key: 'f.subject',  on: true, text: 'موضوعُه',          label: 'بيان: الموضوع' },
+      { key: 'f.place',    on: true, text: 'مكانُه',           label: 'بيان: المكان' },
+      { key: 'f.provider', on: true, text: 'الجهةُ المنفّذة',   label: 'بيان: الجهة' },
+      { key: 'sign',   on: true, text: '', label: 'كتلةُ التوقيع' },
+      { key: 'serial', on: true, text: '', label: 'رقمُ الشهادة وتاريخُها' },
+      { key: 'qr',     on: true, text: 'للتحقق من الشهادة', label: 'رمزُ التحقُّق' }
+    ]);
+
+// القالبُ المحفوظُ قديمًا بلا قائمةٍ تأخذ الافتراضية، والمحفوظُ ناقصًا
+// يُستكمَل بما استُحدث — فلا يختفي سطرٌ لأنَّ القالبَ أقدمُ منه
+export function normalizeBlocks(saved, kind) {
+  const base = CERT_BLOCKS(kind);
+  if (!Array.isArray(saved) || !saved.length) return base;
+  const seen = new Set();
   const out = [];
-  if (c.kind === 'course') {
-    out.push(`تشهد الهيئةُ العامة للعناية بشؤون المسجد الحرام والمسجد النبوي، `
-      + `في مشروع خادم الحرمين الشريفين لترجمة خطب الحرمين، بأنّ`);
-  } else {
-    out.push(`تشهد الهيئةُ العامة للعناية بشؤون المسجد الحرام والمسجد النبوي، `
-      + `في مشروع خادم الحرمين الشريفين لترجمة خطب الحرمين، بأنّ`);
+  for (const b of saved) {
+    const def = base.find(x => x.key === b?.key);
+    if (!def || seen.has(b.key)) continue;
+    seen.add(b.key);
+    out.push({ ...def, on: b.on !== false,
+      text: b.text != null && String(b.text).length ? String(b.text) : def.text });
   }
+  for (const def of base) if (!seen.has(def.key)) out.push({ ...def });
   return out;
 }
 
-function facts(c) {
-  const rows = [];
-  if (c.kind === 'course') {
-    if (c.hours) rows.push(['مدّةُ البرنامج', `${c.hours} ساعة`]);
-    if (c.start_on && c.end_on) rows.push(['تاريخُه', `${fmtHijri(c.start_on)} – ${fmtHijri(c.end_on)}`]);
-    else if (c.start_on) rows.push(['تاريخُه', fmtHijri(c.start_on)]);
-    if (c.subject)  rows.push(['موضوعُه', c.subject]);
-    if (c.place)    rows.push(['مكانُه', c.place]);
-    if (c.provider) rows.push(['الجهةُ المنفّذة', c.provider]);
-  } else {
-    if (c.role_text) rows.push(['الدور', c.role_text]);
-    if (c.start_on && c.end_on) rows.push(['المدّة', `${fmtHijri(c.start_on)} – ${fmtHijri(c.end_on)}`]);
-    if (c.body) rows.push(['ما باشره', c.body]);
-  }
-  return rows;
-}
+// قيمةُ كلِّ بيانٍ من بيانات الشهادة
+const FACT_VALUE = {
+  'f.hours':    c => (c.hours ? `${c.hours} ساعة` : ''),
+  'f.dates':    c => (c.start_on && c.end_on
+                        ? `${fmtHijri(c.start_on)} – ${fmtHijri(c.end_on)}`
+                        : (c.start_on ? fmtHijri(c.start_on) : '')),
+  'f.subject':  c => c.subject || '',
+  'f.place':    c => c.place || '',
+  'f.provider': c => c.provider || '',
+  'f.role':     c => c.role_text || '',
+  'f.period':   c => (c.start_on && c.end_on
+                        ? `${fmtHijri(c.start_on)} – ${fmtHijri(c.end_on)}` : ''),
+  'f.body':     c => c.body || ''
+};
 
 // الشعاراتُ الثلاثةُ الافتراضية: الهيئةُ والشؤونُ الدينيةُ يمينًا،
 //   وجامعةُ أمِّ القرى يسارًا (ملاحظتا ٣١٠ و٣١٢)
@@ -147,7 +197,9 @@ export function certHtml(c, memberName) {
   h1 { margin: 2mm 0 0; font-size: 30pt; font-weight: 700; line-height: 1.3; }
   .orn { display: block; width: 46mm; height: 9mm; margin: 6mm auto 0; }
   .pre { margin: 7mm 0 0; font-size: 12.5pt; line-height: 2; max-width: 150mm; color: #4a4a4a; }
+  .bian { margin: 3mm 0 0; font-size: 12.5pt; color: #4a4a4a; }
   .name { margin: 4mm 0 0; font-size: 22pt; font-weight: 700; }
+  .done { margin: 4mm 0 0; font-size: 13pt; color: var(--ink); }
   .facts { margin: 7mm 0 0; display: inline-grid; grid-template-columns: auto auto; gap: 2.5mm 8mm;
            font-size: 12pt; max-width: 170mm; text-align: start; }
   .facts b { color: var(--gold); font-weight: 600; }
@@ -189,25 +241,65 @@ ${c.status === 'revoked' ? '<div class="revoked">ملغاة</div>' : ''}
 ${d.header === false ? '<div style="height:20mm"></div>' : `<header>
   <img class="auth" src="${esc(d.header_src || AUTH_LOGO)}" alt="الهيئة العامة للعناية بشؤون المسجد الحرام والمسجد النبوي">
 </header>`}
-<div class="kind">${esc(KIND[c.kind] || '')}</div>
-<h1>${esc(c.title || '')}</h1>
-${ORNAMENT(th.gold)}
-<div class="pre">${esc(lines(c)[0])}</div>
-<div class="name">${esc(memberName || '')}</div>
-<div class="facts">${facts(c).map(([k, v]) =>
-  `<b>${esc(k)}</b><span>${esc(v)}</span>`).join('')}</div>
-<footer>
-  <div class="sign">
-    <div class="space">${c.signature === 'image' && (c.design || {}).signature_src
-      ? `<img src="${esc(c.design.signature_src)}" alt="">` : ''}</div>
+${bodyHtml(c, memberName, th, qr)}
+</div></div></body></html>`;
+}
+
+// المتنُ يُرسَم على ترتيب القائمة، والمحجوبُ يُطوى فيرتفع ما بعده
+function bodyHtml(c, memberName, th, qr) {
+  const d = c.design || {};
+  const blocks = normalizeBlocks(d.blocks, c.kind).filter(b => b.on !== false);
+  const at = k => blocks.find(b => b.key === k);
+  const out = [];
+  let facts = [];
+  const flushFacts = () => {
+    if (!facts.length) return;
+    out.push(`<div class="facts">${facts.join('')}</div>`);
+    facts = [];
+  };
+  for (const b of blocks) {
+    if (b.key.startsWith('f.')) {
+      const v = (FACT_VALUE[b.key] || (() => ''))(c);
+      if (v) facts.push(`<b data-block="${esc(b.key)}">${esc(b.text || '')}</b>`
+        + `<span>${esc(v)}</span>`);
+      continue;
+    }
+    flushFacts();
+    if (b.key === 'kind') {
+      out.push(`<div class="kind" data-block="kind">${esc(b.text || KIND[c.kind] || '')}</div>`);
+    } else if (b.key === 'title') {
+      out.push(`<h1 data-block="title">${esc(c.title || '')}</h1>`);
+    } else if (b.key === 'orn') {
+      out.push(ORNAMENT(th.gold));
+    } else if (b.key === 'pre') {
+      out.push(`<div class="pre" data-block="pre">${esc(b.text || PRE_TEXT)}</div>`);
+    } else if (b.key === 'bian') {
+      out.push(`<div class="bian" data-block="bian">${esc(b.text || 'بأنّ')}</div>`);
+    } else if (b.key === 'name') {
+      out.push(`<div class="name" data-block="name">${esc(memberName || '')}</div>`);
+    } else if (b.key === 'done') {
+      out.push(`<div class="done" data-block="done">${esc(b.text || '')}</div>`);
+    }
+  }
+  flushFacts();
+
+  const sign = at('sign') ? `<div class="sign">
+    <div class="space">${c.signature === 'image' && d.signature_src
+      ? `<img src="${esc(d.signature_src)}" alt="">` : ''}</div>
     <div class="rule"></div>
     <b>${esc(c.signer_name || '')}</b>
     <small>${esc(c.signer_role || '')}</small>
-  </div>
-  <div class="no">${esc(c.serial_no || '')}${c.issued_at ? ' · ' + esc(fmtDate(c.issued_at)) : ''}</div>
-  ${qr ? `<div class="stamp"><img src="${qr}" alt="رمز التحقق">للتحقق من الشهادة</div>` : ''}
-</footer>
-</div></div></body></html>`;
+  </div>` : '<div class="sign"></div>';
+  const serial = at('serial')
+    ? `<div class="no">${esc(c.serial_no || '')}`
+      + `${c.issued_at ? ' · ' + esc(fmtDate(c.issued_at)) : ''}</div>`
+    : '';
+  const stamp = (qr && at('qr'))
+    ? `<div class="stamp"><img src="${qr}" alt="رمز التحقق">`
+      + `${esc(at('qr').text || 'للتحقق من الشهادة')}</div>`
+    : '';
+  out.push(`<footer>${sign}${serial}${stamp}</footer>`);
+  return out.join('\n');
 }
 
 // تُفتح في نافذةٍ للطباعة أو الحفظ PDF — ولا يُخزَّن منها ملف

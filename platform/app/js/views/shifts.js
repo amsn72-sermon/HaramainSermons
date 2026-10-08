@@ -334,6 +334,9 @@ async function edit(s, members, reload) {
 async function todaySection() {
   const box = h('div.stack');
   async function load() {
+    // الوردةُ التي انقضت فترتُها بلا حضورٍ تُكتب غيابًا (ملاحظة ٣٧٤)
+    try { await db.rpc('sweep_absent_shifts', { p_date: today() }); }
+    catch { /* حسابيٌّ لا يُعيق العرض */ }
     const rows = await db.select('shifts', {
       select: '*,member:member_id(id,full_name,member_no),sub:sub_member_id(full_name)',
       shift_date: `eq.${today()}`, order: 'start_at.asc'
@@ -380,7 +383,7 @@ async function todaySection() {
       h('div.card.stack',
         h('h3', `ورديات ${fmtDate(today())}`),
         h('div.table-wrap', h('table.responsive',
-          h('thead', h('tr', ['المرشد', 'الوردية', 'الموقع', 'الحضور', 'الانصراف', 'التأخير', 'الحالة', ''].map(t => h('th', t)))),
+          h('thead', h('tr', ['المرشد', 'الوردية', 'الموقع', 'الحضور', 'الانصراف', 'التأخير', 'المُتحقَّق', 'الحالة', ''].map(t => h('th', t)))),
           h('tbody', rows.map(s => {
             const [label, kind] = SHIFT_STATUS[s.status] || [s.status, ''];
             const absent = h('button.btn.xs', { type: 'button' }, 'غياب');
@@ -399,7 +402,19 @@ async function todaySection() {
               h('td', { 'data-label': 'الموقع' }, s.location || '—'),
               h('td', { 'data-label': 'الحضور' }, s.check_in_at ? fmtDateTime(s.check_in_at) : '—'),
               h('td', { 'data-label': 'الانصراف' }, s.check_out_at ? fmtDateTime(s.check_out_at) : '—'),
-              h('td', { 'data-label': 'التأخير' }, s.late_minutes ? h('span.badge.warn', lateText(s.late_minutes)) : '—'),
+              h('td', { 'data-label': 'التأخير' },
+                s.late_minutes ? h('span.badge.warn', lateText(s.late_minutes)) : '—',
+                s.early_minutes ? h('span.sub', `انصرافٌ مبكِّر ${lateText(s.early_minutes)}`) : null),
+              // ما لم يصل فيه نبضُ موقعٍ لا يُحتسَب، ويُبيَّن (ملاحظة ٣٧٥)
+              h('td', { 'data-label': 'المُتحقَّق' },
+                s.verified_minutes != null
+                  ? h('span', lateText(s.verified_minutes)) : h('span.muted', '—'),
+                Number(s.gap_minutes)
+                  ? h('span.sub.bad', `غيرُ مُتحقَّقٍ منه ${lateText(s.gap_minutes)}`) : null,
+                s.out_unverified ? h('span.sub.bad', 'انصرافٌ غيرُ مُتحقَّق') : null,
+                s.out_outside ? h('span.sub.bad', 'انصرافٌ من خارج الموقع') : null,
+                (s.challenge_at && !s.challenge_ok_at)
+                  ? h('span.sub.bad', 'لم يردَّ على المناداة') : null),
               h('td', { 'data-label': 'الحالة' }, h('span.badge', { class: kind }, label)),
               h('td', { 'data-label': '' }, isAdmin() ? h('div.row', absent, leave) : null));
           }))))));

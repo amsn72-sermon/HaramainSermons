@@ -276,6 +276,18 @@ export async function render(ctx) {
     mosqueSel.onchange = () => { paintLangs(); };
     paintLangs();
 
+    // قوالبُ المصمِّم تُتاح هنا كما في أرشيف الخطب (ملاحظة ٣٥٧)
+    let tplRows = [];
+    try { tplRows = await db.rpc('book_templates_list') || []; } catch { tplRows = []; }
+    const tplSel = h('select', { 'aria-label': 'قالبُ الإخراج' },
+      h('option', { value: '' }, 'كليشةُ الهيئة — كما كان'),
+      tplRows.map(r => h('option', { value: r.id },
+        `${r.name}${r.is_default ? ' ★' : ''}`)));
+    const tplRow = h('div.row.between.wrap',
+      h('label.field', { style: { flex: 1, minWidth: '220px' } }, 'قالبُ الإخراج', tplSel,
+        h('small', 'قوالبُ المجمَّع نفسُها: غلافٌ وصفحاتُ عناوينَ وكليشةٌ وترقيم')),
+      h('a.btn.sm', { href: '/app/book-design' }, '🖌 تصميمُ القوالب'));
+
     const all = h('button.btn.xs', { type: 'button',
       onclick: () => { inputs.forEach(i => { i.checked = true; }); paint(); } }, 'كل اللغات');
     const none = h('button.btn.xs', { type: 'button',
@@ -296,6 +308,7 @@ export async function render(ctx) {
           h('div.row.between', h('b', 'اللغات'), h('div.row', all, none)),
           langBox, count),
         h('label.field', 'ترتيب المخرج', shape),
+        tplRow,
         h('label.field.row', { style: { alignItems: 'center', gap: '8px' } },
           withArabic, h('span', 'اضمم الأصل العربي قبل تراجم كل عمل')),
         h('p.small.muted', 'والمدة كما حُدِّدت في الأرشيف: ' + periodLabel())),
@@ -307,7 +320,7 @@ export async function render(ctx) {
             return true;
           },
           value: () => ({ codes: inputs.filter(i => i.checked).map(i => i.value),
-            shape: shape.value, arabic: withArabic.checked,
+            shape: shape.value, arabic: withArabic.checked, tpl: tplSel.value || null,
             title: titleIn.value.trim() || 'خطب الحرمين الشريفين' }) }]
     });
     if (!picked) return;
@@ -372,12 +385,53 @@ export async function render(ctx) {
         rows: picked.codes.flatMap(c => packLang(sel.filter(t => t.language_code === c))) }];
     }
 
+    // على قالبٍ من المصمِّم: يُبنى بمولِّد المجمَّع نفسِه، فالمُخرَجُ
+    //   واحدٌ في الأرشيفين لا مُخرَجان (ملاحظة ٣٥٧)
+    let onTpl = null;
+    if (picked.tpl) {
+      const chosen = tplRows.find(r => String(r.id) === String(picked.tpl));
+      if (chosen) {
+        const { buildBook, DEFAULT_TPL } = await import('../sermonbook.js');
+        const base = DEFAULT_TPL();
+        const tpl = { ...base, ...(chosen.tpl || {}) };
+        for (const k of ['cover', 'front', 'colophon', 'divider', 'inner', 'back', 'margins']) {
+          tpl[k] = { ...(base[k] || {}), ...((chosen.tpl || {})[k] || {}) };
+        }
+        const toBookRow = (it, i) => ({
+          seq: i + 1, week_no: null,
+          title: it.material?.title || '—',
+          khateeb: it.khateeb || it.material?.khateeb?.name || null,
+          mosque: it.material?.mosque || null,
+          sermon_type: it.material?.sermon_type || it.material?.material_type || 'خطبة جمعة',
+          sermon_date: it.material?.sermon_date || null,
+          hijri_text: null,
+          body_html: it.track?.translation_html || '',
+          doc_no: it.track?.doc_no || null,
+          title_tr: it.track?.title_tr || null
+        });
+        // العامُ هجريٌّ لا ميلاديّ: يُقرأ من تقويم أمِّ القرى
+        const hYear = (iso => {
+          try {
+            return Number(new Intl.DateTimeFormat('en-u-ca-islamic-umalqura',
+              { year: 'numeric' }).format(new Date(iso)).replace(/\D+/g, '')) || 0;
+          } catch { return 0; }
+        })(sel[0]?.material?.sermon_date
+            ? `${String(sel[0].material.sermon_date).slice(0, 10)}T12:00:00`
+            : new Date().toISOString());
+        onTpl = (rows, code) => buildBook(rows.map(toBookRow), {
+          year: hYear, lang: code || rows[0]?.track?.language_code || 'ar',
+          title: picked.title, intro: tpl.intro || '', tpl });
+      }
+    }
+
     let opened = 0;
     for (const g of groups) {
       if (!g.rows.length) continue;
-      const ok = printBook(g.rows,
-        { title: picked.title, period: periodLabel(), language: g.code, edition },
-        { autoPrint: false });
+      const ok = onTpl
+        ? onTpl(g.rows, g.code)
+        : printBook(g.rows,
+            { title: picked.title, period: periodLabel(), language: g.code, edition },
+            { autoPrint: false });
       if (ok) opened++;
       await new Promise(r => setTimeout(r, 400));   // نوافذ متتابعة لا دفعةً واحدة
     }

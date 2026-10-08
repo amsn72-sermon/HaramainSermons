@@ -1935,6 +1935,49 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
   background: var(--surface); }
 .bd-bar .field.sm { margin: 0; min-width: 130px; }
 .bd-sheets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+/* ـــ العرضُ على نسقِ الكتاب: صفحةٌ وحدَها، وصفحتان مفتوحتان (ملاحظة ٣٥٥) */
+.bd-stage { display: grid; gap: 14px; }
+.bd-row { display: grid; gap: 4px; }
+.bd-row-label { padding-inline-start: 2px; }
+.bd-spread { display: grid; gap: 10px; justify-content: center;
+  grid-template-columns: minmax(0, 320px); }
+.bd-spread.two { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px;
+  justify-content: stretch; }
+/* الصفحتان المفتوحتان يلتقيان عند الخيط، فيُقرَّبان ويُظلَّل ما بينهما */
+.bd-spread.two .bd-sheet-wrap:first-child .bd-sheet { border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  box-shadow: 0 2px 10px #0004, inset -8px 0 14px -10px #0007; }
+.bd-spread.two .bd-sheet-wrap:last-child .bd-sheet { border-start-end-radius: 0;
+  border-end-end-radius: 0;
+  box-shadow: 0 2px 10px #0004, inset 8px 0 14px -10px #0007; }
+@media (max-width: 640px) { .bd-spread.two { grid-template-columns: 1fr; gap: 10px; } }
+
+/* نصٌّ حرٌّ على الصفحة المصغَّرة */
+.bd-tx { position: absolute; direction: rtl; line-height: 1.6; white-space: pre-wrap;
+  unicode-bidi: plaintext; }
+
+/* صفحةُ الحقوق مصغَّرة */
+.bd-colo { position: absolute; top: 12%; inset-inline: 12%; direction: rtl;
+  display: flex; flex-direction: column; gap: 3%; font-size: 3.4cqw; }
+.bd-colo > b { font-size: 5cqw; padding-bottom: 2%; }
+.bd-rights { border: 1px solid; border-radius: 2px; padding: 3% 4%; font-size: 3cqw;
+  opacity: .8; }
+.bd-qr { width: 14%; aspect-ratio: 1; border: 1px solid; border-radius: 2px; opacity: .5; }
+
+/* لوحةُ الأدوات الواحدة (ملاحظة ٣٥٥) */
+.bd-pages { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.bd-pages .tab { border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 8px; padding: 5px 10px; font: inherit;
+  cursor: pointer; min-height: 0; font-size: .82rem; }
+.bd-pages .tab[aria-selected="true"] { background: var(--gold); border-color: var(--gold);
+  color: var(--ink); font-weight: 700; }
+.bd-sec { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px;
+  margin-bottom: 8px; background: var(--bg); }
+.bd-sec > summary { cursor: pointer; font-weight: 600; font-size: .9rem;
+  color: var(--accent-text); }
+.bd-sec > .stack, .bd-sec > fieldset { margin-top: 8px; }
+.tx-row { border: 1px dashed var(--border); border-radius: 8px; padding: 6px; gap: 6px; }
+.tx-row textarea { min-height: 44px; }
 .bd-sheet-wrap { display: flex; flex-direction: column; gap: 4px; align-items: stretch;
   background: none; border: 0; padding: 0; cursor: pointer; font: inherit; color: inherit; }
 .bd-sheet { position: relative; overflow: hidden; border-radius: 4px;
@@ -1984,3 +2027,102 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .bd-h { margin: 10px 0 8px; font-size: 1rem; color: var(--accent-text); }
 .bd-props { border: 1px solid var(--border); border-radius: 12px; padding: 12px;
   background: var(--surface); }
+
+/* ===================================================================
+   أرشيفُ الخطب: بطاقاتُ الأشهر وصفوفُ اللغات (ملاحظات ٣٥٨ و٣٦٤–٣٧٠)
+   =================================================================== */
+
+/* ـــ القسمُ يُنتقى ويُعدَّل ويُحذَف من بطاقته (ملاحظتا ٣٥٨ و٣٦٤) */
+.sec-tile { position: relative; }
+.sec-tile .sec-pick { display: flex; flex-direction: column; align-items: flex-start;
+  gap: 2px; background: none; border: 0; padding: 0; font: inherit; color: inherit;
+  cursor: pointer; text-align: start; }
+.sec-tile .sec-acts { position: absolute; inset-block-start: 4px; inset-inline-end: 4px;
+  display: inline-flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+.sec-tile:hover .sec-acts, .sec-tile:focus-within .sec-acts { opacity: 1; }
+.sec-tile .sec-acts .icon-btn { padding: 1px 4px; }
+
+/* ـــ اثنتا عشرة بطاقةً على أشهر العام (ملاحظة ٣٦٩) */
+.month-grid { display: grid; gap: 8px; margin-bottom: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .month-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px)  { .month-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.month-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--card); cursor: pointer; font: inherit; color: inherit;
+  text-align: start; transition: border-color .12s, transform .12s; }
+.month-tile:hover { border-color: var(--gold); transform: translateY(-1px); }
+.month-tile.on { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold) inset;
+  background: color-mix(in srgb, var(--gold) 10%, var(--card)); }
+.month-tile .m-name { font-size: 1rem; }
+.month-tile .year-bar { width: 100%; margin: 2px 0; }
+.month-tile .m-stats { display: flex; flex-wrap: wrap; gap: 4px; }
+.month-tile .m-stats .badge { padding: 0 6px; font-size: .68rem; }
+.month-head { padding: 2px 2px 6px; }
+.month-head b { font-size: 1.05rem; }
+
+/* ـــ صفٌّ لكلِّ لغة: عنوانٌ ومسجدٌ ولغةٌ ورمزُ توثيقٍ وأيقونات
+      (ملاحظات ٣٦٥ و٣٦٦ و٣٧٠) */
+.lang-rows { display: grid; gap: 1px; }
+.lang-row { display: grid; align-items: center; gap: 6px; padding: 2px 4px;
+  border-radius: 6px; font-size: .82rem; line-height: 1.5; min-width: 0;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, .9fr) minmax(0, .8fr) auto auto; }
+.lang-row + .lang-row { border-top: 1px dashed var(--border); }
+.lang-row.empty { opacity: .62; }
+.lang-row.has { background: color-mix(in srgb, var(--ok, #2f6b52) 7%, transparent); }
+.lang-row:hover { background: color-mix(in srgb, var(--gold) 12%, transparent); }
+.lang-row .lr-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.lang-row .lr-mosque, .lang-row .lr-lang { color: var(--muted); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.week-cols .lang-row { grid-template-columns:
+  minmax(0, 1.7fr) auto minmax(0, 1fr) auto auto; }
+.week-cols .lang-row .lr-mq-name { display: none; }
+.lang-row .lr-lang { color: var(--text); }
+.lang-row .lr-no { white-space: nowrap; }
+.lang-row .doc-no { font-size: .7rem; }
+.lang-row .lr-acts { display: inline-flex; gap: 1px; justify-content: flex-end;
+  flex: 0 0 auto; }
+.lang-row .lr-acts .icon-btn { padding: 0 3px; }
+@media (max-width: 900px) {
+  .lang-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .lang-row .lr-mosque { display: none; }
+}
+
+/* ـــ شبكةُ اختيارِ لغات العام */
+.check-grid { display: grid; gap: 4px;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+
+/* ـــ نصوصُ الشهادة مصفوفةً بترتيبها (ملاحظة ٣٥٦) */
+.cb-row { gap: 8px; padding: 5px 0; align-items: center; }
+.cb-row + .cb-row { border-top: 1px dashed var(--border); }
+.cb-row .cb-no { display: inline-flex; min-width: 20px; justify-content: center;
+  font-size: .72rem; color: var(--muted); }
+.cb-row b.small { display: block; color: var(--muted); font-weight: 600;
+  margin-bottom: 2px; }
+.cb-row input[type="text"], .cb-row input:not([type]) { width: 100%; }
+
+/* ـــ خططُ التدريب مربَّعاتٌ تُفتَح صفحةً لها (ملاحظة ٣٦٠) */
+.plan-grid { display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.plan-tile { position: relative; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--card); overflow: hidden; transition: border-color .12s, transform .12s; }
+.plan-tile:hover { border-color: var(--gold); transform: translateY(-1px); }
+.plan-tile.off { opacity: .72; }
+.plan-tile .plan-open { display: flex; flex-direction: column; gap: 4px;
+  padding: 12px 14px 10px; text-decoration: none; color: inherit; }
+.plan-tile .plan-title { font-size: 1.02rem; }
+.plan-tile .plan-goal { margin: 2px 0 0; color: var(--muted);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; }
+.plan-tile .plan-stats { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.plan-tile .plan-stats .badge { padding: 0 6px; font-size: .7rem; }
+.plan-tile .plan-targets, .plan-tile .plan-room { margin-top: 2px; }
+.plan-tile .plan-acts { display: flex; gap: 6px; padding: 0 14px 10px; }
+
+/* ـــ ما لم يُتحقَّق منه في الحضور يُبيَّن بلونه (ملاحظة ٣٧٥) */
+.sub.bad { color: var(--bad, #c06c6c); }
+
+/* ـــ بطاقةُ الخطة: العمودُ يمتدُّ فلا يتكوَّم النصُّ في الوسط (٣٦٠) */
+.plan-head .row > .grow { flex: 1 1 auto; min-width: 0; }
+.plan-head .row.wrap > .grow { min-width: 220px; }

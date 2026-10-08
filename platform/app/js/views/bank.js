@@ -1,7 +1,7 @@
 // الحساب البنكي للعضو: داخل المملكة آيبان، وخارجها سويفت وما يلزم معه (ملاحظة ٨٤)
 import { h, toast, busy, confirm, dialog, fmtDateTime } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, isManager } from '../store.js';
+import { state, isManager, can } from '../store.js';
 
 const clean = v => String(v || '').replace(/\s+/g, '').toUpperCase();
 export const ibanPretty = v => clean(v).replace(/(.{4})/g, '$1 ').trim();
@@ -153,12 +153,25 @@ export async function bankSection(ctx) {
   const statusNote = acc && !acc.verified_at
     ? h('p.small.muted', 'بياناتك محفوظة، ويطابقها المنسق بخطاب البنك المرفق ثم يعتمدها. الصرف بعد الاعتماد.')
     : null;
+  // ما طُلب منه: مستندٌ أو تصحيحٌ بسببٍ مكتوب (ملاحظة ٣٧٣)
+  const asked = acc && acc.needs_fix
+    ? h('div.policy-state.unsigned.stack',
+        h('b', 'حسابُك يحتاج تصحيحًا'),
+        h('span.small', acc.needs_fix),
+        h('span.small.muted', 'صحِّحْ ما ذُكر واحفظْ، فيُرفَع الوسمُ من تلقاء نفسه.'))
+    : (acc && acc.doc_requested_at
+        ? h('div.policy-state.unsigned.stack',
+            h('b', 'مطلوبٌ إرفاقُ خطاب البنك'),
+            h('span.small', 'أرفِقْ خطابَ البنك الرسميَّ الذي يحمل الآيبان في بطاقة '
+              + '«خطاب البنك» أدناه.'))
+        : null);
 
   sync();
   return h('div.stack',
     h('div.card.stack',
       h('div.row.between', h('h3', 'الحساب البنكي'), status),
       h('p.small.muted', 'تُستخدم هذه البيانات لصرف مستحقات الترجمة، ولا يطّلع عليها إلا المنسق ومدير المشروع.'),
+      asked,
       statusNote,
       err),
     h('div.card.stack',
@@ -174,44 +187,184 @@ export async function bankSection(ctx) {
     h('div.card.stack', h('h3', 'خطاب البنك'), docBox));
 }
 
+// ما يملكه الناظرُ من أبواب الحساب: المنحُ عملٌ لا كتابة (إصلاح ٣٥٩)
+//
+//   كان الزرُّ معلَّقًا على `isManager()` وحدَه، فالمنسِّقُ الممنوحُ
+//   «تدقيقَ الحسابات المصرفية وتفعيلَها» لا يرى أيقونةً أصلًا ولا يعرف
+//   لِمَ. فصارت كلُّ أيقونةٍ على مفتاحها، والبوابةُ في قاعدة البيانات
+//   كما هي لا تُمَسّ.
+const mayCheck    = () => isManager() || can('bank_check');
+const mayVerify   = () => isManager() || can('bank_verify');
+const mayActivate = () => isManager() || can('bank_activate');
+const mayAnyBank  = () => mayCheck() || mayVerify() || mayActivate();
+
+const STATE_BADGE = {
+  verified:   ['ok',   'معتمَد'],
+  needs_fix:  ['bad',  'يُنتظَر تصحيحُه'],
+  doc_wanted: ['warn', 'يُنتظَر المستند'],
+  no_doc:     ['warn', 'بلا مستندٍ رسمي'],
+  review:     ['warn', 'تحت المراجعة']
+};
+
 // شاشة الإدارة: حسابات الفريق وتوثيقها
 export async function adminList(ctx, opts = {}) {
-  const [all, members] = await Promise.all([
-    db.select('bank_accounts', { select: '*' }),
-    db.select('profiles', { select: 'id,full_name,role,email', order: 'full_name.asc' })
-  ]);
+  let all = [];
+  try { all = await db.rpc('bank_admin_list') || []; }
+  catch {
+    // القديمُ احتياطًا: جدولانِ يُضمَّان في الواجهة
+    const [rows, members] = await Promise.all([
+      db.select('bank_accounts', { select: '*' }).catch(() => []),
+      db.select('profiles', { select: 'id,full_name,role,email',
+        order: 'full_name.asc' }).catch(() => [])
+    ]);
+    const byId = Object.fromEntries(members.map(m => [m.id, m]));
+    all = rows.map(a => ({ ...a, full_name: byId[a.member_id]?.full_name,
+      email: byId[a.member_id]?.email,
+      state: a.verified_at ? 'verified' : (a.doc_path ? 'review' : 'no_doc') }));
+  }
   // كل فريق وحساباته على حدة (ملاحظة ٩٩)
   const accounts = opts.only ? all.filter(a => opts.only.has(a.member_id)) : all;
-  const byId = Object.fromEntries(members.map(m => [m.id, m]));
   const reload = () => ctx.navigate(opts.reloadPath || '/app/bank-accounts', { replace: true });
 
+  // ـــ طلبُ المستند، وتصحيحُ الرقم، والإعادةُ للتصحيح (ملاحظة ٣٧٣)
+  async function askDoc(a) {
+    const note = h('textarea', { rows: 2, 'aria-label': 'ما يُكتب له',
+      placeholder: 'أرفِقْ خطابَ البنك الرسميَّ الذي يحمل الآيبان' });
+    const res = await dialog({
+      title: `طلبُ المستند من ${a.full_name || 'العضو'}`,
+      body: h('div.stack',
+        h('p.small.muted', 'يصله إشعارٌ بذلك، ويبقى حسابُه موسومًا بانتظار المستند.'),
+        h('label.field', 'ما يُكتب له', note)),
+      buttons: [{ label: 'اطلبْه', kind: 'primary',
+        value: () => ({ note: note.value.trim() || null }) },
+        { label: 'إلغاء', value: null }]
+    });
+    if (!res) return;
+    try {
+      await db.rpc('request_bank_doc', { p_member: a.member_id, p_note: res.note });
+      toast('طُلب المستند.', 'ok'); reload();
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  async function sendBack(a) {
+    const why = h('textarea', { rows: 2, 'aria-label': 'السبب',
+      placeholder: 'الرقمُ المكتوبُ يخالف ما في خطاب البنك' });
+    const res = await dialog({
+      title: `إعادةُ حساب ${a.full_name || 'العضو'} للتصحيح`,
+      body: h('div.stack',
+        h('p.small.muted', 'يرجع الطلبُ إلى صاحبه ليصحِّح بنفسه، ويخرج من «تحت المراجعة» '
+          + 'إلى «يُنتظَر تصحيحُه». والسببُ يُكتب له.'),
+        h('label.field', 'السبب', why)),
+      buttons: [{ label: 'أعِدْه', kind: 'primary',
+        validate: () => (why.value.trim().length >= 3 ? true : 'اكتبِ السبب'),
+        value: () => why.value.trim() }, { label: 'إلغاء', value: null }]
+    });
+    if (!res) return;
+    try {
+      await db.rpc('return_bank_account', { p_member: a.member_id, p_reason: res });
+      toast('أُعيد للتصحيح.', 'ok'); reload();
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  async function fixIban(a) {
+    const local = a.scope === 'local';
+    const iban = h('input', { value: a.iban || '', dir: 'ltr', 'aria-label': 'الآيبان',
+      placeholder: local ? 'SA…' : '' });
+    const acc = h('input', { value: a.account_number || '', dir: 'ltr',
+      'aria-label': 'رقم الحساب' });
+    const swift = h('input', { value: a.swift || '', dir: 'ltr', 'aria-label': 'سويفت' });
+    const note = h('input', { 'aria-label': 'ملاحظة', placeholder: 'بحسب خطاب البنك' });
+    const res = await dialog({
+      title: `تصحيحُ رقم حساب ${a.full_name || 'العضو'}`,
+      body: h('div.stack',
+        h('p.small.muted', 'إذا خالف المستندُ الرسميُّ الرقمَ المكتوب صُحِّح من هنا. '
+          + 'ويُقيَّد مَن صحَّحه ومتى، ويبقى الرقمُ الأصلُ في السجل. '
+          + 'والتصحيحُ يُلغي التوثيقَ السابقَ فيُراجَع الجديد.'),
+        h('label.field', 'الآيبان (IBAN)', iban),
+        local ? null : h('div.grid-2',
+          h('label.field', 'رقم الحساب', acc),
+          h('label.field', 'سويفت', swift)),
+        h('label.field', 'ملاحظة', note),
+        a.iban_was ? h('p.small.muted', { dir: 'ltr' }, `سابقًا: ${a.iban_was}`) : null),
+      buttons: [{ label: 'احفظِ التصحيح', kind: 'primary',
+        validate: () => {
+          const v = iban.value.replace(/\s+/g, '').toUpperCase();
+          if (local && !/^SA[0-9]{22}$/.test(v)) {
+            return 'الآيبان السعودي يبدأ بـ SA ويتكوّن من ٢٤ خانة';
+          }
+          if (!local && !v && !acc.value.trim()) return 'اكتبِ الآيبان أو رقمَ الحساب';
+          return true;
+        },
+        value: () => ({ iban: iban.value.replace(/\s+/g, '').toUpperCase() || null,
+          acc: acc.value.trim() || null, swift: swift.value.trim() || null,
+          note: note.value.trim() || null }) },
+        { label: 'إلغاء', value: null }]
+    });
+    if (!res) return;
+    try {
+      await db.rpc('fix_bank_iban', { p_member: a.member_id, p_iban: res.iban,
+        p_account_number: res.acc, p_swift: res.swift, p_note: res.note });
+      toast('حُفظ التصحيح.', 'ok'); reload();
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
   const rowEl = a => {
-    const m = byId[a.member_id] || {};
+    const [kind, label] = STATE_BADGE[a.state] || STATE_BADGE.review;
     return h('tr',
-      h('td', { 'data-label': 'العضو' }, h('b', m.full_name || '—'), h('span.sub', { dir: 'ltr' }, m.email || '')),
-      h('td', { 'data-label': 'البنك' }, a.bank_name, h('span.sub', a.scope === 'local' ? 'داخل المملكة' : `خارج المملكة — ${a.country || ''}`)),
-      h('td', { 'data-label': 'الآيبان' }, h('span', { dir: 'ltr' }, a.iban ? ibanPretty(a.iban) : (a.account_number || '—')),
-        a.swift && h('span.sub', { dir: 'ltr' }, a.swift)),
-      h('td', { 'data-label': 'التوثيق' }, a.verified_at
-        ? h('span.badge.ok', h('span.tick', { 'aria-hidden': 'true' }, '✓'), 'معتمَد')
-        : h('span.badge.warn', 'تحت المراجعة')),
-      h('td', h('div.row',
-        a.doc_path && h('button.btn.sm', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
-          try { window.open(await storage.signedUrl('bank-docs', a.doc_path, 600), '_blank', 'noopener'); }
-          catch (err) { toast(err.message, 'bad'); }
-        }) }, 'الخطاب'),
-        isManager() && h('button.btn.sm', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
-          const on = !a.verified_at;
-          if (on && !await confirm('توثيق الحساب', `تؤكد مطابقة بيانات ${m.full_name} لخطاب البنك؟`, 'توثيق')) return;
-          try { await db.rpc('verify_bank_account', { p_member: a.member_id, p_verified: on }); toast('تم.', 'ok'); reload(); }
-          catch (err) { toast(err.message, 'bad'); }
-        }) }, a.verified_at ? 'إلغاء التوثيق' : 'توثيق'))));
+      h('td', { 'data-label': 'العضو' }, h('b', a.full_name || '—'),
+        h('span.sub', { dir: 'ltr' }, a.email || '')),
+      h('td', { 'data-label': 'البنك' }, a.bank_name,
+        h('span.sub', a.scope === 'local' ? 'داخل المملكة'
+          : `خارج المملكة — ${a.country || ''}`)),
+      h('td', { 'data-label': 'الآيبان' },
+        h('span', { dir: 'ltr' }, a.iban ? ibanPretty(a.iban) : (a.account_number || '—')),
+        a.swift ? h('span.sub', { dir: 'ltr' }, a.swift) : null,
+        a.iban_was ? h('span.sub', { dir: 'ltr', title: 'الرقمُ قبل التصحيح' },
+          `← ${ibanPretty(a.iban_was)}`) : null),
+      h('td', { 'data-label': 'الحال' },
+        h('span.badge', { class: kind },
+          kind === 'ok' ? h('span.tick', { 'aria-hidden': 'true' }, '✓') : null, label),
+        a.needs_fix ? h('span.sub', a.needs_fix) : null),
+      h('td', h('div.row.wrap', { style: { gap: '4px' } },
+        a.doc_path
+          ? h('button.btn.sm', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
+              try {
+                window.open(await storage.signedUrl('bank-docs', a.doc_path, 600),
+                  '_blank', 'noopener');
+              } catch (err) { toast(err.message, 'bad'); }
+            }) }, 'الخطاب')
+          : null,
+        mayCheck()
+          ? h('button.btn.sm.ghost', { type: 'button', onclick: () => askDoc(a) },
+              'اطلبِ المستند')
+          : null,
+        mayCheck()
+          ? h('button.btn.sm.ghost', { type: 'button', onclick: () => fixIban(a) },
+              'صحِّحِ الرقم')
+          : null,
+        mayCheck()
+          ? h('button.btn.sm.ghost', { type: 'button', onclick: () => sendBack(a) },
+              'أعِدْه للتصحيح')
+          : null,
+        (mayVerify() || mayActivate())
+          ? h('button.btn.sm', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
+              const on = !a.verified_at;
+              if (on && !await confirm('توثيق الحساب',
+                `تؤكد مطابقة بيانات ${a.full_name} لخطاب البنك؟`, 'توثيق')) return;
+              try {
+                await db.rpc('verify_bank_account', { p_member: a.member_id, p_verified: on });
+                toast('تم.', 'ok'); reload();
+              } catch (err) { toast(err.message, 'bad'); }
+            }) }, a.verified_at ? 'إلغاء التوثيق' : 'وثِّقْ وفعِّلْ')
+          : null)));
   };
 
   const body = accounts.length ? h('div.table-wrap', h('table.responsive',
-    h('thead', h('tr', ['العضو', 'البنك', 'الآيبان / رقم الحساب', 'التوثيق', ''].map(t => h('th', t)))),
+    h('thead', h('tr', ['العضو', 'البنك', 'الآيبان / رقم الحساب', 'الحال', ''].map(t => h('th', t)))),
     h('tbody', accounts.map(rowEl))))
-    : h('p.muted', 'لم يسجّل أحد حسابه البنكي بعد.');
+    : h('p.muted', mayAnyBank()
+        ? 'لم يسجّل أحد حسابه البنكي بعد.'
+        : 'هذا خارجَ نطاقِ عملك الحالي.');
 
   // جزء داخل شاشة «شؤون الفريق» الموحّدة (ملاحظة ٩٨)
   if (opts.parts) {

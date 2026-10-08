@@ -14,7 +14,8 @@
 import { h, fill, toast, busy, dialog, confirm } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { isManager, can } from '../store.js';
-import { certHtml, CERT_THEMES, DEFAULT_CERT_MARKS, CERT_VARS, printCertificate } from '../certdoc.js';
+import { certHtml, CERT_THEMES, DEFAULT_CERT_MARKS, CERT_VARS, printCertificate,
+         CERT_BLOCKS, normalizeBlocks } from '../certdoc.js';
 import { prepareMark } from '../photo.js';
 import { bgImage } from '../pdfview.js';
 
@@ -35,6 +36,10 @@ const SAMPLE = {
 };
 
 export const DEFAULT_MARKS = () => DEFAULT_CERT_MARKS.map(g => ({ ...g }));
+
+// النصوصُ التي تُحرَّر: ما سواها يأخذ نصَّه من بيانات الشهادة
+const NO_TEXT = new Set(['title', 'orn', 'name', 'sign', 'serial']);
+const HAS_TEXT = key => !NO_TEXT.has(key);
 
 const FONTS = [
   ['', 'خطُّ الشهادة'],
@@ -128,6 +133,17 @@ export async function render(ctx) {
     doc.open();
     doc.write(certHtml({ ...SAMPLE, design: { ...d } }, 'محمد بن عبدالله الأنصاري'));
     doc.close();
+    // النقرُ على النصِّ في الشهادة نفسِها يفتح تحريرَه (ملاحظة ٣٥٦)
+    try {
+      const st = doc.createElement('style');
+      st.textContent = '[data-block]{cursor:text;outline-offset:2px}'
+        + '[data-block]:hover{outline:1px dashed var(--gold)}';
+      doc.head?.append(st);
+      doc.body?.addEventListener('click', ev => {
+        const el = ev.target?.closest?.('[data-block]');
+        if (el) editBlock(el.getAttribute('data-block'));
+      });
+    } catch { /* الإطارُ لم يكتملْ بعد */ }
     requestAnimationFrame(() => { fit(); drawHandles(); });
   }
   window.addEventListener('resize', fit);
@@ -510,7 +526,81 @@ export async function render(ctx) {
     h('a.btn.sm.ghost', { href: '/app/certificates?tab=templates' }, '← كلُّ القوالب'));
 
   // ------------------------------------------------------------------
+  // نصوصُ الشهادة: مصفوفةٌ بترتيبها، أمامَ كلٍّ علامةُ صحٍّ وتحريرٌ
+  //   (ملاحظة ٣٥٦)
+  // ------------------------------------------------------------------
+  const blocksOf = () => {
+    d.blocks = normalizeBlocks(d.blocks, kind);
+    return d.blocks;
+  };
+
+  const moveBlock = (i, dir) => {
+    const list = blocksOf();
+    const j = i + dir;
+    if (j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    paint(); drawTabs();
+  };
+
+  // تحريرُ نصٍّ بالنقر عليه في الشهادة نفسِها
+  async function editBlock(key) {
+    const list = blocksOf();
+    const b = list.find(x => x.key === key);
+    if (!b) return;
+    if (key === 'title') {
+      return toast('عنوانُ الشهادة يُكتب في «بياناتُ القالب».', 'warn');
+    }
+    if (!HAS_TEXT(key)) return;
+    const inp = h('textarea', { rows: 3, 'aria-label': 'النص' }, b.text || '');
+    const res = await dialog({
+      title: `تعديلُ: ${b.label}`,
+      body: h('div.stack',
+        h('p.small.muted', 'المكتوبُ مقترَحٌ لا محتوم — اكتبْ ما شئت.'),
+        inp),
+      buttons: [{ label: 'احفظْ', kind: 'primary', value: () => inp.value },
+                { label: 'إلغاء', value: null }]
+    });
+    if (res == null) return;
+    b.text = res;
+    paint(); drawTabs();
+  }
+
+  const blocksBox = () => {
+    const list = blocksOf();
+    return h('div.stack',
+      h('p.small.muted', 'النصوصُ بترتيبها في الشهادة من أعلى إلى أسفل. '
+        + 'ارفعِ العلامةَ ليَظهر النصُّ، واخفضْها ليُحجَب — وما بعده يرتفع مكانَه. '
+        + 'وكلُّ نصٍّ يُحرَّر من هنا أو بالنقر عليه في الشهادة.'),
+      ...list.map((b, i) => {
+        const on = h('input', { type: 'checkbox', checked: b.on !== false ? true : null,
+          'aria-label': `أظهِرْ ${b.label}` });
+        on.onchange = () => { b.on = on.checked; paint(); };
+        const txt = HAS_TEXT(b.key)
+          ? (() => {
+              const i2 = h('input', { value: b.text || '', 'aria-label': b.label });
+              i2.oninput = () => { b.text = i2.value; };
+              i2.onchange = () => paint();
+              return i2;
+            })()
+          : h('span.small.muted', b.key === 'title' ? 'من بيانات القالب' : '—');
+        return h('div.row.between.wrap.cb-row',
+          h('label.check', on, h('span.cb-no', AR(i + 1))),
+          h('div.grow', { style: { minWidth: '180px' } },
+            h('b.small', b.label), txt),
+          h('div.row', { style: { gap: '4px' } },
+            h('button.btn.xs.ghost', { type: 'button', title: 'ارفعْه سطرًا',
+              onclick: () => moveBlock(i, -1) }, '▲'),
+            h('button.btn.xs.ghost', { type: 'button', title: 'أنزلْه سطرًا',
+              onclick: () => moveBlock(i, 1) }, '▼')));
+      }),
+      h('div.row',
+        h('button.btn.sm.ghost', { type: 'button', onclick: () => {
+          d.blocks = CERT_BLOCKS(kind); paint(); drawTabs();
+        } }, '↺ أعِدِ الترتيبَ والنصوصَ الأصلية')));
+  };
+
   const TABS = [
+    ['blocks', '≡', 'نصوصُ الشهادة', 'ترتيبُها وحجبُها وتحريرُها', blocksBox],
     ['fixed', '✎', 'بياناتُ القالب', 'ما يُملأ مرةً لكلِّ الشهادات', fixedBox],
     ['theme', '▦', 'القالبُ والاتجاه', 'ثلاثةُ قوالبَ وأفقيٌّ ورأسيّ', themeBox],
     ['bg',    '🖼', 'الخلفية', 'PDF بدقّة الطباعة', bgBox],

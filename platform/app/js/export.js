@@ -147,29 +147,39 @@ async function docStampBlocks(docx, track) {
   ];
 }
 
-export async function downloadDocx({ material, track, khateeb }) {
+export async function downloadDocx(one) {
+  const { material, track, khateeb } = one;
+  return downloadDocxBundle([one],
+    { name: fileName(material, track.language_code, khateeb, null, track.doc_no) });
+}
+
+// عدّةُ خطبٍ في ملفِ Word واحد: لكلِّ واحدةٍ قسمُها وكليشتُها، فتبدأ
+// كلُّ خطبةٍ صفحةً جديدة (ملاحظة ٣٧١)
+export async function downloadDocxBundle(items, { name = 'خطب' } = {}) {
+  if (!items || !items.length) throw new Error('لا خطبَ للتصدير');
   const docx = await loadDocx();
   const { Document, Packer, Paragraph, ImageRun, Header, HorizontalPositionRelativeFrom, VerticalPositionRelativeFrom } = docx;
-  const rtl = langDir(track.language_code) === 'rtl';
   const img = await fetch(LETTERHEAD).then(r => { if (!r.ok) throw new Error('تعذّر تحميل الكليشة'); return r.arrayBuffer(); });
-  const letterhead = new Paragraph({ children: [new ImageRun({
+  const letterhead = () => new Paragraph({ children: [new ImageRun({
     type: 'jpg', data: img, transformation: { width: PX(PAGE.w), height: PX(PAGE.h) },
     floating: { horizontalPosition: { relative: HorizontalPositionRelativeFrom.PAGE, offset: 0 },
       verticalPosition: { relative: VerticalPositionRelativeFrom.PAGE, offset: 0 }, behindDocument: true, allowOverlap: true }
   })] });
-  const doc = new Document({
-    creator: 'منصة ترجمة خطب الحرمين الشريفين', title: fileName(material, track.language_code, khateeb, null, track.doc_no),
-    sections: [{
+  const sections = [];
+  for (const { material, track, khateeb } of items) {
+    const rtl = langDir(track.language_code) === 'rtl';
+    sections.push({
       properties: { page: { size: { width: TW(PAGE.w), height: TW(PAGE.h) },
         margin: { top: TW(PAGE.top), bottom: TW(PAGE.bottom), left: TW(PAGE.side), right: TW(PAGE.side), header: 0, footer: 0 } } },
-      headers: { default: new Header({ children: [letterhead] }) },
+      headers: { default: new Header({ children: [letterhead()] }) },
       children: [...(await docStampBlocks(docx, track)),
         cardTable(docx, material, track, khateeb), new Paragraph({ children: [], spacing: { after: 200 } }),
         ...htmlToBlocks(docx, track.translation_html, rtl)]
-    }]
-  });
+    });
+  }
+  const doc = new Document({ creator: 'منصة ترجمة خطب الحرمين الشريفين', title: name, sections });
   const blob = await Packer.toBlob(doc);
-  const a = h('a', { href: URL.createObjectURL(blob), download: `${fileName(material, track.language_code, khateeb, null, track.doc_no)}.docx` });
+  const a = h('a', { href: URL.createObjectURL(blob), download: `${name}.docx` });
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
@@ -177,8 +187,14 @@ export async function downloadDocx({ material, track, khateeb }) {
 // الطباعة / الحفظ PDF: نقسّم النص إلى صفحات A4 بأنفسنا، ولكل صفحة كليشتها.
 // لا نعتمد على تكرار المتصفح للعناصر الثابتة ولا لرأس الجدول وتذييله،
 // لأن سفاري لا يكرّرها فتضيع الكليشة ويركب النص على بيانات التواصل (ملاحظة ٣٨).
-export function printTranslation({ material, track, khateeb }, { autoPrint = true } = {}) {
-  const dir = langDir(track.language_code);
+export function printTranslation(one, opts = {}) { return printTranslations([one], opts); }
+
+// وعدّةُ خطبٍ في نافذةٍ واحدة: لكلِّ واحدةٍ بطاقتُها وختمُها وصفحاتُها،
+// وتبدأ كلُّ خطبةٍ صفحةً جديدة (ملاحظة ٣٧١)
+export function printTranslations(items, { autoPrint = true, name = null } = {}) {
+  if (!items || !items.length) return false;
+  const first = items[0];
+  const dir = langDir(first.track.language_code);
   const w = window.open('', '_blank');
   if (!w) return false;
   const P = PAGE;
@@ -187,7 +203,7 @@ export function printTranslation({ material, track, khateeb }, { autoPrint = tru
   const NUM_H = 8;                          // شريط رقم الصفحة أسفل صندوق الكتابة
   const SAFE_H = 9;                         // فسحة أمان تمنع قصّ السطر الأخير (ملاحظتا ٧١ و٧٩)
   const WIN_H = BOX_H - NUM_H - SAFE_H;
-  w.document.write(`<!doctype html><html lang="${track.language_code}" dir="${dir}" data-theme="light"><head><meta charset="utf-8"><title></title>
+  w.document.write(`<!doctype html><html lang="${first.track.language_code}" dir="${dir}" data-theme="light"><head><meta charset="utf-8"><title></title>
 <link rel="stylesheet" href="${location.origin}/css/app.css"><style>
 @page { size: A4; margin: 0; }
 html, body { margin: 0; background: #fff !important; color: #111 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -214,36 +230,38 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 </style></head><body><div id="pages"></div><div id="measure"><div class="print-body flow"><div class="card-slot"></div><div class="t"></div></div></div></body></html>`);
   w.document.close();
   const d = w.document;
-  d.title = fileName(material, track.language_code, khateeb, null, track.doc_no);
+  d.title = name || fileName(first.material, first.track.language_code,
+    first.khateeb, null, first.track.doc_no);
 
   // بطاقة البيانات: صفّان بعرض الصفحة
-  const card = d.createElement('table');
-  card.className = 'data-card'; card.dir = 'rtl'; card.lang = 'ar';
-  const cols = cardColumns(material, track.language_code, khateeb);
-  const trRow = cardRowsTr(material, track.language_code, khateeb, track.title_tr, null);
-  const thead = d.createElement('thead'), htr = d.createElement('tr');
-  const tb = d.createElement('tbody'), vtr = d.createElement('tr');
-  const ltr = trRow ? d.createElement('tr') : null;
-  if (ltr) { ltr.className = 'tr-row'; ltr.dir = langDir(track.language_code); }
-  cols.forEach(([k, v], i) => {
-    const th = d.createElement('th'), td = d.createElement('td');
-    th.textContent = k; td.textContent = v;
-    if (k === 'رقم التوثيق') { td.className = 'doc-cell'; td.dir = 'ltr'; }
-    htr.append(th); vtr.append(td);
-    if (ltr) {
-      const td2 = d.createElement('td');
-      td2.textContent = (trRow[i] || [])[1] || '';
-      ltr.append(td2);
-    }
-  });
-  thead.append(htr); tb.append(vtr);
-  if (ltr) tb.append(ltr);
-  card.append(thead, tb);
-  d.querySelector('.card-slot').replaceWith(card);
-  d.querySelector('.t').innerHTML = sanitize(track.translation_html);
+  const cardOf = ({ material, track, khateeb }) => {
+    const card = d.createElement('table');
+    card.className = 'data-card'; card.dir = 'rtl'; card.lang = 'ar';
+    const cols = cardColumns(material, track.language_code, khateeb);
+    const trRow = cardRowsTr(material, track.language_code, khateeb, track.title_tr, null);
+    const thead = d.createElement('thead'), htr = d.createElement('tr');
+    const tb = d.createElement('tbody'), vtr = d.createElement('tr');
+    const ltr = trRow ? d.createElement('tr') : null;
+    if (ltr) { ltr.className = 'tr-row'; ltr.dir = langDir(track.language_code); }
+    cols.forEach(([k, v], i) => {
+      const th = d.createElement('th'), td = d.createElement('td');
+      th.textContent = k; td.textContent = v;
+      if (k === 'رقم التوثيق') { td.className = 'doc-cell'; td.dir = 'ltr'; }
+      htr.append(th); vtr.append(td);
+      if (ltr) {
+        const td2 = d.createElement('td');
+        td2.textContent = (trRow[i] || [])[1] || '';
+        ltr.append(td2);
+      }
+    });
+    thead.append(htr); tb.append(vtr);
+    if (ltr) tb.append(ltr);
+    card.append(thead, tb);
+    return card;
+  };
 
   // ختم التوثيق: أعلى الصفحة الأولى يسارًا، مقابل شعار الهيئة (ملاحظة ١٤٥)
-  const docStamp = () => {
+  const docStamp = track => {
     if (!track.doc_no) return null;
     const stamp = d.createElement('div');
     stamp.className = 'doc-stamp'; stamp.dir = 'rtl'; stamp.lang = 'ar';
@@ -282,9 +300,17 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
     return [...new Set(out.map(v => Math.round(v)))].sort((a, b) => a - b);
   }
 
-  function paginate() {
+  function paginate(item) {
+    const { track } = item;
     const measure = d.getElementById('measure');
     const flow = measure.querySelector('.flow');
+    flow.dir = langDir(track.language_code);
+    flow.replaceChildren(cardOf(item));
+    const t = d.createElement('div');
+    t.className = 't';
+    t.innerHTML = sanitize(track.translation_html);
+    flow.append(t);
+
     const probe = d.createElement('div');
     probe.style.cssText = `height:${WIN_H}mm;width:1px;position:absolute;visibility:hidden`;
     d.body.append(probe);
@@ -305,7 +331,7 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 
     const pages = d.getElementById('pages');
     const lhUrl = new URL(LETTERHEAD, location.origin).href;
-    pages.replaceChildren(...starts.map((start, i) => {
+    pages.append(...starts.map((start, i) => {
       const img = d.createElement('img'); img.className = 'lh'; img.alt = ''; img.src = lhUrl;
       const clone = flow.cloneNode(true);
       clone.style.top = `${-start}px`;
@@ -317,16 +343,16 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
       const num = d.createElement('div'); num.className = 'pageno';
       num.textContent = `${i + 1} / ${starts.length}`;
       const sheet = d.createElement('div'); sheet.className = 'sheet'; sheet.append(img, win, num);
-      if (i === 0) { const st = docStamp(); if (st) sheet.append(st); }
+      if (i === 0) { const st = docStamp(track); if (st) sheet.append(st); }
       return sheet;
     }));
-    measure.remove();
   }
 
   const ready = async () => {
     try { await d.fonts?.ready; } catch { /* المتصفح لا يدعم fonts.ready */ }
     await new Promise(r => setTimeout(r, 120));
-    paginate();
+    for (const item of items) paginate(item);
+    d.getElementById('measure')?.remove();
     if (autoPrint) setTimeout(() => w.print(), 400);
   };
   if (d.readyState === 'complete') ready(); else w.addEventListener('load', ready);

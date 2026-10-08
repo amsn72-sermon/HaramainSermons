@@ -79,11 +79,30 @@ export const DEFAULT_TPL = () => ({
     bannerW: 30, bannerTop: 26, titleY: 52, foot: true
   },
   divider: { paper: '#f5efe4', banner: true, bannerW: 34, ghost: false,
-             stamp: true, midY: 62, ink: '#174a38' },
+             stamp: true, midY: 62, ink: '#174a38', marks: [], texts: [] },
   inner: { head: true, foot: true, band: true, pageno: 'circle', ornament: false,
-           ink: '#1d2b3a', gold: '#b9975b', paper: '#ffffff' },
+           ink: '#1d2b3a', gold: '#b9975b', paper: '#ffffff', numStart: 1,
+           marks: [], texts: [] },
+  // صفحةُ البسملة وصفحةُ الحقوق: وجها الكتاب المفتوحِ بعد الغلاف (٣٥٥)
+  front:    { marks: [], texts: [] },
+  colophon: { marks: [], texts: [], rights: '' },
+  // ظهرُ الكتاب — لم يكن له وجودٌ قبلُ (ملاحظة ٣٥٥)
+  back: { paper: '#f5efe4', ink: '#174a38', gold: '#b9975b', pattern: true,
+          bg: null, fade: 16, blurb: '', isbn: '', foot: true, mark: true,
+          marks: [], texts: [] },
+  // هوامشُ الصفحة بالمليمتر — الداخليُّ أوسعُ، فالخيطُ يأكل منه
+  margins: { top: 22, bottom: 18, inner: 22, outer: 16 },
   intro: ''
 });
+
+// صفحاتُ القالب التي تحمل صورًا ونصوصًا حرّة
+export const TPL_SLOTS = ['cover', 'front', 'colophon', 'divider', 'inner', 'back'];
+export const slotOf = (tpl, key) => {
+  const s = tpl[key] = tpl[key] || {};
+  if (!Array.isArray(s.marks)) s.marks = [];
+  if (!Array.isArray(s.texts)) s.texts = [];
+  return s;
+};
 
 // ---------------------------------------------------------------------
 // نافذةُ الإصدار: اللغةُ والمسجدُ والمقاسُ والقالب، ثم معاينة (٣١١)
@@ -179,13 +198,39 @@ export async function bookDialog(year, section) {
 // بالافتراضيّ بدل أن تخرج بلا أرضيةٍ ولا كليشة (ملاحظة ٣٣٦)
 function mergeTpl(base, saved) {
   const out = { ...base, ...saved };
-  for (const k of ['cover', 'divider', 'inner']) {
-    out[k] = { ...base[k], ...(saved[k] || {}) };
+  for (const k of [...TPL_SLOTS, 'margins']) {
+    out[k] = { ...(base[k] || {}), ...((saved || {})[k] || {}) };
   }
   if (!Array.isArray(out.cover.marks) || !out.cover.marks.length) {
     out.cover.marks = BOOK_MARKS.map(m => ({ ...m }));
   }
+  for (const k of TPL_SLOTS) slotOf(out, k);
   return out;
+}
+
+// صورٌ ونصوصٌ حرّةٌ تُنثر على صفحةٍ بإحداثياتها (ملاحظة ٣٥٥)
+export function decorate(el, img, sheetEl, slot) {
+  for (const m of (slot?.marks || [])) {
+    if (!m || !m.src) continue;
+    const im = img(m.src, 'deco-mk');
+    im.style.insetInlineStart = `${m.x}%`;
+    im.style.top = `${m.y}%`;
+    im.style.height = `${m.h}mm`;
+    if (m.opacity != null) im.style.opacity = String(Math.max(0, Math.min(100, m.opacity)) / 100);
+    sheetEl.append(im);
+  }
+  for (const x of (slot?.texts || [])) {
+    if (!x || !String(x.text || '').trim()) continue;
+    const tx = el('div', 'deco-tx', escapeHtml(String(x.text)).replace(/\n/g, '<br>'));
+    tx.style.insetInlineStart = `${x.x ?? 10}%`;
+    tx.style.top = `${x.y ?? 10}%`;
+    tx.style.width = `${x.w ?? 80}%`;
+    tx.style.fontSize = `${x.size ?? 4}mm`;
+    tx.style.color = x.color || '#174a38';
+    tx.style.textAlign = x.align || 'center';
+    tx.style.fontWeight = x.bold ? '700' : '400';
+    sheetEl.append(tx);
+  }
 }
 
 // ملاحظة: تصميمُ القوالب انتقل إلى بابه المستقلِّ في صفحة الأعوام
@@ -291,8 +336,9 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
   tpl = mergeTpl(DEFAULT_TPL(), tpl || {});
   const S = SIZES[tpl.size] || SIZES.book;
   const F = fontOf(lang);
-  // الهامشُ الداخليُّ أوسعُ: الخيطُ يأكل منه (ملاحظة ٣١١)
-  const M = { top: 22, bottom: 18, inner: 22, outer: 16 };
+  // الهامشُ الداخليُّ أوسعُ: الخيطُ يأكل منه (ملاحظة ٣١١) — ويُضبَط
+  //   من المصمِّم (ملاحظة ٣٥٥)
+  const M = { top: 22, bottom: 18, inner: 22, outer: 16, ...(tpl.margins || {}) };
   const WIN_W = S.w - M.inner - M.outer;
   const WIN_H = S.h - M.top - M.bottom - 10;      // ١٠ مم لشريط الترقيم
 
@@ -353,12 +399,14 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
       c.append(foot);
     }
     cv.append(c);
+    decorate(el, img, cv, tpl.cover);
 
     // ـــ ٢) صفحةُ البسملة — صورةُ الهيئة لا رسمًا تقريبيًّا (ملاحظة ٣٣٥)
     const bs = sheet('plain-sheet front');
     const bd = el('div', 'basmala');
     bd.append(img(BASMALA_IMG, 'bsm'));
     bs.append(bd);
+    decorate(el, img, bs, tpl.front);
 
     // ـــ ٣) صفحةُ الحقوق
     const co = sheet('plain-sheet front');
@@ -368,8 +416,10 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
       + ` لعام ${esc(ARY(year))}هـ.</p>`
       + '<p>الهيئةُ العامة للعناية بشؤون المسجد الحرام والمسجد النبوي — '
       + 'مشروعُ خادم الحرمين الشريفين لترجمة خطب الحرمين، بتنفيذ جامعة أمِّ القرى.</p>'
-      + '<div class="rights">حقوقُ الطبع محفوظة. ويُرجَع إلى أصلِ كلِّ خطبةٍ في المنصة'
-      + ` برقم توثيقها المطبوع في ذيل صفحتها.<br>عددُ الخطب: ${esc(AR(rows.length))}`
+      + `<div class="rights">${esc(tpl.colophon?.rights
+          || 'حقوقُ الطبع محفوظة. ويُرجَع إلى أصلِ كلِّ خطبةٍ في المنصة برقم توثيقها '
+             + 'المطبوع في ذيل صفحتها.')}`
+      + `<br>عددُ الخطب: ${esc(AR(rows.length))}`
       + ` · أُصدر في ${esc(fmtHijri(new Date().toISOString().slice(0, 10)))}</div>`;
     const qr = d.createElement('img');
     qr.className = 'colo-qr';
@@ -377,6 +427,7 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
       rows[0]?.doc_no || '')}`, { margin: 1, dark: tpl.inner.ink });
     cob.append(qr);
     co.append(cob);
+    decorate(el, img, co, tpl.colophon);
 
     // ـــ ٤) المقدمة (تُدرَج إن كُتبت)
     if (intro) {
@@ -437,6 +488,7 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
         + `${r.mosque ? ' · ' : ''}${esc(langName(lang))}</div>`;
       dv.append(dm);
       ds.append(dv);
+      decorate(el, img, ds, tpl.divider);
 
       // المتن: يبدأ من أوّل سطرٍ في الصفحة التالية (ملاحظة ٣٠٩)
       sheetOfSermon[i] = pagesOut.length;      // أوّلُ صفحةِ متنٍ تُنشأ بعدها
@@ -478,12 +530,50 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
       }
     });
 
+    // ـــ ٦ب) ظهرُ الكتاب: آخرُ صفحةٍ فيه، بلا رقمٍ ولا كليشة (ملاحظة ٣٥٥)
+    const bk = tpl.back || {};
+    if (bk.on !== false) {
+      const bcv = sheet('cover-sheet back-sheet front');
+      const b = el('div', 'back');
+      if (bk.pattern) b.append(el('div', 'cover-pat'));
+      if (bk.bg) {
+        const bg = img(bk.bg, 'cover-bg');
+        bg.style.opacity = String(Math.max(0, Math.min(100, bk.fade ?? 16)) / 100);
+        b.append(bg);
+      }
+      if (bk.mark !== false) {
+        const bm = el('div', 'back-mark');
+        bm.innerHTML = pennantSvg(bk.ink || tpl.cover.ink, bk.gold || tpl.cover.gold);
+        b.append(bm);
+      }
+      const bmid = el('div', 'back-mid');
+      if (String(bk.blurb || '').trim()) {
+        bmid.append(el('p', 'back-blurb',
+          esc(String(bk.blurb)).replace(/\n/g, '<br>')));
+      } else {
+        bmid.append(el('p', 'back-blurb', esc(
+          `${title} — لخُطب ${rowsMosque(rows)} المترجمة إلى ${langName(lang)} `
+          + `لعام ${ARY(year)}هـ.`)));
+      }
+      b.append(bmid);
+      if (bk.foot !== false) {
+        const bf = el('div', 'back-foot');
+        bf.innerHTML = '<span>الهيئةُ العامة للعناية بشؤون المسجد الحرام والمسجد النبوي</span>'
+          + '<span>مشروعُ خادم الحرمين الشريفين لترجمة خطب الحرمين</span>'
+          + (String(bk.isbn || '').trim()
+              ? `<span class="isbn" dir="ltr">${esc(String(bk.isbn))}</span>` : '');
+        b.append(bf);
+      }
+      bcv.append(b);
+      decorate(el, img, bcv, bk);
+    }
+
     pages.replaceChildren(...pagesOut);
 
     // ـــ ٧) الترقيم: المقدماتُ بلا رقم، ثم يبدأ العدُّ من المتن
     //       (ملاحظة ٣٣٦ — «وترقيم الصفحات»)
     const folio = new Array(pagesOut.length).fill(0);
-    let n = 0;
+    let n = Math.max(0, Number(tpl.inner.numStart ?? 1) - 1);
     pagesOut.forEach((s, i) => {
       if (s.classList.contains('front')) return;   // الغلافُ والبسملةُ والحقوق
       folio[i] = ++n;
@@ -713,6 +803,26 @@ function bookCss(S, M, winW, winH, F, tpl) {
   .cover-foot { position: absolute; inset-inline: ${M.outer}mm; bottom: 10mm;
     display: flex; flex-direction: column; gap: 1.5mm; text-align: center;
     font-size: 8.5pt; color: ${green}; opacity: .75; }
+
+  /* ظهرُ الكتاب: آخرُ صفحةٍ فيه (ملاحظة ٣٥٥) */
+  .back-sheet { background: ${tpl.back?.paper || paper}; }
+  .back { position: absolute; inset: 0; }
+  .back-mark { position: absolute; top: 14mm; left: 0; right: 0; margin-inline: auto;
+    width: ${Math.max(16, Number(tpl.back?.markW ?? 26))}mm; display: flex;
+    justify-content: center; }
+  .back-mid { position: absolute; top: 46%; inset-inline: ${M.outer + 6}mm;
+    text-align: center; direction: rtl; }
+  .back-blurb { margin: 0; font-size: 11pt; line-height: 1.9;
+    color: ${tpl.back?.ink || green}; }
+  .back-foot { position: absolute; inset-inline: ${M.outer}mm; bottom: 12mm;
+    display: flex; flex-direction: column; gap: 1.5mm; text-align: center;
+    font-size: 8.5pt; color: ${tpl.back?.ink || green}; opacity: .78; }
+  .back-foot .isbn { font-size: 9pt; letter-spacing: .4mm; opacity: .9; }
+
+  /* صورٌ ونصوصٌ حرّةٌ تُنثر على الصفحات (ملاحظة ٣٥٥) */
+  .deco-mk { position: absolute; width: auto; z-index: 3; }
+  .deco-tx { position: absolute; z-index: 4; direction: rtl; line-height: 1.7;
+    unicode-bidi: plaintext; }
 
   /* البسملةُ وصفحةُ الحقوق */
   .plain-sheet { background: #fff; }

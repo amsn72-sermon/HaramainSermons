@@ -54,6 +54,8 @@ const routes = [
   ['/app/shifts', () => import('./views/shifts.js'), true, true],
   ['/app/sites', () => import('./views/sites.js'), true, 'lead'],
   ['/app/training', () => import('./views/training.js'), true],
+  // الخطةُ بابٌ قائمٌ بنفسه: وحداتُها ومكتبتُها وسجلُّها وقاعتُها (٣٦٠–٣٦٣)
+  ['/app/training/:id', () => import('./views/trainplan.js'), true],
   ['/app/stats', () => import('./views/stats.js'), true, 'reports'],
   ['/app/interpretation', () => import('./views/interpretation.js'), true, 'reports'],
   ['/app/contract', () => import('./views/contract.js'), true, 'manager'],

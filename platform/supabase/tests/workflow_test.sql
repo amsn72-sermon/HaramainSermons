@@ -7640,3 +7640,426 @@ begin
   end if;
   raise notice 'PASS: صفحتا المبادرة والمنصة تذكران أرشيفَ الخطب، وبلا ذكرِ مال';
 end $$;
+
+-- =====================================================================
+-- ٧٩) أشهرُ العام اثنا عشر، والجمعةُ تتبع شهرَها الهجريَّ، والترقيمُ
+--     متّصلٌ على العام (ملاحظة ٣٦٩)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        n int; v_sum int; v_weeks int; v_first int; v_last int;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.add_arch_year(1445, null);
+
+  select count(*)::int, coalesce(sum(fridays), 0)::int
+    into n, v_sum from public.arch_month_tiles(1445);
+  if n <> 12 then raise exception 'FAIL: أشهرُ العام % لا اثنا عشر', n; end if;
+
+  select count(*)::int, min(week_no), max(week_no)
+    into v_weeks, v_first, v_last from public.arch_weeks(1445);
+  if v_sum <> v_weeks then
+    raise exception 'FAIL: جُمَعُ الأشهر % تخالف جُمَعَ العام %', v_sum, v_weeks;
+  end if;
+  if v_first <> 1 or v_last <> v_weeks then
+    raise exception 'FAIL: ترقيمُ الأسابيع غيرُ متّصلٍ على العام: % إلى %', v_first, v_last;
+  end if;
+  -- وكلُّ جمعةٍ لها شهرٌ، ولا شهرَ خارجَ الاثني عشر
+  if exists (select 1 from public.arch_weeks(1445)
+              where h_month is null or h_month < 1 or h_month > 12) then
+    raise exception 'FAIL: جمعةٌ بلا شهرٍ هجريٍّ صحيح';
+  end if;
+  raise notice 'PASS: أشهرُ العام اثنا عشر، وجُمَعُها تُطابق جُمَعَ العام بترقيمٍ متّصل';
+end $$;
+
+-- =====================================================================
+-- ٨٠) صفوفُ اللغات: لغاتُ العام تُحدَّد، والخالي يُرسَم ولا يُخزَّن،
+--     والنسخةُ تُحذَف وحدَها (ملاحظات ٣٦٥ و٣٦٨ و٣٧٠)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_sec uuid; v_id uuid; n int; v_sk text[]; v_w jsonb;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.add_arch_year(1445, null);
+  select id into v_sec from public.arch_sections where h_year = 1445 and name = 'الخطب';
+
+  -- اللغاتُ الافتراضيةُ هي الرئيسةُ الفاعلةُ والعربية
+  select count(*)::int into n from public.arch_year_langs(1445);
+  if n < 2 then raise exception 'FAIL: لغاتُ العام الافتراضية %', n; end if;
+  if not exists (select 1 from public.arch_year_langs(1445) where code = 'ar') then
+    raise exception 'FAIL: العربيةُ ليست في لغات العام';
+  end if;
+
+  -- وتُحدَّد مرّةً فتُحفَظ
+  perform public.set_arch_year_langs(1445, array['ar', 'en', 'ur']);
+  select count(*)::int into n from public.arch_year_langs(1445);
+  if n <> 3 then raise exception 'FAIL: لغاتُ العام بعد التحديد %', n; end if;
+
+  v_id := public.save_arch_sermon(jsonb_build_object(
+    'section_id', v_sec, 'sermon_date', '2023-08-04', 'mosque', 'makkah',
+    'title', 'خطبةُ صفوفِ اللغات', 'khateeb', 'الشريم',
+    'versions', jsonb_build_array(
+      jsonb_build_object('language_code', 'en', 'body_html', '<p>text</p>'))));
+
+  -- الخالي لا يُخزَّن: نسخةٌ واحدةٌ في الجدول لا ثلاث
+  select count(*)::int into n from public.arch_versions where sermon_id = v_id;
+  if n <> 1 then raise exception 'FAIL: خُزِّنت صفوفٌ خالية: %', n; end if;
+
+  -- والنسخُ تأتي مع الأسبوع في طلبٍ واحد
+  select makkah into v_w from public.arch_weeks(1445)
+   where friday_on = date '2023-08-04';
+  if v_w is null or jsonb_array_length(coalesce(v_w -> 'versions', '[]'::jsonb)) <> 1 then
+    raise exception 'FAIL: نسخُ الخطبة لم تأتِ مع أسبوعها';
+  end if;
+
+  -- وصفُّ لغةٍ يُحذَف ويُردّ
+  v_sk := public.skip_arch_lang(v_id, 'ur', true);
+  if not ('ur' = any (v_sk)) then raise exception 'FAIL: لم يُحذفْ صفُّ اللغة'; end if;
+  v_sk := public.skip_arch_lang(v_id, 'ur', false);
+  if 'ur' = any (v_sk) then raise exception 'FAIL: لم يُردَّ صفُّ اللغة'; end if;
+
+  -- وما فيه نسخةٌ محفوظةٌ لا يُحذَف صفُّه صمتًا
+  begin
+    perform public.skip_arch_lang(v_id, 'en', true);
+    raise exception 'FAIL: حُذف صفُّ لغةٍ فيها نسخةٌ محفوظة';
+  exception when others then
+    if position('نسخةٌ محفوظة' in sqlerrm) = 0 then raise; end if;
+  end;
+
+  -- والنسخةُ تُحذَف وحدَها فيبقى صفُّها خاليًا
+  n := public.delete_arch_version(v_id, 'en');
+  if n <> 1 then raise exception 'FAIL: لم تُحذفِ النسخة: %', n; end if;
+  if not exists (select 1 from public.arch_sermons where id = v_id) then
+    raise exception 'FAIL: حُذفت الخطبةُ بحذف نسخةٍ منها';
+  end if;
+
+  delete from public.arch_sermons where id = v_id;
+  perform public.set_arch_year_langs(1445, null);
+  raise notice 'PASS: صفوفُ اللغات تُرسَم ولا تُخزَّن، وتُحذَف وتُردّ، والنسخةُ وحدَها';
+end $$;
+
+-- =====================================================================
+-- ٨١) القسمُ يُعدَّل ويُحذَف، وخطبُه تُنقَل لا تضيع (ملاحظتا ٣٥٨ و٣٦٤)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_a uuid; v_b uuid; v_id uuid; n int;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.add_arch_year(1445, null);
+  v_a := public.add_arch_section(1445, 'قسمُ التجربة', 'كتب');
+  v_b := (select id from public.arch_sections where h_year = 1445 and name = 'الخطب');
+
+  -- تغييرُ الاسم
+  perform public.rename_arch_section(v_a, 'قسمٌ مسمًّى من جديد', 'دروس علمية');
+  if not exists (select 1 from public.arch_sections
+                  where id = v_a and name = 'قسمٌ مسمًّى من جديد' and icon = 'دروس علمية') then
+    raise exception 'FAIL: لم يُغيَّرِ اسمُ القسم';
+  end if;
+
+  v_id := public.save_arch_sermon(jsonb_build_object(
+    'section_id', v_a, 'sermon_date', '2023-08-11', 'mosque', 'madinah',
+    'title', 'خطبةٌ في قسمٍ يُحذَف',
+    'versions', jsonb_build_array()));
+
+  -- وفيه خطبٌ فلا يُحذَف صمتًا
+  begin
+    perform public.delete_arch_section(v_a, false);
+    raise exception 'FAIL: حُذف قسمٌ فيه خطبٌ بلا تأكيد';
+  exception when others then
+    if position('انقلْها' in sqlerrm) = 0 then raise; end if;
+  end;
+
+  -- فتُنقَل خطبُه ثم يُحذَف
+  n := public.move_arch_sermons(v_a, v_b);
+  if n <> 1 then raise exception 'FAIL: لم تُنقلِ الخطب: %', n; end if;
+  perform public.delete_arch_section(v_a, false);
+  if exists (select 1 from public.arch_sections where id = v_a) then
+    raise exception 'FAIL: لم يُحذفِ القسمُ بعد نقل خطبه';
+  end if;
+  if not exists (select 1 from public.arch_sermons where id = v_id and section_id = v_b) then
+    raise exception 'FAIL: ضاعت الخطبةُ بحذف قسمها';
+  end if;
+
+  -- ولا يُحذَف آخرُ قسمٍ في العام
+  begin
+    perform public.delete_arch_section(v_b, true);
+    raise exception 'FAIL: حُذف آخرُ قسمٍ في العام';
+  exception when others then
+    if position('آخرُ قسم' in sqlerrm) = 0 then raise; end if;
+  end;
+
+  delete from public.arch_sermons where id = v_id;
+  raise notice 'PASS: القسمُ يُعدَّل ويُحذَف، وخطبُه تُنقَل، ولا يُحذَف آخرُه';
+end $$;
+
+-- =====================================================================
+-- ٨٢) التصديرُ بمدًى: ما بين التاريخين وحدَه يخرج (ملاحظة ٣٧١)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_sec uuid; a uuid; b uuid; n int;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.add_arch_year(1445, null);
+  select id into v_sec from public.arch_sections where h_year = 1445 and name = 'الخطب';
+
+  a := public.save_arch_sermon(jsonb_build_object(
+    'section_id', v_sec, 'sermon_date', '2023-08-04', 'mosque', 'makkah',
+    'title', 'الأولى', 'versions', jsonb_build_array(
+      jsonb_build_object('language_code', 'en', 'body_html', '<p>one</p>'))));
+  b := public.save_arch_sermon(jsonb_build_object(
+    'section_id', v_sec, 'sermon_date', '2023-09-01', 'mosque', 'madinah',
+    'title', 'الثانية', 'versions', jsonb_build_array(
+      jsonb_build_object('language_code', 'en', 'body_html', '<p>two</p>'))));
+
+  select count(*)::int into n from public.arch_book(1445, 'en');
+  if n < 2 then raise exception 'FAIL: العامُ كلُّه %', n; end if;
+
+  select count(*)::int into n
+    from public.arch_book(1445, 'en', null, null, date '2023-08-01', date '2023-08-15');
+  if n <> 1 then raise exception 'FAIL: المدى لم يُحصِر: %', n; end if;
+
+  select count(*)::int into n from public.arch_book(1445, 'en', 'madinah');
+  if n <> 1 then raise exception 'FAIL: المسجدُ لم يُحصِر: %', n; end if;
+
+  delete from public.arch_sermons where id in (a, b);
+  raise notice 'PASS: التصديرُ بمدًى ولغةٍ ومسجدٍ يُحصِر ما يخرج';
+end $$;
+
+-- =====================================================================
+-- ٨٣) الخطةُ بابٌ: قاعتُها تُنشَأ باسمها، ومستهدَفوها يُلحَقون
+--     (ملاحظات ٣٦٠–٣٦٣)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_plan uuid; v_room uuid; v_name text; n int; v_t jsonb;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+
+  v_plan := public.save_training_plan(jsonb_build_object(
+    'title', 'خطةُ التجربة للقاعة', 'level', 'development', 'hours', 10,
+    'targets', jsonb_build_object('groups', jsonb_build_array('translators'),
+                                  'members', jsonb_build_array()),
+    'units', jsonb_build_array(jsonb_build_object('title', 'الوحدةُ الأولى'))));
+
+  select room_id, targets into v_room, v_t from public.training_plans where id = v_plan;
+  if v_room is null then raise exception 'FAIL: لم تُنشَأ قاعةُ الخطة'; end if;
+  select name into v_name from public.rooms where id = v_room;
+  if position('خطةُ التجربة للقاعة' in v_name) = 0 then
+    raise exception 'FAIL: قاعةُ الخطة لا تحمل اسمَها: %', v_name;
+  end if;
+  if not exists (select 1 from public.rooms
+                  where id = v_room and kind = 'training' and plan_id = v_plan) then
+    raise exception 'FAIL: القاعةُ لم تُنسَبْ إلى خطتها';
+  end if;
+  if not (v_t -> 'groups' ? 'translators') then
+    raise exception 'FAIL: لم يُحفَظِ المستهدَفون';
+  end if;
+
+  -- واسمُ القاعة يتبع اسمَ الخطة متى غُيِّر
+  perform public.save_training_plan(jsonb_build_object(
+    'id', v_plan, 'title', 'خطةٌ باسمٍ جديد', 'level', 'development'));
+  select name into v_name from public.rooms where id = v_room;
+  if position('خطةٌ باسمٍ جديد' in v_name) = 0 then
+    raise exception 'FAIL: اسمُ القاعة لم يتبع اسمَ الخطة: %', v_name;
+  end if;
+
+  -- والبطاقةُ تحمل إحصاءَها، والخطةُ تُقرأ بوحداتها
+  if not exists (select 1 from public.training_plan_tiles() where id = v_plan and units >= 1) then
+    raise exception 'FAIL: بطاقةُ الخطة بلا إحصاء';
+  end if;
+  if not exists (select 1 from public.training_plan(v_plan)
+                  where jsonb_array_length(units) >= 1) then
+    raise exception 'FAIL: الخطةُ لم تُقرأ بوحداتها';
+  end if;
+
+  -- والمستهدَفون يُلحَقون دفعةً واحدة
+  n := public.enroll_plan_targets(v_plan);
+  if n < 1 then raise exception 'FAIL: لم يُلحَقْ مستهدَفٌ واحد: %', n; end if;
+  if not exists (select 1 from public.training_plan_record(v_plan)) then
+    raise exception 'FAIL: سجلُّ الخطة خالٍ بعد الإلحاق';
+  end if;
+
+  delete from public.member_training where plan_id = v_plan;
+  perform public.delete_training_plan(v_plan);
+  raise notice 'PASS: الخطةُ لها قاعتُها باسمها، ومستهدَفوها يُلحَقون، وسجلُّها فيها';
+end $$;
+
+-- =====================================================================
+-- ٨٤) الحساباتُ المصرفية: يُطلَب المستند، ويُصحَّح الرقم، ويُعاد للتصحيح
+--     (ملاحظتا ٣٥٩ و٣٧٣)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_tr uuid; v_co uuid; v_st text; v_was text;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select id into v_tr from public.profiles where role = 'translator' and status = 'active'
+   order by created_at limit 1;
+  if v_tr is null then raise notice 'PASS: لا مترجمَ في القاعدة'; return; end if;
+
+  insert into public.bank_accounts (member_id, scope, account_holder, bank_name, iban)
+  values (v_tr, 'local', 'صاحبُ الحساب', 'مصرف الراجحي',
+          'SA1180000640608017089380')
+  on conflict (member_id) do update set iban = 'SA1180000640608017089380',
+    doc_path = null, verified_at = null, needs_fix = null, doc_requested_at = null;
+
+  -- حالُه: بلا مستندٍ رسمي
+  select state into v_st from public.bank_admin_list() where member_id = v_tr;
+  if v_st <> 'no_doc' then raise exception 'FAIL: حالُ الحساب % لا «بلا مستند»', v_st; end if;
+
+  -- يُطلَب المستند
+  perform public.request_bank_doc(v_tr, 'أرفِقْ خطابَ البنك');
+  select state into v_st from public.bank_admin_list() where member_id = v_tr;
+  if v_st <> 'doc_wanted' then raise exception 'FAIL: لم يُوسَمْ بانتظار المستند: %', v_st; end if;
+
+  -- ويُصحَّح الرقمُ ويبقى الأصلُ في السجل
+  perform public.fix_bank_iban(v_tr, 'SA3610000754000041066050', null, null, 'بحسب الخطاب');
+  select iban_was into v_was from public.bank_accounts where member_id = v_tr;
+  if v_was <> 'SA1180000640608017089380' then
+    raise exception 'FAIL: لم يُحفَظِ الرقمُ الأصل: %', coalesce(v_was, '—');
+  end if;
+  if not exists (select 1 from public.bank_accounts
+                  where member_id = v_tr and iban = 'SA3610000754000041066050'
+                    and iban_fixed_at is not null and verified_at is null) then
+    raise exception 'FAIL: التصحيحُ لم يُكتَبْ أو لم يُلغِ التوثيق';
+  end if;
+
+  -- ويُعاد للتصحيح بسببٍ مكتوب، ولا يُعاد بلا سبب
+  begin
+    perform public.return_bank_account(v_tr, 'لا');
+    raise exception 'FAIL: أُعيد الطلبُ بلا سببٍ مكتوب';
+  exception when others then
+    if position('اكتبِ السبب' in sqlerrm) = 0 then raise; end if;
+  end;
+  perform public.return_bank_account(v_tr, 'الرقمُ يخالف ما في خطاب البنك');
+  select state into v_st from public.bank_admin_list() where member_id = v_tr;
+  if v_st <> 'needs_fix' then raise exception 'FAIL: لم يُوسَمْ بانتظار التصحيح: %', v_st; end if;
+
+  -- والتوثيقُ مفوَّضٌ بمفتاحه لا بالإدارة وحدَها (إصلاح ٣٥٩)
+  select id into v_co from public.profiles where role = 'coordinator' and status = 'active'
+   order by created_at limit 1;
+  if v_co is not null then
+    delete from public.member_perms where member_id = v_co;
+    perform public.set_member_perm(v_co, 'bank_verify', true);
+    if not public.perm_allowed(v_co, 'bank_verify') then
+      raise exception 'FAIL: لم يُمنحْ مفتاحُ التوثيق';
+    end if;
+    perform public.set_member_perm(v_co, 'bank_activate', true);
+    if not public.perm_allowed(v_co, 'bank_activate') then
+      raise exception 'FAIL: لم يُمنحْ مفتاحُ التفعيل';
+    end if;
+    -- ومن مُنحه يراه في الكشف لا الإدارةُ وحدَها
+    perform set_config('request.jwt.claim.sub', v_co::text, true);
+    if not exists (select 1 from public.bank_admin_list() where member_id = v_tr) then
+      raise exception 'FAIL: الممنوحُ مفتاحَه لا يرى الكشف';
+    end if;
+    perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+    delete from public.member_perms where member_id = v_co;
+  end if;
+
+  delete from public.bank_accounts where member_id = v_tr;
+  raise notice 'PASS: المستندُ يُطلَب، والرقمُ يُصحَّح ويبقى أصلُه، والطلبُ يُعاد بسبب';
+end $$;
+
+-- =====================================================================
+-- ٨٥) الحضور: غيابٌ يُكتب، وتأخيرٌ بمهلته، وفجوةٌ لا تُحتسَب
+--     (ملاحظات ٣٧٤ و٣٧٥ و٣٧٦)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_f uuid; v_sh uuid; n int; v_late int; v_ver int; v_gap int;
+        v_day date := (now() at time zone 'Asia/Riyadh')::date - 1;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select id into v_f from public.profiles where status = 'active' order by created_at limit 1;
+  if v_f is null then raise notice 'PASS: لا أعضاءَ في القاعدة'; return; end if;
+
+  update public.platform_settings set late_grace_min = 5, geo_gap_tolerance = 12;
+
+  -- وردةُ أمسٍ بلا حضور: تُكتب غيابًا
+  delete from public.shifts where member_id = v_f and shift_date = v_day;
+  insert into public.shifts (member_id, shift_date, start_at, end_at, status, created_by)
+  values (v_f, v_day, time '08:00', time '16:00', 'scheduled', v_mgr)
+  returning id into v_sh;
+  n := public.sweep_absent_shifts(v_day);
+  if n < 1 then raise exception 'FAIL: لم تُكتبِ الوردةُ غيابًا: %', n; end if;
+  if not exists (select 1 from public.shifts where id = v_sh and status = 'absent') then
+    raise exception 'FAIL: حالُ الوردة ليست غيابًا';
+  end if;
+
+  -- ومهلةُ التسامح: ثلاثُ دقائقَ لا تُحتسَب تأخيرًا، وعشرون تُحتسَب
+  update public.shifts
+     set status = 'present',
+         check_in_at = (v_day + time '08:03') at time zone 'Asia/Riyadh'
+   where id = v_sh;
+  perform public.shift_recalc(v_sh);
+  select late_minutes into v_late from public.shifts where id = v_sh;
+  if v_late <> 0 then raise exception 'FAIL: احتُسب التأخيرُ داخلَ المهلة: %', v_late; end if;
+
+  update public.shifts
+     set check_in_at = (v_day + time '08:20') at time zone 'Asia/Riyadh' where id = v_sh;
+  perform public.shift_recalc(v_sh);
+  select late_minutes into v_late from public.shifts where id = v_sh;
+  if v_late < 15 then raise exception 'FAIL: لم يُحتسبِ التأخيرُ خارجَ المهلة: %', v_late; end if;
+
+  -- والفجوةُ بين نبضتين لا تُحتسَب: نبضةٌ بعد عشرِ دقائقَ تُحتسَب،
+  --   وأخرى بعد ساعتين فجوة
+  delete from public.shift_pings where shift_id = v_sh;
+  insert into public.shift_pings (shift_id, member_id, at, inside, kind) values
+    (v_sh, v_f, (v_day + time '08:30') at time zone 'Asia/Riyadh', true, 'ping'),
+    (v_sh, v_f, (v_day + time '10:30') at time zone 'Asia/Riyadh', true, 'ping');
+  update public.shifts
+     set check_out_at = (v_day + time '10:40') at time zone 'Asia/Riyadh',
+         last_ping_at = (v_day + time '10:30') at time zone 'Asia/Riyadh'
+   where id = v_sh;
+  perform public.shift_presence(v_sh);
+  select verified_minutes, gap_minutes into v_ver, v_gap
+    from public.shifts where id = v_sh;
+  if v_gap < 100 then raise exception 'FAIL: لم تُطرحِ الفجوةُ: % دقيقة', v_gap; end if;
+  if v_ver > 40 then raise exception 'FAIL: احتُسب ما لم يُتحقَّقْ منه: % دقيقة', v_ver; end if;
+
+  delete from public.shift_pings where shift_id = v_sh;
+  delete from public.shifts where id = v_sh;
+  raise notice 'PASS: الغيابُ يُكتب، والتأخيرُ بمهلته، والفجوةُ تُطرَح ولا تُحتسَب';
+end $$;
+
+-- =====================================================================
+-- ٨٦) نصوصُ الشهادة مصفوفةٌ بترتيبها، والمحجوبُ يُطوى (ملاحظة ٣٥٦)
+--     — القالبُ يُحفَظ بها، والترتيبُ يبقى كما كُتب
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_id uuid; v_b jsonb;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  v_id := public.save_cert_template(jsonb_build_object(
+    'name', 'قالبُ ترتيب النصوص', 'kind', 'course',
+    'tpl', jsonb_build_object('blocks', jsonb_build_array(
+      jsonb_build_object('key', 'kind', 'on', true, 'text', 'شهادةُ حضورِ برنامجٍ تدريبي'),
+      jsonb_build_object('key', 'pre',  'on', true),
+      jsonb_build_object('key', 'bian', 'on', false),
+      jsonb_build_object('key', 'name', 'on', true),
+      jsonb_build_object('key', 'done', 'on', true,
+                         'text', 'قد أتمَّ حضورَ الدورة التدريبية بنجاح'))),
+    'fixed', '{}'::jsonb));
+
+  select (tpl -> 'blocks') into v_b from public.cert_templates where id = v_id;
+  if v_b is null or jsonb_array_length(v_b) < 5 then
+    raise exception 'FAIL: لم تُحفَظْ قائمةُ النصوص';
+  end if;
+  if (v_b -> 0 ->> 'text') <> 'شهادةُ حضورِ برنامجٍ تدريبي' then
+    raise exception 'FAIL: لم يُحفَظِ النصُّ المعدَّل: %', (v_b -> 0 ->> 'text');
+  end if;
+  if (v_b -> 2 ->> 'on')::boolean then
+    raise exception 'FAIL: لم يُحجَبِ السطرُ المخفوض';
+  end if;
+  if (v_b -> 4 ->> 'text') <> 'قد أتمَّ حضورَ الدورة التدريبية بنجاح' then
+    raise exception 'FAIL: سطرُ الإتمام لم يُحفَظ';
+  end if;
+
+  delete from public.cert_templates where id = v_id;
+  raise notice 'PASS: نصوصُ الشهادة تُحفَظ بترتيبها، والمحجوبُ محجوب، والمعدَّلُ معدَّل';
+end $$;
