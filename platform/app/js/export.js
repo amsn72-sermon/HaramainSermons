@@ -3,7 +3,7 @@
 import { h, fmtHijri } from './ui.js';
 import { sanitize } from './sanitize.js';
 import { langDir } from './store.js';
-import { PAGE, LETTERHEAD, cardColumns, fileName, docVerifyUrl } from './page.js';
+import { PAGE, LETTERHEAD, cardColumns, cardRowsTr, fileName, docVerifyUrl } from './page.js';
 import { qrPngDataUrl, qrPngBytes } from './qr.js';
 
 let docxLoading = null;
@@ -103,12 +103,18 @@ function cardTable(docx, material, track, khateeb) {
     shading: shading ? { fill: 'F6EFE3' } : undefined, children
   });
   const para = (text, o) => new Paragraph({ bidirectional: true, alignment: AlignmentType.CENTER, children: [run(text, o)] });
+  // صفٌّ ثانٍ بلغة الخطبة تحت العمود نفسِه (ملاحظة ٣٤١)
+  const tr = cardRowsTr(material, track.language_code, khateeb, track.title_tr, null);
+  const rows = [
+    new TableRow({ tableHeader: true, children: cols.map(([k]) => cell([para(k, { bold: true, color: '8A6835' })], true)) }),
+    new TableRow({ children: cols.map(([, v]) => cell([para(v)])) })
+  ];
+  if (tr) {
+    rows.push(new TableRow({ children: cols.map((_, i) =>
+      cell([para((tr[i] || [])[1] || '', { size: 20, color: '5A6A78' })])) }));
+  }
   return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE }, visuallyRightToLeft: true,
-    rows: [
-      new TableRow({ tableHeader: true, children: cols.map(([k]) => cell([para(k, { bold: true, color: '8A6835' })], true)) }),
-      new TableRow({ children: cols.map(([, v]) => cell([para(v)])) })
-    ]
+    width: { size: 100, type: WidthType.PERCENTAGE }, visuallyRightToLeft: true, rows
   });
 }
 
@@ -195,6 +201,7 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 .flow { position: absolute; top: 0; inset-inline-start: 0; width: ${BOX_W}mm; }
 .print-body { --pt: 1pt; font-size: 12pt; line-height: 1.8; }
 .print-body .data-card { font-size: 11pt; }
+.data-card tr.tr-row td { font-size: 9.5pt; color: #5a6a78; unicode-bidi: plaintext; }
 #measure { position: absolute; visibility: hidden; top: -10000mm; inset-inline-start: 0; width: ${BOX_W}mm; }
 .doc-stamp { position: absolute; top: 9mm; left: ${P.side}mm; display: flex; align-items: center;
   gap: 3mm; font-size: 8pt; color: #3b3630; text-align: start; }
@@ -213,15 +220,25 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
   const card = d.createElement('table');
   card.className = 'data-card'; card.dir = 'rtl'; card.lang = 'ar';
   const cols = cardColumns(material, track.language_code, khateeb);
+  const trRow = cardRowsTr(material, track.language_code, khateeb, track.title_tr, null);
   const thead = d.createElement('thead'), htr = d.createElement('tr');
   const tb = d.createElement('tbody'), vtr = d.createElement('tr');
-  for (const [k, v] of cols) {
+  const ltr = trRow ? d.createElement('tr') : null;
+  if (ltr) { ltr.className = 'tr-row'; ltr.dir = langDir(track.language_code); }
+  cols.forEach(([k, v], i) => {
     const th = d.createElement('th'), td = d.createElement('td');
     th.textContent = k; td.textContent = v;
     if (k === 'رقم التوثيق') { td.className = 'doc-cell'; td.dir = 'ltr'; }
     htr.append(th); vtr.append(td);
-  }
-  thead.append(htr); tb.append(vtr); card.append(thead, tb);
+    if (ltr) {
+      const td2 = d.createElement('td');
+      td2.textContent = (trRow[i] || [])[1] || '';
+      ltr.append(td2);
+    }
+  });
+  thead.append(htr); tb.append(vtr);
+  if (ltr) tb.append(ltr);
+  card.append(thead, tb);
   d.querySelector('.card-slot').replaceWith(card);
   d.querySelector('.t').innerHTML = sanitize(track.translation_html);
 

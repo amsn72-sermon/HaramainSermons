@@ -1897,3 +1897,90 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .week-card > .week-head > b { color: var(--accent-text, var(--text)); }
 .week-card .mosque-head { background: var(--surface); }
 .week-card .mosque-group.shut { opacity: .92; }
+
+/* ـــ الشهادات: صفٌّ مضغوطٌ، وتقسيمٌ بالنوع والسنة، وترميزٌ ظاهر (ملاحظة ٣٤٠) */
+.cert-kind { margin: 14px 0 6px; font-size: 1rem; color: var(--accent-text); }
+.cert-kind:first-child { margin-top: 0; }
+.cert-year { border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  margin-bottom: 8px; background: var(--surface); }
+.cert-year-head { display: flex; align-items: center; gap: 8px; padding: 4px 10px;
+  background: color-mix(in srgb, var(--gold) 16%, var(--surface));
+  border-bottom: 1px solid color-mix(in srgb, var(--gold) 36%, var(--border)); }
+.cert-rows { padding: 0 10px; }
+.cert-row { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px;
+  padding: 3px 0; border-bottom: 1px solid var(--border); min-height: 0;
+  font-size: .88rem; line-height: 1.6; }
+.cert-row:last-child { border-bottom: 0; }
+.cert-no { flex: 0 0 auto; font-size: .74rem; }
+.cert-main { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.cert-acts { flex: 0 0 auto; gap: 4px; flex-wrap: nowrap; }
+.cert-acts .btn.xs { padding: 0 7px; font-size: .74rem; line-height: 1.6; }
+@media (max-width: 760px) {
+  .cert-row { flex-wrap: wrap; }
+  .cert-main { white-space: normal; }
+}
+
+/* ـــ تنقيحُ نسخةٍ على الكليشة (ملاحظة ٣٣٨) */
+.sheet-wrap { overflow: auto; padding: 8px 0; display: flex; justify-content: center; }
+.ed-bar { position: sticky; top: 0; z-index: 3; background: var(--bg);
+  padding: 6px 0; border-bottom: 1px solid var(--border); gap: 8px; }
+
+/* ـــ مصمِّمُ قوالب المجمَّع (ملاحظتا ٣٣٩ و٣٥٠) */
+.bd-wrap { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(300px, .9fr);
+  gap: 16px; align-items: start; align-content: start; }
+@media (max-width: 1000px) { .bd-wrap { grid-template-columns: 1fr; } }
+.bd-bar { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 14px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface); }
+.bd-bar .field.sm { margin: 0; min-width: 130px; }
+.bd-sheets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.bd-sheet-wrap { display: flex; flex-direction: column; gap: 4px; align-items: stretch;
+  background: none; border: 0; padding: 0; cursor: pointer; font: inherit; color: inherit; }
+.bd-sheet { position: relative; overflow: hidden; border-radius: 4px;
+  border: 1px solid var(--border); box-shadow: 0 2px 10px #0004;
+  container-type: inline-size; }
+.bd-sheet.on { outline: 2px solid var(--gold); outline-offset: 2px; }
+.bd-page { position: absolute; inset: 0; overflow: hidden; }
+.bd-pat { position: absolute; inset: 0; opacity: .09;
+  background: radial-gradient(circle at 50% 50%, var(--g, #b9975b) 0 1px, transparent 1.6px)
+    0 0/14px 14px; }
+.bd-cover-bg { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 34%;
+  object-fit: cover; }
+.bd-mk { position: absolute; }
+.bd-banner { position: absolute; left: 0; right: 0; margin-inline: auto; }
+.bd-banner svg { width: 100%; height: auto; display: block; }
+.bd-ghost { position: absolute; bottom: 0; inset-inline-end: 0; width: 55%; opacity: .12; }
+.bd-stamp { position: absolute; top: 5%; inset-inline-end: 7%; text-align: end;
+  direction: rtl; font-size: 3.6cqw; line-height: 1.8; font-weight: 700;
+  white-space: nowrap; }
+.bd-mid { position: absolute; inset-inline: 8%; text-align: center; direction: rtl; }
+.bd-t1 { display: block; font-size: 8cqw; line-height: 1.35; }
+.bd-t2 { display: block; font-size: 4.6cqw; font-weight: 700; margin-top: 2%;
+  line-height: 1.4; }
+.bd-t3 { display: block; font-size: 4cqw; margin-top: 2%; line-height: 1.5; }
+.bd-t4 { display: block; font-size: 4cqw; margin-top: 3%; opacity: .8; }
+.bd-rule { width: 32%; height: 2px; margin: 4% auto; opacity: .85; }
+.bd-foot { position: absolute; inset-inline: 8%; bottom: 4%; display: flex;
+  flex-direction: column; gap: 2px; text-align: center; font-size: 3.4cqw; opacity: .75;
+  direction: rtl; }
+.bd-head { position: absolute; top: 6%; inset-inline: 10%; display: flex;
+  justify-content: space-between; font-size: 3.6cqw; padding-bottom: 1%; direction: rtl; }
+.bd-win { position: absolute; top: 13%; inset-inline: 10%; bottom: 14%; overflow: hidden; }
+.bd-band { width: 100%; height: 9%; object-fit: cover; display: block; border-radius: 2px;
+  margin-bottom: 4%; }
+.bd-kh { text-align: center; font-size: 5cqw; font-weight: 700; margin-bottom: 4%; }
+.bd-line { height: 2px; border-radius: 1px; opacity: .35; margin-bottom: 5%; }
+.bd-orn { position: absolute; bottom: 8%; inset-inline: 22%; }
+.bd-orn svg { width: 100%; height: auto; display: block; }
+.bd-no { position: absolute; bottom: 3%; inset-inline: 0; display: flex; justify-content: center; }
+.bd-no .pno { display: inline-flex; align-items: center; justify-content: center;
+  min-width: 7cqw; height: 7cqw; font-size: 4cqw; }
+.bd-no .pno.circle { border: 1px solid; border-radius: 50%; }
+.bd-no .pno.ornament { border-top: 1px solid; border-bottom: 1px solid; padding: 0 2cqw; }
+.bd-bsm { position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; }
+.bd-bsm img { width: 58%; height: auto; }
+.bd-h { margin: 10px 0 8px; font-size: 1rem; color: var(--accent-text); }
+.bd-props { border: 1px solid var(--border); border-radius: 12px; padding: 12px;
+  background: var(--surface); }

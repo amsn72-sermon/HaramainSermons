@@ -195,12 +195,15 @@ export async function render(ctx, opts = {}) {
             + 'وانصرافُه المبكر. والدوامُ المرن يُطالبه بإتمام الساعات لا بالساعة المعيَّنة.'))
       : null;
 
-    // المسمّى الوظيفيُّ لحساب المتابعة — يُعدَّل متى شاء المدير (ملاحظة ٢٧١ ط)
-    const jobTitle = h('input', { value: m.job_title || '', 'aria-label': 'المسمّى الوظيفي',
+    // المنصبُ — عبارةٌ تُكتَب لكلِّ حسابٍ لا لحساب المتابعة وحدَه
+    //   (ملاحظة ٣٥٣). ولا أثرَ لها في الصلاحية البتّة: الصلاحياتُ كلُّها
+    //   تُمنَح من مدير المشروع في بابها، وهذه تسميةٌ تُعرَض لا غير.
+    const jobTitle = h('input', { value: m.job_title || '', 'aria-label': 'المنصب',
       placeholder: 'مدير إدارة اللغات…' });
-    const jobCard = (isManager() && m.role === 'viewer')
-      ? h('label.field', 'المسمّى الوظيفي', jobTitle,
-          h('small', 'هو الذي يظهر في المنصة مكان الدور، ويُعدَّل متى شئت'))
+    const jobCard = (isManager() || can('tm_title'))
+      ? h('label.field', 'المنصب', jobTitle,
+          h('small', 'عبارةٌ تُعرَض في المنصة مكانَ الدور. ولا تمنح صلاحيةً ولا تمنعها — '
+            + 'الصلاحياتُ تُمنَح من بابها بيد مدير المشروع.'))
       : null;
 
     const syncTitle = () => {
@@ -389,8 +392,12 @@ export async function render(ctx, opts = {}) {
     }
     if (permCard) drawPerms();
 
+    // المنحُ أوّلًا ثم المنع: المنحُ يفتح ما فوقَه من رؤوس، فلو تأخّر
+    //   لفتح رأسًا أُغلق في النداء نفسِه — فيُقدَّم ليغلبه المنع (ملاحظة ٣٥٢)
     async function savePerms() {
-      for (const [key, want] of permWant) {
+      const order = [...permWant].sort((a, b) =>
+        (a[1] === true ? 0 : 1) - (b[1] === true ? 0 : 1));
+      for (const [key, want] of order) {
         try {
           await db.rpc('set_member_perm', { p_member: m.id, p_key: key, p_allowed: want,
             p_until: want === true && permUntil.value ? permUntil.value : null, p_reason: null });

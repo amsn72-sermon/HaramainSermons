@@ -102,6 +102,85 @@ export function cardColumns(m, languageCode, khateeb, docNo = null) {
     ...(docNo ? [['رقم التوثيق', docNo]] : [])];
 }
 
+// ---------------------------------------------------------------------
+// بطاقةٌ بصفَّين: العربيةُ ثم لغةُ الخطبة في العمود نفسِه (ملاحظة ٣٤١)
+//
+//   القارئُ بلغةِ الخطبة لا يقرأ العربية، فتُعاد عليه صفوفُ البطاقة
+//   بلغته: تسميةُ المادة، وعنوانُها كما ترجمه صاحبُه إن كتبه، والتاريخُ
+//   بتقويمه، واسمُ لغته بلسانها. وما لا يُترجَم — اسمُ الخطيب — يبقى
+//   كما هو، فالأعلامُ لا تُترجَم.
+// ---------------------------------------------------------------------
+const KIND_TR = {
+  en: 'Friday Sermon', fr: 'Sermon du vendredi', es: 'Sermón del viernes',
+  pt: 'Sermão de sexta-feira', it: 'Sermone del venerdì', de: 'Freitagspredigt',
+  nl: 'Vrijdagpreek', sv: 'Fredagspredikan', sq: 'Hutbeja e xhumasë',
+  bs: 'Džuma-hutba', ru: 'Пятничная проповедь', tr: 'Cuma Hutbesi',
+  ur: 'خطبۂ جمعہ', fa: 'خطبهٔ جمعه', ms: 'Khutbah Jumaat',
+  id: 'Khutbah Jumat', fil: 'Sermon ng Biyernes', ha: 'Huduba ta Juma’a',
+  bn: 'জুমার খুতবা', hi: 'जुमा का ख़ुत्बा', ne: 'जुम्माको खुत्बा',
+  th: 'คุฏบะฮฺวันศุกร์', km: 'អំណានថ្ងៃសុក្រ', zh: '主麻演讲', ja: '金曜説教',
+  ko: '금요 설교', sw: 'Khutba ya Ijumaa', am: 'የዓርብ ኹጥባ', so: 'Khudbada Jimcaha'
+};
+const PLACE_TR = {
+  en: { makkah: 'the Grand Mosque', madinah: 'the Prophet’s Mosque' },
+  fr: { makkah: 'la Grande Mosquée', madinah: 'la Mosquée du Prophète' },
+  es: { makkah: 'la Gran Mezquita', madinah: 'la Mezquita del Profeta' },
+  pt: { makkah: 'a Mesquita Sagrada', madinah: 'a Mesquita do Profeta' },
+  tr: { makkah: 'Mescid-i Haram', madinah: 'Mescid-i Nebevî' },
+  ru: { makkah: 'Заповедной мечети', madinah: 'Мечети Пророка' },
+  id: { makkah: 'Masjidil Haram', madinah: 'Masjid Nabawi' },
+  ms: { makkah: 'Masjidil Haram', madinah: 'Masjid Nabawi' },
+  ur: { makkah: 'مسجد حرام', madinah: 'مسجد نبوی' },
+  fa: { makkah: 'مسجدالحرام', madinah: 'مسجد نبوی' },
+  bn: { makkah: 'মসজিদুল হারাম', madinah: 'মসজিদে নববী' },
+  zh: { makkah: '禁寺', madinah: '先知清真寺' }
+};
+const FIELD_TR = {
+  en: ['Sermon', 'Topic', 'Preacher', 'Date', 'Language', 'Document no.'],
+  fr: ['Sermon', 'Sujet', 'Prédicateur', 'Date', 'Langue', 'N° du document'],
+  es: ['Sermón', 'Tema', 'Predicador', 'Fecha', 'Idioma', 'N.º de documento'],
+  pt: ['Sermão', 'Tema', 'Pregador', 'Data', 'Idioma', 'N.º do documento'],
+  tr: ['Hutbe', 'Konu', 'Hatip', 'Tarih', 'Dil', 'Belge no.'],
+  ru: ['Проповедь', 'Тема', 'Проповедник', 'Дата', 'Язык', '№ документа'],
+  id: ['Khutbah', 'Tema', 'Khatib', 'Tanggal', 'Bahasa', 'No. dokumen'],
+  ms: ['Khutbah', 'Tajuk', 'Khatib', 'Tarikh', 'Bahasa', 'No. dokumen'],
+  ur: ['خطبہ', 'موضوع', 'خطیب', 'تاریخ', 'زبان', 'نمبر دستاویز'],
+  fa: ['خطبه', 'موضوع', 'خطیب', 'تاریخ', 'زبان', 'شمارهٔ سند'],
+  bn: ['খুতবা', 'বিষয়', 'খতিব', 'তারিখ', 'ভাষা', 'নথি নম্বর'],
+  zh: ['演讲', '主题', '演讲者', '日期', '语言', '文件编号']
+};
+const trOf = (map, code) => map[code] || map[String(code).split('-')[0]] || map.en || null;
+
+export function headingTr(m, code) {
+  const kind = trOf(KIND_TR, code);
+  if (!kind) return heading(m);
+  const place = trOf(PLACE_TR, code);
+  const at = place && m.mosque ? place[m.mosque] : null;
+  if (!at) return kind;
+  return /^(ur|fa|bn|zh|ja|ko|th|km)$/.test(code) ? `${at} — ${kind}` : `${kind} at ${at}`;
+}
+
+// صفُّ البطاقة بلغة الخطبة: [التسمية، القيمة]
+export function cardRowsTr(m, languageCode, khateeb, titleTr, docNo) {
+  if (!languageCode || languageCode === 'ar') return null;
+  const lbl = trOf(FIELD_TR, languageCode);
+  if (!lbl) return null;
+  const dt = m.sermon_date
+    ? new Date(`${m.sermon_date}T12:00:00`).toLocaleDateString(languageCode,
+        { year: 'numeric', month: 'long', day: 'numeric' })
+    : '';
+  const native = (typeof state !== 'undefined' && state.languages || [])
+    .find(l => l.code === languageCode)?.native_name || langName(languageCode);
+  return [
+    [lbl[0], headingTr(m, languageCode)],
+    [lbl[1], (titleTr || m.title || '')],
+    [lbl[2], (khateeb || m.khateeb?.name || '')],
+    [lbl[3], dt],
+    [lbl[4], native],
+    ...(docNo ? [[lbl[5], docNo]] : [])
+  ];
+}
+
 // بطاقة بيانات الخطبة داخل مساحة الترجمة: صفّان بعرض الصفحة
 export function dataCard(m, languageCode, khateeb, docNo = null) {
   const cols = cardColumns(m, languageCode, khateeb, docNo);

@@ -18,12 +18,18 @@ const MOSQUE_ICON = { makkah: '🕋', madinah: '🕌' };
 const mayUpload = () => isManager() || can('arch_upload');
 const mayEdit   = () => isManager() || can('arch_edit');
 const mayExport = () => isManager() || can('arch_export');
+const mayDesign = () => isManager() || can('arch_design') || can('arch_export');
+const mayCarry  = () => isManager() || can('arch_carry')  || can('arch_upload');
+const mayRefine = () => isManager() || can('arch_refine') || can('arch_edit');
 
 // أيقوناتُ صفِّ الخطبة — على نسق أرشيف أعمال الترجمة (ملاحظة ٣٠٣)
 const ICONS = {
   open:  '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="3"/>',
   langs: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>',
   edit:  '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M14 6l4 4"/>',
+  // تنقيحُ النصِّ على الكليشة: ورقةٌ وقلم (ملاحظة ٣٣٨)
+  pen:   '<path d="M6 3h8l5 5v4"/><path d="M14 3v6h6"/>'
+         + '<path d="M11 21H6V3"/><path d="M14.5 20.5 20 15l2 2-5.5 5.5-3 .8z"/>',
   down:  '<path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 21h16"/>',
   // تنزيلُ الخطبة: وورد وPDF والملفُّ المرفوع (ملاحظة ٣٣٢)
   word:  '<path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/>'
@@ -101,10 +107,15 @@ export async function render(ctx) {
 
   return h('div',
     h('div.page-head',
-      mayUpload()
-        ? h('div.row', { style: { marginInlineStart: 'auto', order: 2 } },
-            h('button.btn.sm.primary', { type: 'button', onclick: addYear }, '＋ عام'))
-        : null,
+      h('div.row.wrap', { style: { marginInlineStart: 'auto', order: 2 } },
+        mayDesign()
+          ? h('a.btn.sm', { href: '/app/book-design',
+              title: 'الغلافُ وصفحاتُ العناوين والكليشةُ والترقيم' },
+              '🖌 قوالبُ المجمَّع السنوي')
+          : null,
+        mayUpload()
+          ? h('button.btn.sm.primary', { type: 'button', onclick: addYear }, '＋ عام')
+          : null),
       h('div.grow', h('div.eyebrow', 'الأرشيف'), h('h1', 'أرشيفُ الخطب'),
         h('p.muted', 'خطبُ الحرمين بأعوامها الهجرية: في كلِّ عامٍ أسابيعُ جُمَعِه، '
           + 'وفي كلِّ جمعةٍ خطبتان بلغاتهما. ومنه يُصدَر المجمَّعُ السنوي.'))),
@@ -197,6 +208,10 @@ async function yearPage(ctx, year) {
       act('open', 'اعرضِ الخطبةَ ونسخَها', () => openSermon(s.id)),
       mayEdit() ? act('edit', 'تعديلُ بياناتها',
         () => sermonDialog(s.id, { mosque, friday })) : null,
+      // تنقيحُ النصِّ على الكليشة ثم حفظُه (ملاحظة ٣٣٨)
+      mayRefine() ? h('a.icon-btn', { href: `/app/sermon-edit/${s.id}`,
+        title: 'افتحْها على الكليشة لتُنسَّق وتُحفَظ',
+        'aria-label': 'تنقيحٌ على الكليشة' }, ico('pen')) : null,
       mayExport() ? act('word', 'تنزيلُ Word على كليشة الهيئة', btn => dl(async () => {
         const m = await import('../sermondl.js');
         await m.downloadSermonWord(s.id);
@@ -231,6 +246,8 @@ async function yearPage(ctx, year) {
             ? `${MOSQUE_ICON[mosque]} ${s.sermon_type} من ${MOSQUE[mosque]}`
             : `⚠ ${s.sermon_type} — لم يُعرَفْ مسجدُها`),
           h('b.sm-title', ` (${s.title})`),
+          // ترميزُ الخطبة بعد عنوانها (ملاحظة ٣٤٥)
+          s.doc_no ? h('span.doc-no', { dir: 'ltr', title: 'رقمُ توثيق الخطبة' }, s.doc_no) : null,
           h('div.small.muted',
             [s.khateeb, s.hijri_text || (s.sermon_date ? fmtHijri(s.sermon_date) : null),
              s.sermon_date ? fmtDate(s.sermon_date) : null].filter(Boolean).join('، '))),
@@ -326,7 +343,8 @@ async function yearPage(ctx, year) {
           n ? `${AR(n)} لغة` : 'بلا نسخ'),
         h('span.row.head-acts', { style: { marginInlineStart: 'auto' } },
           sermonActs(s, mosque, w.friday_on), arrow)),
-      h('div.mosque-sub.small.muted', s.title || '—'),
+      h('div.mosque-sub.small.muted', s.title || '—',
+        s.doc_no ? h('span.doc-no', { dir: 'ltr', title: 'رقمُ توثيق الخطبة' }, s.doc_no) : null),
       inner);
   };
 
@@ -520,7 +538,20 @@ async function yearPage(ctx, year) {
     });
     if (!res) return;
     try {
-      await db.rpc('save_arch_sermon', { p: res });
+      const sid = await db.rpc('save_arch_sermon', { p: res });
+      // وملفُّ Word نفسُه يُحفَظ مع نسخته لا نصُّه وحدَه، فتعمل أيقونةُ
+      //   «الملفُّ المرفوعُ كما هو» (ملاحظة ٣٤٧)
+      const fl = f.file.files?.[0];
+      if (sid && fl && f.lang.value) {
+        try {
+          const safe = String(fl.name).replace(/[^\w.\-]+/g, '_');
+          const at = `${sid}/${Date.now()}_${safe}`;
+          await storage.upload('repo', at, fl);
+          await db.rpc('save_arch_sermon', { p: { id: sid, section_id: section?.id,
+            versions: [{ language_code: f.lang.value, file_path: at,
+                         is_source: f.lang.value === 'ar' }] } });
+        } catch (e) { toast(`حُفظت الخطبة، وتعذّر حفظُ الملف: ${e.message}`, 'warn'); }
+      }
       toast(id ? 'حُفظ التعديل.' : 'أُضيفت الخطبة.', 'ok');
       sections = await db.rpc('arch_section_tiles', { p_year: year }) || [];
       section = sections.find(s => s.id === section?.id) || section;
@@ -547,16 +578,29 @@ async function yearPage(ctx, year) {
     const file = h('input', { type: 'file', accept: '.pdf,.doc,.docx', 'aria-label': 'ملف النسخة' });
     const text = h('textarea', { rows: 5, 'aria-label': 'نصّ النسخة' });
     const note = h('small.muted');
+    // الرفعُ يستغرق، والحفظُ كان يسبقه فيُحفَظ بلا ملفٍّ ثم يُقال
+    //   «لا ملفَّ مرفوع». فصار الحفظُ ينتظر رفعَه (ملاحظة ٣٤٧)
     let path = null;
-    file.onchange = () => busy(file, async () => {
-      const fl = file.files[0]; if (!fl) return;
-      try {
+    let pending = null;
+    file.onchange = () => {
+      const fl = file.files[0];
+      if (!fl) { path = null; pending = null; note.textContent = ''; return; }
+      note.textContent = 'يُرفَع الملف…';
+      pending = (async () => {
         const safe = String(fl.name).replace(/[^\w.\-]+/g, '_');
-        path = `${id}/${Date.now()}_${safe}`;
-        await storage.upload('repo', path, fl);
-        note.textContent = 'رُفع الملف.';
-      } catch (e) { note.textContent = e.message; path = null; }
-    });
+        const at = `${id}/${Date.now()}_${safe}`;
+        try {
+          await storage.upload('repo', at, fl);
+          path = at;
+          note.textContent = `رُفع الملف: ${fl.name}`;
+        } catch (e) {
+          path = null;
+          note.textContent = `تعذّر رفعُ الملف: ${e.message}`;
+          throw e;
+        }
+      })();
+      pending.catch(() => { /* الخطأُ مكتوبٌ في السطر */ });
+    };
 
     const res = await dialog({
       title: 'نسخةٌ بلغة',
@@ -566,13 +610,21 @@ async function yearPage(ctx, year) {
         h('label.field', 'ملفُّ النسخة (PDF أو وورد)', file, note),
         h('label.field', 'النصّ', text)),
       buttons: [{ label: 'حفظ', kind: 'primary',
+        validate: async () => {
+          if (pending) {
+            try { await pending; } catch { return 'تعذّر رفعُ الملف — أعِدْ اختيارَه'; }
+          }
+          if (!path && !text.value.trim()) return 'ارفعْ ملفًا أو الصقِ النصّ';
+          return true;
+        },
         value: () => ({ language_code: lang.value, body_html: text.value.trim() || null,
           file_path: path, is_source: lang.value === 'ar' }) }, { label: 'إلغاء', value: null }]
     });
     if (!res) return;
     try {
+      // لا يُرسَل عنوانٌ ولا تاريخ: ما لا يُذكَر يبقى على حاله (إصلاح ٣٤٩)
       await db.rpc('save_arch_sermon', { p: { id, section_id: section?.id,
-        title: '—', versions: [res] } });
+        versions: [res] } });
       toast('حُفظت النسخة.', 'ok');
       drawWeeks();
     } catch (e) { toast(e.message, 'bad'); }
@@ -677,7 +729,7 @@ async function yearPage(ctx, year) {
       onclick: () => { ['week', ...Object.keys(MOSQUE)].forEach(k => foldAll(k, false)); } }, 'افتحِ الكلَّ'));
 
   // ترحيلُ أعمال العام المنجَزة من أرشيف الترجمة (ملاحظة ٣٣٧)
-  const carryBtn = mayUpload()
+  const carryBtn = mayCarry()
     ? h('button.btn.sm', { type: 'button', title: 'نقلُ أعمال العام المنجَزة إلى الأرشيف' },
         '⇄ رحِّلْ من أرشيف الترجمة')
     : null;

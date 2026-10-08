@@ -10,6 +10,7 @@ import { printCertificate, certVerifyUrl, CERT_THEMES } from '../certdoc.js';
 import { prepareMark } from '../photo.js';
 
 const AR = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn');
+const ARY = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn', { useGrouping: false });
 
 const KIND_LABEL = { course: 'دورة تدريبية', experience: 'خبرة' };
 const STATE = { draft: ['مسوّدة', 'warn'], issued: ['صادرة', 'ok'], revoked: ['ملغاة', 'bad'] };
@@ -75,7 +76,30 @@ export async function render() {
       fill(list, emptyState('لا شهادات', 'ما مُنحت شهادةٌ بعد في هذه القائمة.'));
       return;
     }
-    fill(list, rows.map(card));
+    // تُقسَّم بالنوع ثم بالسنة الهجرية، وتُرتَّب بترميزها (ملاحظة ٣٤٠)
+    const byKind = new Map();
+    for (const r of rows) {
+      const k = r.kind || 'course';
+      if (!byKind.has(k)) byKind.set(k, new Map());
+      const y = Number(r.h_year) || 0;
+      const years = byKind.get(k);
+      if (!years.has(y)) years.set(y, []);
+      years.get(y).push(r);
+    }
+    const bySerial = (a, b) =>
+      String(a.serial_no || 'zz').localeCompare(String(b.serial_no || 'zz'), 'en');
+    fill(list, [...byKind.entries()]
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+      .flatMap(([kind, years]) => [
+        h('h3.cert-kind', KIND_LABEL[kind] || kind,
+          h('span.small.muted', ` · ${AR([...years.values()].flat().length)} شهادة`)),
+        ...[...years.entries()].sort((a, b) => b[0] - a[0]).map(([y, list2]) =>
+          h('section.cert-year',
+            h('div.cert-year-head',
+              h('b', y ? `${ARY(y)}هـ` : 'بلا سنة'),
+              h('span.badge', `${AR(list2.length)}`)),
+            h('div.cert-rows', list2.sort(bySerial).map(card))))
+      ]));
   }
 
   // -------------------------------------------------------------------
@@ -231,15 +255,29 @@ export async function render() {
       ? h('a.small', { href: certVerifyUrl(c), target: '_blank', rel: 'noopener', dir: 'ltr' }, c.serial_no)
       : h('span.small.muted', 'بلا رقمٍ حتى تُعتمد');
 
+    // الحذفُ لما أُلغي أو بقي مسوّدةً — والصادرةُ لا تُحذف (ملاحظة ٣٤٤)
+    const del = ((isManager() || can('cert_delete')) && c.status !== 'issued')
+      ? h('button.btn.xs.danger', { type: 'button' }, '🗑 حذف') : null;
+    if (del) del.onclick = () => busy(del, async () => {
+      if (!await confirm('حذفُ شهادة',
+        `تُحذف «${c.title}» لصاحبها ${c.member_name} حذفًا لا يُستدرك.`
+        + (c.serial_no ? ` ورقمُها ${c.serial_no} يبقى مسحوبًا لا يُعاد منحُه.` : ''),
+        'احذفْها', 'danger')) return;
+      try { await db.rpc('delete_certificate', { p_cert: c.id });
+        toast('حُذفت الشهادة.', 'ok'); draw(); }
+      catch (err) { toast(err.message, 'bad'); }
+    });
+
     return h('div.cert-row',
-      h('div', { style: { flex: 1, minWidth: '220px' } },
+      h('span.doc-no.cert-no', { dir: 'ltr', title: 'رقمُ الشهادة' },
+        c.serial_no || '—'),
+      h('div.cert-main',
         h('b', c.title),
-        h('div.small.muted', `${KIND_LABEL[c.kind] || ''} · ${c.member_name}`),
-        h('div.small.muted', c.hours ? `${c.hours} ساعة · ` : '',
-          c.start_on ? fmtDate(c.start_on) : '', c.end_on ? ' – ' + fmtDate(c.end_on) : ''),
-        link),
+        h('span.small.muted', ` · ${c.member_name}`),
+        c.hours ? h('span.small.muted', ` · ${AR(c.hours)} ساعة`) : null,
+        c.start_on ? h('span.small.muted', ` · ${fmtDate(c.start_on)}`) : null),
       h('span.pill', { class: tone }, label),
-      h('div.row', open, editBtn, issue, revoke));
+      h('div.row.cert-acts', link, open, editBtn, issue, revoke, del));
   }
 
   async function openCert(c) {

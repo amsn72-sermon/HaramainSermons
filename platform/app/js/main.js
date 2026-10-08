@@ -33,6 +33,10 @@ const routes = [
   // أرشيفُ الخطب السنوي: أعوامٌ وأسابيعُ جُمَع (ملاحظة ٣٠٣)
   ['/app/sermons', () => import('./views/sermons.js'), true, 'rp_archive'],
   ['/app/sermons/:year', () => import('./views/sermons.js'), true, 'rp_archive'],
+  // تنقيحُ نسخةٍ على الكليشة ثم حفظُها (ملاحظة ٣٣٨)
+  ['/app/sermon-edit/:id', () => import('./views/sermonedit.js'), true, 'rp_archive'],
+  // مصمِّمُ قوالب المجمَّع السنوي (ملاحظتا ٣٣٩ و٣٥٠)
+  ['/app/book-design', () => import('./views/bookdesign.js'), true, 'arch_design'],
   // «حضوري» شاشةُ العضو لنفسه: تُفتح لكل مفعَّل، ولا تُعلَّق بصلاحية
   // إدارةِ الحضور — فتلك للاطّلاع على غيره (ملاحظة ٢٣٨)
   ['/app/attend', () => import('./views/attend.js'), true],
@@ -83,7 +87,8 @@ const PERM_OF = {
   '/app/contract': 'ctr_view',
   '/app/languages': 'st_languages', '/app/khateebs': 'st_khateebs',
   '/app/workflow': 'st_workflow',
-  '/app/stats': 'rp_stats', '/app/archive': 'rp_archive'
+  '/app/stats': 'rp_stats', '/app/archive': 'rp_archive',
+  '/app/sermon-edit': 'rp_archive', '/app/book-design': 'arch_design'
 };
 
 function match(path) {

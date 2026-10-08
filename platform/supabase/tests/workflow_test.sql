@@ -2568,8 +2568,8 @@ begin
   if v_txt ~ 'الرواتب|التسعيرة|المستحقات|المصرفية|المستخلص|ريال' then
     raise exception 'FAIL: ذكرٌ مالي في صفحة المبادرة';
   end if;
-  -- وأُضيف قسمُ التدريب فصارت اثنتين وعشرين (ملاحظة ٢٣٢)
-  if jsonb_array_length(v -> 'sections') <> 22 then
+  -- أُضيف قسمُ التدريب (ملاحظة ٢٣٢) ثم أرشيفُ الخطب السنويّ (ملاحظة ٣٥١)
+  if jsonb_array_length(v -> 'sections') <> 23 then
     raise exception 'FAIL: أقسام المبادرة (%)', jsonb_array_length(v -> 'sections');
   end if;
   foreach v_txt in array array['الترجمة الفورية', 'الدليل المصطلحي الشرعي الموحَّد',
@@ -7343,4 +7343,300 @@ begin
   end if;
   delete from public.materials where id = v_m;
   raise notice 'PASS: المادةُ العامّةُ لا تدخل صفَّ الحرمين بالترحيل';
+end $$;
+
+-- =====================================================================
+-- ٧٤) رفعُ نسخةٍ لا يمحو بيانات الخطبة (ملاحظتا ٣٤٧ و٣٤٩)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_sec uuid; v_id uuid; v_d date := date '2026-07-10';
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select id into v_sec from public.arch_sections where h_year = 1448 and name = 'الخطب';
+
+  v_id := public.save_arch_sermon(jsonb_build_object(
+    'section_id', v_sec, 'sermon_date', v_d, 'mosque', 'makkah',
+    'title', 'خطبةُ الرفع', 'khateeb', 'الشيخ فلان', 'hijri_text', '٢٤ محرم ١٤٤٨هـ'));
+
+  -- رفعُ نسخةٍ بلغةٍ: لا عنوانَ ولا تاريخَ في الطلب
+  perform public.save_arch_sermon(jsonb_build_object(
+    'id', v_id, 'section_id', v_sec,
+    'versions', jsonb_build_array(jsonb_build_object(
+      'language_code', 'en', 'file_path', 'x/y.docx', 'body_html', '<p>t</p>'))));
+
+  if (select title from public.arch_sermons where id = v_id) <> 'خطبةُ الرفع' then
+    raise exception 'FAIL: مُحي عنوانُ الخطبة برفع نسخة';
+  end if;
+  if (select sermon_date from public.arch_sermons where id = v_id) is distinct from v_d then
+    raise exception 'FAIL: مُحي تاريخُ الخطبة برفع نسخة';
+  end if;
+  if (select mosque from public.arch_sermons where id = v_id) <> 'makkah' then
+    raise exception 'FAIL: مُحي مسجدُ الخطبة برفع نسخة';
+  end if;
+  if (select friday_on from public.arch_sermons where id = v_id)
+       is distinct from public.friday_of(v_d) then
+    raise exception 'FAIL: مُحيت جمعةُ الخطبة برفع نسخة';
+  end if;
+  if (select khateeb from public.arch_sermons where id = v_id) <> 'الشيخ فلان' then
+    raise exception 'FAIL: مُحي خطيبُ الخطبة برفع نسخة';
+  end if;
+  if (select hijri_text from public.arch_sermons where id = v_id) <> '٢٤ محرم ١٤٤٨هـ' then
+    raise exception 'FAIL: مُحي التاريخُ الهجريُّ برفع نسخة';
+  end if;
+  -- والخطبةُ تبقى في صفِّ حرمها من أسبوعها
+  if not exists (select 1 from public.arch_weeks(1448) w
+                  where w.makkah ->> 'title' = 'خطبةُ الرفع') then
+    raise exception 'FAIL: سقطت الخطبةُ من صفِّها بعد رفع النسخة';
+  end if;
+  -- والملفُّ محفوظٌ مع نسخته
+  if (select file_path from public.arch_versions
+       where sermon_id = v_id and language_code = 'en') <> 'x/y.docx' then
+    raise exception 'FAIL: لم يُحفَظ مسارُ الملف';
+  end if;
+
+  -- وما يُرسَل فارغًا صراحةً يُمحى
+  perform public.save_arch_sermon(jsonb_build_object(
+    'id', v_id, 'section_id', v_sec, 'khateeb', ''));
+  if (select khateeb from public.arch_sermons where id = v_id) is not null then
+    raise exception 'FAIL: لم يُمحَ الخطيبُ مع إرساله فارغًا';
+  end if;
+
+  perform public.delete_arch_sermon(v_id);
+  raise notice 'PASS: رفعُ النسخة يُبقي بيانات الخطبة، والفارغُ الصريحُ وحدَه يمحو';
+end $$;
+
+-- =====================================================================
+-- ٧٥) حذفُ الشهادة الملغاة، والصادرةُ لا تُحذف (ملاحظة ٣٤٤)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_tr  uuid := '00000000-0000-0000-0000-00000000000c';
+        v_a uuid; v_b uuid; v_no text;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  insert into public.certificates (kind, member_id, title, status, created_by)
+  values ('course', v_tr, 'شهادةٌ تُحذف', 'draft', v_mgr) returning id into v_a;
+  insert into public.certificates (kind, member_id, title, status, created_by)
+  values ('course', v_tr, 'شهادةٌ تصدر', 'draft', v_mgr) returning id into v_b;
+
+  v_no := public.issue_certificate(v_b);
+
+  -- الصادرةُ لا تُحذف
+  begin
+    perform public.delete_certificate(v_b);
+    raise exception 'FAIL: حُذفت شهادةٌ صادرة';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  -- والمسوّدةُ تُحذف
+  perform public.delete_certificate(v_a);
+  if exists (select 1 from public.certificates where id = v_a) then
+    raise exception 'FAIL: لم تُحذف المسوّدة';
+  end if;
+
+  -- والملغاةُ تُحذف، ورقمُها يبقى مسحوبًا لا يُعاد
+  perform public.revoke_certificate(v_b, 'صدرت بخطأ');
+  perform public.delete_certificate(v_b);
+  if exists (select 1 from public.certificates where id = v_b) then
+    raise exception 'FAIL: لم تُحذف الملغاة';
+  end if;
+
+  -- والحذفُ ليس لغير مدير المشروع
+  insert into public.certificates (kind, member_id, title, status, created_by)
+  values ('course', v_tr, 'شهادةٌ أخرى', 'draft', v_mgr) returning id into v_a;
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  begin
+    perform public.delete_certificate(v_a);
+    raise exception 'FAIL: حذف مَن لا إذنَ له';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  delete from public.certificates where id = v_a;
+
+  -- والكشفُ يُرجع سنةَ الشهادة ليُقسَّم بها
+  if not exists (select 1 from information_schema.columns
+                  where table_name = 'certificates' and table_schema = 'public') then
+    raise exception 'FAIL: لا جدولَ للشهادات';
+  end if;
+  raise notice 'PASS: الشهادةُ الملغاةُ والمسوّدةُ تُحذفان، والصادرةُ لا تُمَسّ';
+end $$;
+
+-- =====================================================================
+-- ٧٦) إعادةُ الترقيم: ثابتةٌ بالتاريخ ثم الحرم، وتضبط الجمعة (ملاحظة ٣٤٦)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_sec uuid; v_a uuid; v_b uuid; v_c uuid; v_n int;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select id into v_sec from public.arch_sections where h_year = 1448 and name = 'الخطب';
+  delete from public.arch_sermons where h_year = 1448;
+
+  -- النبويُّ يُرفَع أوّلًا، والحرامُ بعدَه، وفي الجمعة نفسِها
+  v_b := public.save_arch_sermon(jsonb_build_object('section_id', v_sec,
+    'sermon_date', '2026-07-17', 'mosque', 'madinah', 'title', 'نبويُّ الجمعة الأولى'));
+  v_a := public.save_arch_sermon(jsonb_build_object('section_id', v_sec,
+    'sermon_date', '2026-07-17', 'mosque', 'makkah', 'title', 'حرامُ الجمعة الأولى'));
+  v_c := public.save_arch_sermon(jsonb_build_object('section_id', v_sec,
+    'sermon_date', '2026-07-24', 'mosque', 'makkah', 'title', 'حرامُ الجمعة الثانية'));
+
+  v_n := public.renumber_arch_year(1448);
+  if v_n < 3 then raise exception 'FAIL: لم تُرقَّمِ الخطبُ كلُّها (%)', v_n; end if;
+  if (select seq from public.arch_sermons where id = v_a) <> 1 then
+    raise exception 'FAIL: لم يأخذِ الحرامُ الرقمَ الأوّل في جمعته (%)',
+      (select seq from public.arch_sermons where id = v_a);
+  end if;
+  if (select seq from public.arch_sermons where id = v_b) <> 2 then
+    raise exception 'FAIL: ترتيبُ النبويِّ بعد الحرام لم يثبُت';
+  end if;
+  if (select seq from public.arch_sermons where id = v_c) <> 3 then
+    raise exception 'FAIL: الجمعةُ التالية لم تأخذْ ما بعدَها';
+  end if;
+
+  -- وإعادةُ الضغط لا تُبدّل شيئًا
+  perform public.renumber_arch_year(1448);
+  if (select seq from public.arch_sermons where id = v_a) <> 1
+     or (select seq from public.arch_sermons where id = v_b) <> 2 then
+    raise exception 'FAIL: تبدّل الترقيمُ بإعادة الضغط';
+  end if;
+
+  -- والجمعةُ تُضبَط من التاريخ ولو صُحِّح بعد الرفع
+  update public.arch_sermons set sermon_date = date '2026-07-31', friday_on = null,
+                                 week_no = null where id = v_c;
+  perform public.renumber_arch_year(1448);
+  if (select friday_on from public.arch_sermons where id = v_c)
+       is distinct from public.friday_of(date '2026-07-31') then
+    raise exception 'FAIL: لم تُضبَط جمعةُ الخطبة بإعادة الترقيم';
+  end if;
+  if (select week_no from public.arch_sermons where id = v_c) is null then
+    raise exception 'FAIL: لم يُضبَط رقمُ الأسبوع';
+  end if;
+
+  -- والترقيمُ المستقلُّ لكلِّ حرم
+  perform public.renumber_arch_year(1448, true);
+  if (select seq from public.arch_sermons where id = v_a) <> 1
+     or (select seq from public.arch_sermons where id = v_b) <> 1 then
+    raise exception 'FAIL: الترقيمُ المستقلُّ لكلِّ حرمٍ لم يعمل';
+  end if;
+
+  -- وفي النسق الواحد لا يتكرّر رقم: الحرامُ سلسلةٌ والنبويُّ سلسلة
+  if exists (select mosque, seq from public.arch_sermons
+              where h_year = 1448 and seq is not null
+              group by mosque, seq having count(*) > 1) then
+    raise exception 'FAIL: تكرّر رقمٌ في حرمٍ واحد';
+  end if;
+  -- وفي ترقيم العام كلِّه لا يتكرّر رقمٌ البتّة
+  perform public.renumber_arch_year(1448);
+  if exists (select seq from public.arch_sermons
+              where h_year = 1448 and seq is not null
+              group by seq having count(*) > 1) then
+    raise exception 'FAIL: تكرّر رقمٌ في ترقيم العام كلِّه';
+  end if;
+
+  delete from public.arch_sermons where h_year = 1448;
+  raise notice 'PASS: إعادةُ الترقيم ثابتةٌ بالتاريخ ثم الحرم، وتضبط الجمعة، ولا يتكرّر رقم';
+end $$;
+
+-- =====================================================================
+-- ٧٧) المنعُ يُغلق ما فُتح لأجله، ومفاتيحُ ما استُحدث (ملاحظتا ٣٥٢ و٣٥٤)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_co  uuid;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select id into v_co from public.profiles where role = 'coordinator' limit 1;
+  if v_co is null then raise notice 'PASS: لا منسّقَ في هذه القاعدة'; return; end if;
+  delete from public.member_perms where member_id = v_co;
+
+  -- المفاتيحُ المستحدثةُ في الجرد
+  if (select count(*) from public.perm_keys
+       where key in ('cert_delete', 'arch_design', 'arch_carry', 'arch_refine', 'tm_title')) <> 5 then
+    raise exception 'FAIL: نقصت مفاتيحُ ما استُحدث من الجرد';
+  end if;
+  if exists (select 1 from public.perm_keys
+              where key in ('cert_delete', 'arch_design', 'arch_carry', 'arch_refine', 'tm_title')
+                and not admin_only) then
+    raise exception 'FAIL: مفتاحٌ مستحدثٌ ليس من مفاتيح الإدارة';
+  end if;
+
+  -- المنحُ يفتح ما فوقَه
+  perform public.set_member_perm(v_co, 'arch_design', true);
+  if not exists (select 1 from public.member_perms
+                  where member_id = v_co and perm_key = 'archive_year' and allowed) then
+    raise exception 'FAIL: لم يُفتح الرأسُ بالمنح';
+  end if;
+  if not public.perm_allowed(v_co, 'arch_design') then
+    raise exception 'FAIL: لم ينفذِ المنح';
+  end if;
+
+  -- والمنعُ يُغلق ما فُتح لأجله إذا لم يبقَ تحتَه ممنوح
+  perform public.set_member_perm(v_co, 'arch_design', null);
+  if exists (select 1 from public.member_perms
+              where member_id = v_co and perm_key = 'archive_year') then
+    raise exception 'FAIL: بقي الرأسُ مفتوحًا بعد زوال سببه';
+  end if;
+
+  -- وما بقي تحتَه ممنوحٌ لا يُغلَق رأسُه
+  perform public.set_member_perm(v_co, 'arch_design', true);
+  perform public.set_member_perm(v_co, 'arch_carry', true);
+  perform public.set_member_perm(v_co, 'arch_design', null);
+  if not exists (select 1 from public.member_perms
+                  where member_id = v_co and perm_key = 'archive_year' and allowed) then
+    raise exception 'FAIL: أُغلق رأسٌ تحتَه ممنوحٌ يقتضيه';
+  end if;
+  if not public.perm_allowed(v_co, 'arch_carry') then
+    raise exception 'FAIL: سقط منحٌ قائمٌ بإغلاق أخيه';
+  end if;
+
+  -- وما مُنح مفتاحَه يفعل: الترحيلُ بمفتاح arch_carry لا بالإدارة وحدَها
+  delete from public.member_perms where member_id = v_co;
+  perform public.set_member_perm(v_co, 'arch_carry', true);
+  perform set_config('request.jwt.claim.sub', v_co::text, true);
+  begin
+    perform public.carry_year_to_archive(1447,
+      (select id from public.arch_sections where h_year = 1447 limit 1), array[]::uuid[]);
+  exception when others then
+    if position('بإذن مدير المشروع' in sqlerrm) > 0 then
+      raise exception 'FAIL: لم يُفوَّضِ الترحيلُ لمن مُنح مفتاحَه';
+    end if;
+  end;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  delete from public.member_perms where member_id = v_co;
+  raise notice 'PASS: المنعُ يُغلق ما فُتح لأجله، وأبوابُ ما استُحدث تُفوَّض بمفاتيحها';
+end $$;
+
+-- =====================================================================
+-- ٧٨) صفحتا المبادرة والمنصة تذكران أرشيفَ الخطب بلا ذكرِ مال (ملاحظة ٣٥١)
+-- =====================================================================
+do $$
+declare v text; w text;
+begin
+  select content::text into v from public.page_content where key = 'initiative';
+  select content::text into w from public.page_content where key = 'about';
+  if v is null then raise notice 'PASS: لا صفحةَ مبادرةٍ في هذه القاعدة'; return; end if;
+
+  if position('أرشيف الخطب السنوي ومجمَّعه' in v) = 0 then
+    raise exception 'FAIL: لم يُذكر أرشيفُ الخطب في صفحة المبادرة';
+  end if;
+  if position('مجمَّع الخطب السنوي' in v) = 0 then
+    raise exception 'FAIL: لم تُضَفْ بطاقةُ المجمَّع إلى المخرجات';
+  end if;
+  if v ~ 'الرواتب|التسعيرة|المستحقات|المصرفية|المستخلص|ريال|بلا مقابل|لا يأخذ عليه' then
+    raise exception 'FAIL: دخل ذكرٌ ماليٌّ في صفحة المبادرة';
+  end if;
+
+  if w is not null then
+    if position('أرشيفٌ سنويٌّ على تقويم الحرمين' in w) = 0 then
+      raise exception 'FAIL: لم يُذكر أرشيفُ الخطب في «عن المنصة»';
+    end if;
+    if w ~ 'التسعيرة|المستخلص|ريال' then
+      raise exception 'FAIL: دخل ذكرٌ ماليٌّ في «عن المنصة»';
+    end if;
+  end if;
+  raise notice 'PASS: صفحتا المبادرة والمنصة تذكران أرشيفَ الخطب، وبلا ذكرِ مال';
 end $$;

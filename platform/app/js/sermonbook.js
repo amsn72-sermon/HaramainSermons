@@ -75,10 +75,13 @@ export const DEFAULT_TPL = () => ({
   cover: {
     bg: null, fade: 22, pattern: true,
     marks: BOOK_MARKS.map(m => ({ ...m })),
-    paper: '#f5efe4', ink: '#174a38', gold: '#b9975b'
+    paper: '#f5efe4', ink: '#174a38', gold: '#b9975b',
+    bannerW: 30, bannerTop: 26, titleY: 52, foot: true
   },
-  divider: { paper: '#f5efe4', banner: true, ghost: false, ink: '#174a38' },
-  inner: { head: true, foot: true, band: true, ink: '#1d2b3a', gold: '#b9975b', paper: '#ffffff' },
+  divider: { paper: '#f5efe4', banner: true, bannerW: 34, ghost: false,
+             stamp: true, midY: 62, ink: '#174a38' },
+  inner: { head: true, foot: true, band: true, pageno: 'circle', ornament: false,
+           ink: '#1d2b3a', gold: '#b9975b', paper: '#ffffff' },
   intro: ''
 });
 
@@ -90,12 +93,13 @@ export async function bookDialog(year, section) {
   try { langs = await db.rpc('arch_book_langs', { p_year: year }) || []; } catch { langs = []; }
   if (!langs.length) return toast('لا نسخَ في هذا العام بعد.', 'bad');
 
+  // القوالبُ المحفوظةُ تُنتقى بالاسم، ولكلٍّ تصميمُه (ملاحظتا ٣٤٢ و٣٣٩)
+  let saved = [];
+  try { saved = await db.rpc('book_templates_list') || []; } catch { saved = []; }
+  const pickOf = () => saved.find(r => String(r.id) === tplSel.value) || null;
   let tpl = DEFAULT_TPL();
-  try {
-    const saved = await db.rpc('book_template', { p_year: year });
-    const t = Array.isArray(saved) ? saved[0] : saved;
-    if (t && t.tpl) tpl = mergeTpl(tpl, t.tpl);
-  } catch { /* الافتراضيُّ يكفي */ }
+  const first = saved.find(r => r.h_year === year) || saved.find(r => r.is_default) || saved[0];
+  if (first && first.tpl) tpl = mergeTpl(tpl, first.tpl);
 
   const lang = h('select', { 'aria-label': 'اللغة' },
     langs.map(l => h('option', { value: l.language_code },
@@ -114,16 +118,19 @@ export async function bookDialog(year, section) {
     h('option', { value: 'pdf', selected: true }, 'PDF — للطباعة والنشر'),
     h('option', { value: 'docx' }, 'Word — للتسليم والتعديل'));
 
-  const tplBtn = h('button.btn.sm', { type: 'button' }, '🖌 تصميمُ القالب');
-  const tplName = h('span.small.muted');
-  const syncTpl = () => {
-    tplName.textContent = tpl.name ? `القالب: ${tpl.name}` : 'القالبُ الافتراضي';
+  // اختيارُ القالب المحفوظ، وبابُ تصميمه مستقلٌّ في صفحة الأعوام
+  const tplSel = h('select', { 'aria-label': 'قالبُ المجمَّع' },
+    saved.length
+      ? saved.map(r => h('option', { value: r.id, selected: first && r.id === first.id },
+          `${r.name}${r.is_default ? ' ★' : ''}${r.h_year ? ` — ${ARY(r.h_year)}هـ` : ''}`))
+      : [h('option', { value: '' }, 'القالبُ الافتراضي')]);
+  tplSel.onchange = () => {
+    const r = pickOf();
+    tpl = mergeTpl(DEFAULT_TPL(), r?.tpl || {});
+    if (r) tpl.name = r.name;
+    size.value = tpl.size || 'book';
   };
-  syncTpl();
-  tplBtn.onclick = async () => {
-    const next = await templateDialog(tpl, year);
-    if (next) { tpl = next; syncTpl(); }
-  };
+  const tplBtn = h('a.btn.sm', { href: '/app/book-design' }, '🖌 تصميمُ القوالب');
 
   const res = await dialog({
     title: `إصدارُ مجمَّع ${ARY(year)}هـ`,
@@ -140,7 +147,8 @@ export async function bookDialog(year, section) {
         h('label.check', withIntro, h('span', 'أدرِجْ مقدمةً في أوّله')),
         intro,
         h('p.small.muted', 'تُحفَظ مع القالب فلا تُعاد كتابتُها كلَّ عام.')),
-      h('div.row.between.wrap', tplName, tplBtn)),
+      h('div.row.between.wrap',
+        h('label.field', { style: { flex: 1, minWidth: '220px' } }, 'القالب', tplSel), tplBtn)),
     buttons: [
       { label: 'عايِنْ ثم صدِّرْ', kind: 'primary',
         value: () => ({ lang: lang.value, mosque: mosque.value || null, size: size.value,
@@ -158,6 +166,8 @@ export async function bookDialog(year, section) {
   } catch (e) { return toast(e.message, 'bad'); }
   if (!rows.length) return toast('لا خطبَ بهذه التصفية.', 'bad');
 
+  const chosen = pickOf();
+  if (chosen) { tpl = mergeTpl(DEFAULT_TPL(), chosen.tpl || {}); tpl.name = chosen.name; }
   tpl = { ...tpl, size: res.size, intro: res.intro };
   if (res.fmt === 'docx') return bookWord(rows, { year, ...res, tpl });
   if (!buildBook(rows, { year, ...res, tpl })) {
@@ -178,161 +188,9 @@ function mergeTpl(base, saved) {
   return out;
 }
 
-// ---------------------------------------------------------------------
-// تصميمُ القالب: ثلاثةُ أبوابٍ — الغلافُ وصفحةُ عنوان الخطبة والصفحاتُ
-//   الداخلية. والافتراضيُّ لا يُمَسّ: من عدّل أنشأ قالبًا باسمه
-//   (ملاحظة ٣١٠)
-// ---------------------------------------------------------------------
-async function templateDialog(cur, year) {
-  const t = mergeTpl(DEFAULT_TPL(), JSON.parse(JSON.stringify(cur)));
-
-  const name = h('input', { value: t.name || '', 'aria-label': 'اسم القالب',
-    placeholder: `قالبُ ${ARY(year)}هـ` });
-  const forYear = h('input', { type: 'checkbox', checked: true, 'aria-label': 'لهذا العام' });
-  const asDefault = h('input', { type: 'checkbox', 'aria-label': 'قالبٌ افتراضي' });
-
-  const colorIn = (val, set) => {
-    const i = h('input', { type: 'color', value: val, 'aria-label': 'لون' });
-    i.oninput = () => set(i.value);
-    return i;
-  };
-  const rangeIn = (val, min, max, set) => {
-    const i = h('input', { type: 'range', min: String(min), max: String(max),
-      value: String(val), 'aria-label': 'مقدار' });
-    i.oninput = () => set(Number(i.value));
-    return i;
-  };
-  const check = (on, label, set) => {
-    const i = h('input', { type: 'checkbox', checked: on ? true : null, 'aria-label': label });
-    i.onchange = () => set(i.checked);
-    return h('label.check', i, h('span', label));
-  };
-
-  // خلفيةُ الغلاف: تُرفَع أو تُختار من المرفوعات (ملاحظة ٣١٠)
-  const bgFile = h('input', { type: 'file', accept: 'image/*', hidden: true,
-    'aria-label': 'صورةُ الغلاف' });
-  const bgPrev = h('div.mark-prev');
-  const drawBg = () => bgPrev.replaceChildren(t.cover.bg
-    ? h('img', { src: t.cover.bg, alt: 'خلفيةُ الغلاف' })
-    : h('span.small.muted', 'بلا صورة — ورقٌ عاجيٌّ ورايةٌ مزخرفة'));
-  const bgUp = h('button.btn.xs', { type: 'button', onclick: () => bgFile.click() }, '⤒ ارفعْ صورة');
-  bgFile.onchange = async () => {
-    const f = bgFile.files?.[0]; if (!f) return;
-    try {
-      const { prepareMark } = await import('./photo.js');
-      t.cover.bg = await prepareMark(f, 1400); drawBg();
-    } catch (e) { toast(e.message, 'bad'); }
-    bgFile.value = '';
-  };
-  const bgClear = h('button.btn.xs.ghost', { type: 'button',
-    onclick: () => { t.cover.bg = null; drawBg(); } }, 'بلا صورة');
-  drawBg();
-
-  // شعاراتُ الغلاف: تُضاف وتُحذَف وتُحرَّك (ملاحظة ٣١٠)
-  const markBox = h('div.stack');
-  const markFile = h('input', { type: 'file', accept: 'image/*', hidden: true,
-    'aria-label': 'ملفُّ الشعار' });
-  markFile.onchange = async () => {
-    const f = markFile.files?.[0]; if (!f) return;
-    try {
-      const { prepareMark } = await import('./photo.js');
-      t.cover.marks.push({ src: await prepareMark(f, 600), x: 45, y: 6, h: 16 });
-      drawMarks();
-    } catch (e) { toast(e.message, 'bad'); }
-    markFile.value = '';
-  };
-  const numIn = (m, key, label, min, max) => {
-    const i = h('input', { type: 'number', value: String(m[key]), min: String(min),
-      max: String(max), step: '0.5', 'aria-label': label });
-    i.oninput = () => { m[key] = Number(i.value); };
-    return h('label.field.sm', label, i);
-  };
-  function drawMarks() {
-    markBox.replaceChildren(...(t.cover.marks.length ? t.cover.marks.map((m, i) =>
-      h('div.row.between.wrap.mark-row',
-        h('img.mark-thumb', { src: m.src, alt: '' }),
-        h('div.row.wrap', { style: { gap: '6px' } },
-          numIn(m, 'x', 'من اليمين ٪', 0, 95),
-          numIn(m, 'y', 'من الأعلى ٪', 0, 95),
-          numIn(m, 'h', 'الارتفاع مم', 5, 40)),
-        h('button.btn.xs.ghost', { type: 'button',
-          onclick: () => { t.cover.marks.splice(i, 1); drawMarks(); } }, 'احذفه')))
-      : [h('p.small.muted', 'لا شعارات — أضِفْ أو أعِدِ الثلاثةَ الافتراضية.')]));
-  }
-  drawMarks();
-
-  const res = await dialog({
-    title: 'تصميمُ قالب المجمَّع',
-    body: h('div.stack',
-      h('p.small.muted', 'الأصلُ تصميمُ المجمَّع القائم. وما تعدّله هنا يُحفَظ قالبًا '
-        + 'باسمه، والافتراضيُّ يبقى مرجعًا لا يُمَسّ.'),
-
-      h('fieldset.stack', h('legend', 'الغلاف'),
-        h('div.grid-2',
-          h('label.field', 'لونُ الورق', colorIn(t.cover.paper, v => { t.cover.paper = v; })),
-          h('label.field', 'اللونُ الأخضر', colorIn(t.cover.ink, v => { t.cover.ink = v; })),
-          h('label.field', 'اللونُ الذهبي', colorIn(t.cover.gold, v => { t.cover.gold = v; }))),
-        check(t.cover.pattern, 'نقشٌ باهتٌ خلفَ الغلاف', v => { t.cover.pattern = v; }),
-        h('div.row.between.wrap', h('span.small.muted', 'صورةٌ في ذيل الغلاف (اختيارية)'),
-          h('div.row', bgUp, bgFile, bgClear)),
-        h('div.row.wrap', { style: { gap: '6px' } }, COVER_BGS.map(([src, label]) => {
-          const b = h('button.btn.xs' + (t.cover.bg === src ? '.primary' : ''),
-            { type: 'button' }, label);
-          b.onclick = () => { t.cover.bg = src; drawBg(); };
-          return b;
-        })),
-        bgPrev,
-        h('label.field', 'شدّةُ ظهور الصورة',
-          rangeIn(t.cover.fade, 5, 100, v => { t.cover.fade = v; })),
-        h('div.row.between.wrap', h('span.small.muted', 'الشعارات'),
-          h('div.row',
-            h('button.btn.xs', { type: 'button', onclick: () => markFile.click() }, '＋ شعار'),
-            markFile,
-            h('button.btn.xs.ghost', { type: 'button', onclick: () => {
-              t.cover.marks = BOOK_MARKS.map(m => ({ ...m })); drawMarks();
-            } }, 'الثلاثةُ الافتراضية'))),
-        markBox),
-
-      h('fieldset.stack', h('legend', 'صفحةُ عنوان الخطبة'),
-        h('div.grid-2',
-          h('label.field', 'لونُ الأرضية',
-            colorIn(t.divider.paper, v => { t.divider.paper = v; })),
-          h('label.field', 'لونُ الخطّ', colorIn(t.divider.ink, v => { t.divider.ink = v; }))),
-        check(t.divider.banner, 'الرايةُ المزخرفة', v => { t.divider.banner = v; }),
-        check(t.divider.ghost, 'صورةٌ شبحٌ في الزاوية', v => { t.divider.ghost = v; })),
-
-      h('fieldset.stack', h('legend', 'الصفحاتُ الداخلية'),
-        h('div.grid-2',
-          h('label.field', 'لونُ الحبر', colorIn(t.inner.ink, v => { t.inner.ink = v; })),
-          h('label.field', 'لونُ الحلية', colorIn(t.inner.gold, v => { t.inner.gold = v; }))),
-        check(t.inner.head, 'كليشةٌ في رأس الصفحة', v => { t.inner.head = v; }),
-        check(t.inner.band, 'شريطُ البسملةِ في صدر كلِّ خطبة', v => { t.inner.band = v; }),
-        check(t.inner.foot, 'ترقيمُ الصفحات في الذيل', v => { t.inner.foot = v; })),
-
-      h('fieldset.stack', h('legend', 'حفظُ القالب'),
-        h('label.field', 'اسمُ القالب', name),
-        h('label.check', forYear, h('span', `يخصُّ عامَ ${ARY(year)}هـ`)),
-        h('label.check', asDefault, h('span', 'اجعلْه الافتراضيَّ للأعوام كلِّها')))),
-    buttons: [
-      { label: 'احفظْ واستعملْه', kind: 'primary',
-        validate: () => (name.value.trim().length > 1 ? true : 'اكتب اسمَ القالب'),
-        value: () => ({ save: true, name: name.value.trim() }) },
-      { label: 'استعملْه بلا حفظ', value: () => ({ save: false }) },
-      { label: 'إلغاء', value: null }
-    ]
-  });
-  if (!res) return null;
-
-  if (res.save) {
-    t.name = res.name;
-    try {
-      await db.rpc('save_book_template', { p_name: res.name, p_tpl: t,
-        p_year: forYear.checked ? year : null, p_default: asDefault.checked });
-      toast('حُفظ القالب.', 'ok');
-    } catch (e) { toast(e.message, 'bad'); }
-  }
-  return t;
-}
+// ملاحظة: تصميمُ القوالب انتقل إلى بابه المستقلِّ في صفحة الأعوام
+//   (/app/book-design) على آليّة مصمِّم الشهادات — لوحةٌ تُرى وأدواتٌ
+//   تحتها، لا حقولٌ لا يُعرَف أثرُها إلا بعد البناء (ملاحظتا ٣٣٩ و٣٥٠).
 
 // ---------------------------------------------------------------------
 // نصُّ النسخة ← فقراتُه (ملاحظة ٣٣٤)
@@ -346,6 +204,10 @@ async function templateDialog(cur, year) {
 const BLOCK_TAGS = new Set(['P', 'DIV', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
   'BLOCKQUOTE', 'PRE', 'TD', 'TH', 'SECTION', 'ARTICLE', 'FIGCAPTION']);
 const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'HEAD', 'TEMPLATE']);
+// الأغلفةُ تُفَكُّ ولا تُعَدُّ فقرةً: الجدولُ وجوفُه وقوائمُه
+const WRAP_TAGS = new Set(['TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'UL', 'OL', 'DL']);
+const isBlock = n => n.nodeType === 1
+  && (BLOCK_TAGS.has(n.tagName) || WRAP_TAGS.has(n.tagName));
 
 export function htmlParagraphs(html) {
   const src = String(html || '').trim();
@@ -380,12 +242,10 @@ export function htmlParagraphs(html) {
       if (n.nodeType !== 1) continue;
       if (SKIP_TAGS.has(n.tagName)) continue;
       if (n.tagName === 'BR') { buf += '<br>'; continue; }
-      if (BLOCK_TAGS.has(n.tagName) || n.tagName === 'TABLE'
-          || n.tagName === 'UL' || n.tagName === 'OL' || n.tagName === 'TR') {
+      if (isBlock(n)) {
         // فقرةٌ جديدةٌ تبدأ هنا، وما قبلها يُغلَق
         flush();
-        if ([...n.children].some(c => BLOCK_TAGS.has(c.tagName) || c.tagName === 'TABLE'
-              || c.tagName === 'UL' || c.tagName === 'OL' || c.tagName === 'TR')) {
+        if ([...n.children].some(isBlock)) {
           walk(n);                   // فيها فقراتٌ أخرى: تُفكّ
         } else {
           buf = n.innerHTML;         // ورقةٌ: زينتُها الداخليةُ تبقى كما هي
@@ -474,9 +334,11 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
     }
     c.append(marks);
     // الرايةُ المزخرفةُ معلّقةٌ من رأس الغلاف، على نسق صفحات العنوان
-    const cban = el('div', 'cover-banner');
-    cban.innerHTML = pennantSvg(tpl.cover.ink, tpl.cover.gold);
-    c.append(cban);
+    if (Number(tpl.cover.bannerW) > 0) {
+      const cban = el('div', 'cover-banner');
+      cban.innerHTML = pennantSvg(tpl.cover.ink, tpl.cover.gold);
+      c.append(cban);
+    }
     const mid = el('div', 'cover-mid');
     mid.append(el('h1', 'ct', esc(title)));
     mid.append(el('div', 'crule'));
@@ -484,10 +346,12 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
     mid.append(el('div', 'cs2', esc(`إلى ${langName(lang)}`)));
     mid.append(el('div', 'cy', esc(`لعام ${ARY(year)}هـ`)));
     c.append(mid);
-    const foot = el('div', 'cover-foot');
-    foot.innerHTML = '<span>الهيئةُ العامة للعناية بشؤون المسجد الحرام والمسجد النبوي</span>'
-      + '<span>مشروعُ خادم الحرمين الشريفين لترجمة خطب الحرمين — بتنفيذ جامعة أمِّ القرى</span>';
-    c.append(foot);
+    if (tpl.cover.foot !== false) {
+      const foot = el('div', 'cover-foot');
+      foot.innerHTML = '<span>الهيئةُ العامة للعناية بشؤون المسجد الحرام والمسجد النبوي</span>'
+        + '<span>مشروعُ خادم الحرمين الشريفين لترجمة خطب الحرمين — بتنفيذ جامعة أمِّ القرى</span>';
+      c.append(foot);
+    }
     cv.append(c);
 
     // ـــ ٢) صفحةُ البسملة — صورةُ الهيئة لا رسمًا تقريبيًّا (ملاحظة ٣٣٥)
@@ -556,11 +420,13 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
         dv.append(bn);
       }
       if (tpl.divider.ghost && tpl.cover.bg) dv.append(img(tpl.cover.bg, 'div-ghost'));
-      const stamp = el('div', 'div-stamp');
+      const stamp = tpl.divider.stamp === false ? null : el('div', 'div-stamp');
+      if (stamp) {
       stamp.innerHTML = `<div>${esc(r.sermon_type || 'خطبة الجمعة')}</div>`
         + `<div>${esc(r.hijri_text || (r.sermon_date ? fmtHijri(r.sermon_date) : ''))}</div>`
         + (r.sermon_date ? `<div>الموافق ${esc(gregLine(r.sermon_date))}</div>` : '');
-      dv.append(stamp);
+        dv.append(stamp);
+      }
       const dm = el('div', 'div-mid');
       dm.innerHTML = '<div class="dl">موضـوع الخطبة:</div>'
         + `<div class="dt">${esc(r.title)}</div>`
@@ -626,6 +492,11 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
         box.innerHTML = `<span class="pno">${AR(folio[i])}</span>`;
         s.append(box);
       }
+      if (tpl.inner.ornament && !s.classList.contains('div-sheet')) {
+        const orn = el('div', 'foot-orn');
+        orn.innerHTML = footOrnamentSvg(tpl.inner.gold);
+        s.append(orn);
+      }
       if (tpl.inner.head && !s.classList.contains('div-sheet')) {
         const hd = el('div', 'runhead');
         hd.innerHTML = `<span>${esc(title)}</span>`
@@ -662,7 +533,7 @@ const gregLine = iso => {
 // الرايةُ المعلَّقة: درعٌ أخضرُ بحليةٍ ذهبيةٍ ونجومٍ ثمانيةٍ متشابكة
 // (على نسق صفحات العنوان في مطبوعات المشروع — ملاحظة ٣٣٦)
 let pennantSeq = 0;
-function pennantSvg(ink, gold) {
+export function pennantSvg(ink, gold) {
   // المعرِّفُ فريدٌ لكلِّ رايةٍ: المعرِّفاتُ المكرَّرةُ في وثيقةٍ واحدةٍ
   //   تجعل القصَّ يتبع أوّلَها (ملاحظة ٣٣٦)
   const id = `pen${++pennantSeq}`;
@@ -692,6 +563,17 @@ function pennantSvg(ink, gold) {
     <path d="M5.6 0 V129.2 L30 158.5 L54.4 129.2 V0" fill="none" stroke="${gold}"
       stroke-width=".5" opacity=".8"/>
   </svg>`;
+}
+
+// حليةٌ هندسيةٌ في ذيل الصفحة الداخلية (ملاحظة ٣٥٠)
+export function footOrnamentSvg(gold) {
+  return `<svg viewBox="0 0 120 10" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+    <g fill="none" stroke="${gold}" stroke-width=".7" opacity=".85">
+      <path d="M0 5 H42"/><path d="M78 5 H120"/>
+      <polygon points="60,0.6 64.6,5 60,9.4 55.4,5"/>
+      <polygon points="50,2.2 53,5 50,7.8 47,5"/>
+      <polygon points="70,2.2 73,5 70,7.8 67,5"/>
+    </g></svg>`;
 }
 
 // ---------------------------------------------------------------------
@@ -816,11 +698,12 @@ function bookCss(S, M, winW, winH, F, tpl) {
       radial-gradient(circle at 50% 50%, ${g} 0 .8px, transparent 1.3px) 6mm 6mm/12mm 12mm; }
   .cover-marks { position: absolute; inset: 0; }
   .cover-marks .mk { position: absolute; }
-  .cover-banner { position: absolute; top: 26mm; inset-inline: 0; display: flex;
+  .cover-banner { position: absolute; top: ${tpl.cover.bannerTop ?? 26}mm; inset-inline: 0; display: flex;
     justify-content: center; }
-  .cover-banner svg { width: 30mm; height: ${Math.round(S.h * 0.34)}mm; display: block; }
+  .cover-banner svg { width: ${tpl.cover.bannerW || 30}mm;
+    height: ${Math.round(S.h * 0.34)}mm; display: block; }
   .cover-mid { position: absolute; inset-inline: ${M.outer}mm;
-    top: ${Math.round(S.h * 0.52)}mm; text-align: center; }
+    top: ${Math.round(S.h * ((tpl.cover.titleY ?? 52) / 100))}mm; text-align: center; }
   .cover .ct { font-size: 28pt; font-weight: 700; color: ${green}; margin: 0;
     line-height: 1.5; letter-spacing: .4mm; }
   .cover .crule { width: 54mm; height: .5mm; background: ${g}; margin: 5mm auto; opacity: .85; }
@@ -850,14 +733,15 @@ function bookCss(S, M, winW, winH, F, tpl) {
   .divider { position: absolute; inset: 0; }
   .divider .banner { position: absolute; top: 0; inset-inline: 0; display: flex;
     justify-content: center; }
-  .divider .banner svg { width: 34mm; height: ${Math.round(S.h * 0.56)}mm; display: block; }
+  .divider .banner svg { width: ${tpl.divider.bannerW || 34}mm;
+    height: ${Math.round(S.h * 0.56)}mm; display: block; }
   .div-stamp { position: absolute; top: ${M.top - 10}mm; inset-inline-end: ${M.outer}mm;
     text-align: end; direction: rtl; font-size: 9.5pt; font-weight: 700;
     color: ${tpl.divider.ink}; line-height: 2; }
   .div-ghost { position: absolute; bottom: 0; inset-inline-end: 0; width: 55%;
     opacity: .12; }
   .div-mid { position: absolute; inset-inline: ${M.outer}mm;
-    top: ${Math.round(S.h * 0.62)}mm; text-align: center; direction: rtl; }
+    top: ${Math.round(S.h * ((tpl.divider.midY ?? 62) / 100))}mm; text-align: center; direction: rtl; }
   .div-mid .dl { font-size: 13pt; color: ${tpl.divider.ink}; letter-spacing: .6mm; }
   .div-mid .dt { font-size: 21pt; font-weight: 700; color: ${tpl.divider.ink};
     margin-top: 3mm; line-height: 1.5; }
@@ -876,8 +760,15 @@ function bookCss(S, M, winW, winH, F, tpl) {
   .pageno { position: absolute; bottom: ${Math.max(5, M.bottom - 12)}mm; inset-inline: 0;
     display: flex; justify-content: center; }
   .pageno .pno { display: inline-flex; align-items: center; justify-content: center;
-    width: 8mm; height: 8mm; border-radius: 50%; border: .3mm solid ${g};
-    font-size: 9pt; color: ${ink}; background: #fff9; }
+    min-width: 8mm; height: 8mm; font-size: 9pt; color: ${ink};
+    ${tpl.inner.pageno === 'plain'
+      ? ''
+      : tpl.inner.pageno === 'ornament'
+        ? `border-top: .3mm solid ${g}; border-bottom: .3mm solid ${g}; padding: 0 3mm;`
+        : `border-radius: 50%; border: .3mm solid ${g}; background: #fff9;`} }
+  .foot-orn { position: absolute; bottom: ${Math.max(3, M.bottom - 16)}mm;
+    inset-inline: ${M.inner}mm; display: flex; justify-content: center; }
+  .foot-orn svg { width: 46mm; height: 4mm; }
   .div-sheet .pageno .pno { background: transparent; }
 
   /* الفهرس — صفوفٌ تُقطع فُرادى فلا تنكسر خليةٌ عن أختها (ملاحظة ٣٣٤) */
