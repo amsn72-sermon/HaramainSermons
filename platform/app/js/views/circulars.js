@@ -1,7 +1,7 @@
 // المراسلات: تعاميم وتوجيهات وتحذيرات ودعوات — إرسالٌ من الإدارة وتوقيعٌ بالعلم من العضو (ملاحظة ٨١)
-import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDateTime, req, markBad } from '../ui.js';
+import { h, toast, busy, dialog, confirm, emptyState, fmtDateTime, req, markBad } from '../ui.js';
 import { db, storage, auth } from '../sb.js';
-import { state, isAdmin, isManager, ROLE_LABEL, langName, loadCircularState } from '../store.js';
+import { state, isAdmin, isManager, ROLE_LABEL, loadCircularState } from '../store.js';
 import { pdfViewer } from '../pdfview.js';
 import { signaturePad, signatureImg, signatureUpload } from '../signature.js';
 

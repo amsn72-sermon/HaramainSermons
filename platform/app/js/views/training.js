@@ -2,9 +2,9 @@
 //   يجري التدريبُ في قاعات التدريب، وهذه الشاشةُ لما يقوم عليه: الخططُ
 //   والموادُّ والسجل. والمشاركةُ من الإدارة إلى العضو، ولكلِّ مشاركةٍ
 //   مفتاحُ تنزيلٍ يقرّره المدير.
-import { h, toast, busy, dialog, fill, emptyState, fmtDate, fmtDateTime, confirm } from '../ui.js';
+import { h, toast, dialog, fmtDate, confirm } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, isAdmin, isManager } from '../store.js';
+import { state, isAdmin } from '../store.js';
 
 const LEVEL = { onboarding: 'تأهيلُ الملتحقين', development: 'تطويرٌ مستمر',
   specialized: 'تخصصيٌّ متقدم' };

@@ -3,10 +3,9 @@
 //   وأوقاتُهم، والقادةُ وفِرقُهم، وتوليدُ مناوبات الشهر.
 //   مديرُ المشروع يُنشئ ويحرّر ويُسنِد؛ والمنسقون يطّلعون؛ وقائدُ الفريق
 //   يرى فريقَه وحدَه.
-import { h, toast, busy, dialog, fill, emptyState, fmtDate } from '../ui.js';
+import { fill, h, toast, busy, dialog } from '../ui.js';
 import { db } from '../sb.js';
-import { CITY, isAdmin, isManager, can, state, loadPeriods, periodName,
-  WORK_MODE, WEEK_DAYS, daysLabel, LEAD_KIND, roleLabel, TRACK_LABEL } from '../store.js';
+import { CITY, isAdmin, isManager, can, state, loadPeriods, WORK_MODE, WEEK_DAYS, daysLabel, LEAD_KIND, roleLabel, TRACK_LABEL } from '../store.js';
 import { miniMap, searchPlace, myPosition } from '../map.js';
 
 export const maySetSites = () => isManager();
@@ -331,7 +330,7 @@ async function teamsCard() {
       ]);
     } catch { /* يُعرض ما أمكن */ }
 
-    box.replaceChildren(
+    fill(box, 
       leads.length ? h('div.lead-grid', leads.map(l => h('article.lead-card',
         h('div.row.between', h('b', l.lead_name),
           h('span.badge', LEAD_KIND[l.lead_kind] || 'قائد')),
@@ -402,7 +401,7 @@ async function generateCard() {
         } catch (e) { toast(e.message, 'bad'); }
       });
 
-      out.replaceChildren(
+      fill(out, 
         h('p', fresh.length
           ? `ستُنشأ ${fresh.length} مناوبةً لـ${byMember.size} عضوًا، ويُتخطّى ${rows.length - fresh.length} يومًا مسجَّلًا من قبل.`
           : 'لا جديد: إمّا أن الجميع مسجَّلون، وإمّا أنه لا أحدَ حضوريٌّ بفترةٍ وأيامِ عمل.'),

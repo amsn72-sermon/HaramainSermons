@@ -1,12 +1,11 @@
 // الرواتب والمستحقات: أجر كل عضو، وتسعيرة الأعمال بالمقطوع حسب نوعها،
 // ودورة شهرية تُحتسب من الأعمال المنجزة، يعتمدها مدير المشروع ثم تُصرف
 // (ملاحظتا ١١٦ و١١٨)
-import { h, toast, busy, confirm, dialog, req, fmtDate, fmtDateTime } from '../ui.js';
+import { h, toast, busy, confirm, dialog, fmtDate, fmtDateTime } from '../ui.js';
 import { db } from '../sb.js';
-import { isManager, ROLE_LABEL, langName, roleLabel} from '../store.js';
-import { PAY_TYPE, PAYROLL_STATUS, WORK_KIND, WORK_KINDS, RATE_BASIS, kindName, basisName, money, monthLabel, monthStart, thisMonth, today } from '../pay.js';
+import { isManager, langName, roleLabel } from '../store.js';
+import { PAY_TYPE, PAYROLL_STATUS, WORK_KINDS, RATE_BASIS, kindName, basisName, money, monthLabel, monthStart, thisMonth, today } from '../pay.js';
 import { exportExcel, exportPdf, exportWord } from '../teamexport.js';
-
 
 const groupOf = m => (['manager', 'coordinator'].includes(m.role) ? 'إداري'
   : m.track === 'answers' ? 'إجابة السائلين'

@@ -8,7 +8,7 @@
 //   والمجمَّعُ السنويُّ يُولَّد من هذه الخطب لا يُرفَع جاهزًا (ملاحظة ٣٠٩).
 import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDate, fmtHijri } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, MOSQUE, SERMON_TYPES, langName, trLangs, isManager, can } from '../store.js';
+import { MOSQUE, SERMON_TYPES, langName, trLangs, isManager, can } from '../store.js';
 import { typeIcon } from '../icons.js';
 
 const AR = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn');
@@ -25,6 +25,11 @@ const ICONS = {
   langs: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>',
   edit:  '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M14 6l4 4"/>',
   down:  '<path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 21h16"/>',
+  // تنزيلُ الخطبة: وورد وPDF والملفُّ المرفوع (ملاحظة ٣٣٢)
+  word:  '<path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/>'
+         + '<path d="M8.5 12l1.4 5 1.6-3.6L13.1 17l1.4-5"/>',
+  pdf:   '<path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/><path d="M12 11v7m-3-3 3 3 3-3"/>',
+  file:  '<path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/><path d="M9 14h6M9 17.5h4"/>',
   audio: '<path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/>',
   trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>'
 };
@@ -178,8 +183,37 @@ async function yearPage(ctx, year) {
     } catch { weeks = []; occasions = []; }
   }
 
+  // أيقوناتُ العمل على الخطبة: العرضُ والتعديلُ والتنزيلُ والحذف
+  //   (ملاحظتا ٣٣٠ و٣٣٢ — والتنزيلُ يُنزِّل فعلًا لا يفتح نافذةَ عرض)
+  const sermonActs = (s, mosque, friday) => {
+    const dl = async (fn, btn) => {
+      try { await busy(btn, async () => { await fn(); }); }
+      catch (e) { toast(e.message, 'bad'); }
+    };
+    const act = (name, title, run, cls = '') =>
+      h('button.icon-btn' + (cls ? '.' + cls : ''), { type: 'button', title, 'aria-label': title,
+        onclick: ev => run(ev.currentTarget) }, ico(name));
+    return h('span.sm-acts',
+      act('open', 'اعرضِ الخطبةَ ونسخَها', () => openSermon(s.id)),
+      mayEdit() ? act('edit', 'تعديلُ بياناتها',
+        () => sermonDialog(s.id, { mosque, friday })) : null,
+      mayExport() ? act('word', 'تنزيلُ Word على كليشة الهيئة', btn => dl(async () => {
+        const m = await import('../sermondl.js');
+        await m.downloadSermonWord(s.id);
+      }, btn)) : null,
+      mayExport() ? act('pdf', 'تنزيلُ PDF على كليشة الهيئة', btn => dl(async () => {
+        const m = await import('../sermondl.js');
+        await m.downloadSermonPdf(s.id);
+      }, btn)) : null,
+      mayExport() ? act('file', 'الملفُّ المرفوعُ كما هو', btn => dl(async () => {
+        const m = await import('../sermondl.js');
+        await m.openSermonFile(s.id);
+      }, btn)) : null,
+      mayEdit() ? act('trash', 'حذفُ الخطبة', () => removeSermon(s), 'danger') : null);
+  };
+
   // صفُّ الخطبة — على نسق أرشيف أعمال الترجمة
-  const sermonRow = (s, mosque, friday) => {
+  const sermonRow = (s, mosque, friday, { acts = true } = {}) => {
     if (!s) {
       return h('div.row.between.wrap.sm-row.gone',
         h('span.small.muted', `${MOSQUE_ICON[mosque]} ${MOSQUE[mosque]} — لم تُضَف`),
@@ -191,7 +225,7 @@ async function yearPage(ctx, year) {
     const n = Number(s.n_langs || 0);
     return h('div.stack.sm-row', { style: { gap: '4px' } },
       h('div.row.between.wrap',
-        h('div', { style: { flex: 1, minWidth: '240px' } },
+        h('div', { style: { flex: 1, minWidth: '180px' } },
           h('span.sm-no', AR(s.seq || 0)),
           h('b', mosque
             ? `${MOSQUE_ICON[mosque]} ${s.sermon_type} من ${MOSQUE[mosque]}`
@@ -200,23 +234,12 @@ async function yearPage(ctx, year) {
           h('div.small.muted',
             [s.khateeb, s.hijri_text || (s.sermon_date ? fmtHijri(s.sermon_date) : null),
              s.sermon_date ? fmtDate(s.sermon_date) : null].filter(Boolean).join('، '))),
-        h('div.row', { style: { gap: '4px' } },
-          h('span.badge', { class: n >= 10 ? 'ok' : n ? 'warn' : 'bad' },
-            n ? `${AR(n)} لغة` : 'بلا نسخ'),
-          h('button.icon-btn', { type: 'button', title: 'اعرضِ الخطبةَ ونسخَها',
-            onclick: () => openSermon(s.id) }, ico('open')),
-          mayEdit()
-            ? h('button.icon-btn', { type: 'button', title: 'تعديل',
-                onclick: () => sermonDialog(s.id, { mosque, friday }) }, ico('edit'))
-            : null,
-          mayExport()
-            ? h('button.icon-btn', { type: 'button', title: 'تنزيلُ الخطبة',
-                onclick: () => openSermon(s.id) }, ico('down'))
-            : null,
-          mayEdit()
-            ? h('button.icon-btn.danger', { type: 'button', title: 'حذف',
-                onclick: () => removeSermon(s) }, ico('trash'))
-            : null)),
+        acts
+          ? h('div.row', { style: { gap: '4px' } },
+              h('span.badge', { class: n >= 10 ? 'ok' : n ? 'warn' : 'bad' },
+                n ? `${AR(n)} لغة` : 'بلا نسخ'),
+              sermonActs(s, mosque, friday))
+          : null),
       langChips(s.id, n));
   };
 
@@ -230,7 +253,11 @@ async function yearPage(ctx, year) {
         v = (Array.isArray(r) ? r[0] : r)?.versions || [];
       } catch { v = []; }
       const has = new Set(v.map(x => x.language_code));
-      const all = ['ar', ...trLangs().filter(l => l.is_active).map(l => l.code)];
+      // تُعرَض المرفوعةُ واللغاتُ الرئيسةُ وحدَها في شريطٍ يُمرَّر،
+      // وما سواها يُطلَب بزرِّ «＋ لغة» (ملاحظة من الواقع)
+      const act = trLangs().filter(l => l.is_active);
+      const show = act.filter(l => l.is_core || has.has(l.code));
+      const all = ['ar', ...show.map(l => l.code)];
       fill(box, ...all.map(code => {
         const on = has.has(code);
         const b = h('button.lang-chip' + (on ? '.on' : ''), { type: 'button',
@@ -240,7 +267,8 @@ async function yearPage(ctx, year) {
           : mayUpload() ? addVersion(id, code) : toast('هذا خارجَ نطاقِ عملك الحالي.', 'bad'));
         return b;
       }), mayUpload()
-        ? h('button.lang-chip.add', { type: 'button', onclick: () => addVersion(id, null) }, '＋ لغة')
+        ? h('button.lang-chip.add', { type: 'button', onclick: () => addVersion(id, null) },
+            `＋ لغة (${AR(act.length - show.length)})`)
         : null);
     };
     if (n) paint(); else box.append(h('span.small.muted', 'لا نسخَ بعد'));
@@ -282,7 +310,7 @@ async function yearPage(ctx, year) {
       'aria-expanded': shut ? 'false' : 'true',
       title: shut ? 'افتحْ هذا الصف' : 'اطوِ هذا الصف' }, shut ? '▾' : '▴');
     const inner = h('div.week-body', { hidden: shut },
-      sermonRow(s, mosque, w.friday_on));
+      sermonRow(s, mosque, w.friday_on, { acts: false }));
     arrow.onclick = () => {
       const now = !inner.hidden;
       inner.hidden = now;
@@ -290,14 +318,15 @@ async function yearPage(ctx, year) {
       arrow.setAttribute('aria-expanded', now ? 'false' : 'true');
       setShut(w.friday_on, mosque, now);
     };
+    // الأيقوناتُ في رأس العمود: تُدرَك ولو كان الصفُّ مطويًّا (ملاحظة ٣٣٠)
     return h('div.mosque-group', { class: shut ? 'shut' : '' },
       h('div.mosque-head',
         h('b', `${MOSQUE_ICON[mosque]} ${MOSQUE[mosque]}`),
-        h('span.small.muted', s.title || ''),
-        h('span.row', { style: { gap: '6px', marginInlineStart: 'auto' } },
-          h('span.badge', { class: n >= 10 ? 'ok' : n ? 'warn' : 'bad' },
-            n ? `${AR(n)} لغة` : 'بلا نسخ'),
-          arrow)),
+        h('span.badge', { class: n >= 10 ? 'ok' : n ? 'warn' : 'bad' },
+          n ? `${AR(n)} لغة` : 'بلا نسخ'),
+        h('span.row.head-acts', { style: { marginInlineStart: 'auto' } },
+          sermonActs(s, mosque, w.friday_on), arrow)),
+      h('div.mosque-sub.small.muted', s.title || '—'),
       inner);
   };
 
@@ -306,9 +335,13 @@ async function yearPage(ctx, year) {
     const have = (w.makkah ? 1 : 0) + (w.madinah ? 1 : 0);
     // وما لم يُعرَف مسجدُه يُعرَض ليُصحَّح، ولا يبقى غائبًا (إصلاح ٣١٦)
     const others = Array.isArray(w.others) ? w.others : [];
+    // عمودان: المسجدُ الحرامُ يمينًا والنبويُّ يسارًا (ملاحظة ٣٣٠).
+    //   والاتجاهُ من الصفحة: فهي عربيةٌ يمينُها أوّلُها، فيُكتب الحرامُ
+    //   أوّلًا فيقع يمينًا.
     const inner = h('div.week-inner',
-      mosqueLine(w, 'makkah'),
-      mosqueLine(w, 'madinah'),
+      h('div.week-cols',
+        mosqueLine(w, 'makkah'),
+        mosqueLine(w, 'madinah')),
       others.length
         ? h('div.mosque-group.nomosque',
             h('div.mosque-head',
@@ -335,7 +368,7 @@ async function yearPage(ctx, year) {
       h('div.week-head',
         arrow,
         h('b', `الأسبوع ${AR(w.week_no)}`),
-        h('span.small.muted', `${fmtHijri(w.friday_on)} — ${fmtDate(w.friday_on)}`),
+        h('span.small.muted', `الجمعة ${fmtHijri(w.friday_on)} — ${fmtDate(w.friday_on)}`),
         h('span.row', { style: { gap: '6px', marginInlineStart: 'auto' } },
           others.length
             ? h('span.badge.bad', `${AR(others.length)} بلا مسجد`)
@@ -643,6 +676,22 @@ async function yearPage(ctx, year) {
     h('button.btn.xs.ghost', { type: 'button',
       onclick: () => { ['week', ...Object.keys(MOSQUE)].forEach(k => foldAll(k, false)); } }, 'افتحِ الكلَّ'));
 
+  // ترحيلُ أعمال العام المنجَزة من أرشيف الترجمة (ملاحظة ٣٣٧)
+  const carryBtn = mayUpload()
+    ? h('button.btn.sm', { type: 'button', title: 'نقلُ أعمال العام المنجَزة إلى الأرشيف' },
+        '⇄ رحِّلْ من أرشيف الترجمة')
+    : null;
+  if (carryBtn) {
+    carryBtn.onclick = () => busy(carryBtn, async () => {
+      const { carryDialog } = await import('../archcarry.js');
+      await carryDialog(year, section, { onDone: async () => {
+        sections = await db.rpc('arch_section_tiles', { p_year: year }) || [];
+        section = sections.find(x => x.id === section?.id) || section;
+        drawSecs(); drawWeeks();
+      } });
+    });
+  }
+
   // إعادةُ ترقيم العام بالتاريخ (ملاحظة ٣٢٧)
   const numBtn = mayEdit()
     ? h('button.btn.sm.ghost', { type: 'button' }, '№ أعِدْ ترقيمَ العام')
@@ -684,7 +733,7 @@ async function yearPage(ctx, year) {
   return h('div',
     h('div.page-head',
       h('div.row.wrap', { style: { marginInlineStart: 'auto', order: 2 } },
-        bookBtn, bulkBtn, numBtn, shortBtn,
+        bookBtn, bulkBtn, carryBtn, numBtn, shortBtn,
         mayUpload()
           ? h('button.btn.sm', { type: 'button',
               onclick: () => sermonDialog(null, {}) }, '＋ خطبة')

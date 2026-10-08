@@ -5,7 +5,7 @@ import { h, toast, busy, fmtDate } from '../ui.js';
 import { db } from '../sb.js';
 import { isManager } from '../store.js';
 import { buildXlsx, downloadBlob } from '../xlsx.js';
-import { pickColumns, narrowSheet, isExtra, extraLabel } from '../columns.js';
+import { pickColumns, isExtra, extraLabel } from '../columns.js';
 import { icon } from '../icons.js';
 import { monthField } from '../monthpicker.js';
 import { scopeSection } from './scope.js';
@@ -322,7 +322,6 @@ export async function render(ctx) {
     h('tfoot', h('tr.total-row',
       h('td', { colspan: '5' }, 'إجمالي قيمة العقد قبل الضريبة'),
       h('td', money(items.reduce((s, r) => s + Number(r.total_value || 0), 0)))))));
-
 
   // ---------------- لوحةُ مؤشرات البنود (ملاحظة ٢٤١) ----------------
   //   كمياتٌ لا ماليات: لا سعرَ ولا قيمةَ هنا، فالأسعارُ في جدول المستخلص

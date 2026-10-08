@@ -1,6 +1,6 @@
 // التحقق بخطوتين برمز من تطبيق المصادقة (Google Authenticator أو Microsoft Authenticator)
 // إلزامي لمدير المشروع والمنسقين، واختياري لغيرهم (ملاحظة ١٠٣).
-import { h, toast, busy } from '../ui.js';
+import { fill, h, toast, busy } from '../ui.js';
 import { auth, db } from '../sb.js';
 import { state, isAdmin, loadMfaState } from '../store.js';
 import { brand, themeToggle, footer } from './shell.js';
@@ -301,7 +301,7 @@ async function enrollBox(ctx) {
     go.onclick = submit;
     code.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
 
-    box.replaceChildren(
+    fill(box, 
       h('p.muted', required
         ? 'حسابك إداري، فالتحقق بخطوتين إلزامي عليه: لا تُفتح المنصة إلا برمز من تطبيق المصادقة على جوالك.'
         : 'تُضيف هذه الخطوة رمزًا من جوالك إلى كلمة المرور، فلا يدخل حسابك أحد بكلمة المرور وحدها.'),

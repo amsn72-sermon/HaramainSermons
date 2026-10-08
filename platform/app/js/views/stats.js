@@ -1,7 +1,7 @@
 // دليل الإنتاج: قوائم الأعمال بعدد كلماتها وصفحاتها ودقائقها، ومجموع يتحدّث (ملاحظة ٩٠)
-import { h, toast, busy, fmtDate, fmtDateTime, fmtSermonDate, fmtHijri } from '../ui.js';
+import { fill, h, toast, busy, fmtDate, fmtDateTime, fmtSermonDate, fmtHijri } from '../ui.js';
 import { db } from '../sb.js';
-import { state, langName, MOSQUE, MOSQUE_ANY, MATERIAL_TYPES, SERMON_TYPES, isManager } from '../store.js';
+import { langName, MOSQUE, MOSQUE_ANY, MATERIAL_TYPES, SERMON_TYPES, isManager } from '../store.js';
 import { buildXlsx, downloadBlob } from '../xlsx.js';
 import { EVENT_TYPES } from './interpretation.js';
 
@@ -190,7 +190,7 @@ export async function render(ctx) {
       db.rpc('initiative_totals').then(r => (Array.isArray(r) ? r[0] : r)).catch(() => null)
     ]).then(([c, ini]) => {
       if (!c) return;
-      contractBox.replaceChildren(
+      fill(contractBox, 
         h('div.row.between',
           h('b', 'أساس العقد في الاحتساب'),
           c.missing > 0
@@ -311,7 +311,7 @@ export async function render(ctx) {
     const sec = sums(list).sec;
     const sermonCount = list.filter(r => !countsWords(r.material_type)).length;
 
-    tablesBox.replaceChildren(
+    fill(tablesBox, 
       ...(groups.length ? groups.map(([t, l]) => typeTable(t, l))
         : [h('p.muted', 'لا أعمال ضمن هذا التحديد.')]),
       groups.length ? h('div.card.grand-total',
@@ -327,8 +327,10 @@ export async function render(ctx) {
     const list = rows.filter(match);
     // التاريخ هجريٌّ وحده في كل التصديرات (ملاحظة ١٦٠)
     const dateOf = r => (r.sermon_date ? fmtHijri(r.sermon_date) : fmtHijri((r.added_at || '').slice(0, 10)));
-    const wordCell = r => (countsWords(r.material_type) ? String(r.words || 0) : '—');
-    const pageCell = r => (countsWords(r.material_type) ? String(pagesOf(r.words)) : '—');
+    // الكلمةُ كلمةُ الأصل العربيِّ لا كلمةُ الترجمة، كما في الشاشة
+    //   وكما في المجموع أسفلَه — وكانت صفوفُ الكشف تُخالف مجموعَها
+    const wordCell = r => (countsWords(r.material_type) ? String(r.source_words || 0) : '—');
+    const pageCell = r => (countsWords(r.material_type) ? String(pagesOf(r.source_words)) : '—');
     const out = [['النوع', 'العنوان', 'التاريخ', 'اللغة', 'الكلمات', 'الصفحات', 'الدقائق الصوتية']];
     for (const t of [...TYPE_ORDER, 'مواد أخرى']) {
       const l = list.filter(r => (r.material_type || 'مادة') === t
@@ -454,7 +456,8 @@ export async function render(ctx) {
         h('label.field', 'إلى تاريخ', f.to))),
     tabs,
     panels,
-    h('p.small.muted', 'الكلمات تُحسب من نص الترجمة نفسه. والصفحات تقديرية على أساس 250 كلمة للصفحة المطبوعة على كليشة الهيئة.'));
+    h('p.small.muted', 'الكلمةُ كلمةُ النصِّ العربيِّ الأصل، تُحصى مرةً واحدةً للمادة. '
+      + 'والصفحات تقديرية على أساس 250 كلمة للصفحة المطبوعة على كليشة الهيئة.'));
 }
 
 // عدّاد مختصر لصدر شاشة المتابعة

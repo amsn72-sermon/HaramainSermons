@@ -5342,7 +5342,15 @@ begin
   end;
 
   -- ========== ٢٢٢: المدينةُ تُطلب من الجميع ==========
+  --   وناقصُ ملفِّ الزميل لا يراه زميلٌ ليس عليه (إصلاح أمنيّ في 0109)
   update public.profiles set city = null where id = v_yus;
+  if public.profile_missing(v_yus) <> '{}'::text[] then
+    raise exception 'FAIL: كشف زميلٌ ناقصَ ملفِّ زميله';
+  end if;
+  if public.profile_missing(v_fld) = '{}'::text[] then
+    raise exception 'FAIL: لم يرَ العضوُ ناقصَ ملفِّ نفسِه';
+  end if;
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
   if not ('المدينة' = any(public.profile_missing(v_yus))) then
     raise exception 'FAIL: لم تُطلب المدينةُ من المترجم';
   end if;
@@ -7086,4 +7094,253 @@ begin
 
   perform public.delete_arch_sermon(v_id);
   raise notice 'PASS: ما لا مسجدَ له يُعرَض ليُصحَّح، ولا يدخل بالرفع الجماعي';
+end $$;
+
+-- =====================================================================
+-- ٧١) ترحيلُ خطب العام من أرشيف الترجمة إلى أرشيف الخطب (ملاحظة ٣٣٧)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_sec uuid; v_m uuid; v_t uuid; v_g jsonb; v_id uuid;
+        v_date date := date '2025-07-18';      -- جمعةٌ في ١٤٤٧هـ
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select id into v_sec from public.arch_sections where h_year = 1447 and name = 'الخطب';
+
+  -- عامُ التاريخ يُعرَف من حدود الأعوام لا بالتخمين
+  if public.hijri_year_of(v_date) <> 1447 then
+    raise exception 'FAIL: عامُ % حُسب % لا ١٤٤٧', v_date, public.hijri_year_of(v_date);
+  end if;
+
+  insert into public.materials (title, material_type, sermon_type, mosque, sermon_date,
+                                khateeb_id, deliverable, source_html, created_by)
+  values ('خطبةُ الترحيل', 'خطب', 'خطبة جمعة', 'madinah', v_date,
+          (select id from public.khateebs order by id limit 1), 'text',
+          '<p>الأصلُ العربي</p>', v_mgr)
+  returning id into v_m;
+
+  insert into public.tracks (material_id, language_code, status, translation_html,
+                             receipt_due_at, completed_at)
+  values (v_m, 'en', 'completed', '<p>The carried text</p>', now(), now())
+  returning id into v_t;
+  -- ومسارٌ لم يُنجَزْ بعدُ: لا يُرحَّل
+  insert into public.tracks (material_id, language_code, status, translation_html, receipt_due_at)
+  values (v_m, 'ur', 'in_progress', '<p>ناتمام</p>', now());
+
+  -- المعاينةُ تُظهرها، وتعدُّ المنجَزَ وحدَه، وتقول إنها لم تُرحَّل
+  if not exists (select 1 from public.arch_carry_preview(1447, v_sec) c
+                  where c.material_id = v_m and c.langs = 1 and c.carried = 0
+                    and c.has_source and c.matched is null) then
+    raise exception 'FAIL: لم تظهر المادةُ صالحةً للترحيل (%)',
+      (select to_jsonb(c) from public.arch_carry_preview(1447, v_sec) c where c.material_id = v_m);
+  end if;
+
+  -- الترحيل: خطبةٌ تُنشأ، ونسختان — العربيُّ أصلًا والإنجليزيةُ ترجمةً
+  v_g := public.carry_year_to_archive(1447, v_sec, array[v_m]::uuid[]);
+  if (v_g ->> 'created')::int <> 1 then
+    raise exception 'FAIL: لم تُنشأ خطبةُ الترحيل (%)', v_g;
+  end if;
+  select id into v_id from public.arch_sermons
+   where section_id = v_sec and title = 'خطبةُ الترحيل';
+  if v_id is null then raise exception 'FAIL: لم تُكتب الخطبةُ في الأرشيف'; end if;
+  if (select friday_on from public.arch_sermons where id = v_id) <> public.friday_of(v_date) then
+    raise exception 'FAIL: لم تنزلْ في جمعتها';
+  end if;
+  if (select count(*) from public.arch_versions where sermon_id = v_id) <> 2 then
+    raise exception 'FAIL: عددُ النسخ % لا ٢',
+      (select count(*) from public.arch_versions where sermon_id = v_id);
+  end if;
+  if not exists (select 1 from public.arch_versions
+                  where sermon_id = v_id and language_code = 'ar' and is_source) then
+    raise exception 'FAIL: لم يُكتب الأصلُ العربيُّ أصلًا';
+  end if;
+  if (select from_track_id from public.arch_versions
+       where sermon_id = v_id and language_code = 'en') <> v_t then
+    raise exception 'FAIL: لم تُنسب النسخةُ إلى مسارها';
+  end if;
+  if exists (select 1 from public.arch_versions where sermon_id = v_id and language_code = 'ur') then
+    raise exception 'FAIL: رُحِّل مسارٌ لم يُنجَزْ بعد';
+  end if;
+
+  -- وأرشيفُ الترجمة يبقى كما هو: النقلُ نسخٌ لا حذف
+  if not exists (select 1 from public.tracks where id = v_t and deleted_at is null) then
+    raise exception 'FAIL: مُسَّ أرشيفُ الترجمة بالترحيل';
+  end if;
+
+  -- وإعادةُ الترحيل تضُمُّ ولا تُكرِّر، والمعاينةُ تقول إنها رُحِّلت
+  v_g := public.carry_year_to_archive(1447, v_sec, array[v_m]::uuid[]);
+  if (v_g ->> 'created')::int <> 0 or (v_g ->> 'merged')::int <> 1 then
+    raise exception 'FAIL: كرَّر الترحيلُ الخطبةَ (%)', v_g;
+  end if;
+  if (select count(*) from public.arch_versions where sermon_id = v_id) <> 2 then
+    raise exception 'FAIL: تكرّرت النسخُ بإعادة الترحيل';
+  end if;
+  if not exists (select 1 from public.arch_carry_preview(1447, v_sec) c
+                  where c.material_id = v_m and c.carried = 1 and c.matched = v_id) then
+    raise exception 'FAIL: لم تُعلَمِ المعاينةُ بما رُحِّل';
+  end if;
+
+  -- والنصُّ القائمُ لا يُستبدَل إلا بإذنٍ صريح
+  update public.arch_versions set body_html = '<p>نصٌّ نُقِّح بيد</p>'
+   where sermon_id = v_id and language_code = 'en';
+  perform public.carry_year_to_archive(1447, v_sec, array[v_m]::uuid[]);
+  if (select body_html from public.arch_versions
+       where sermon_id = v_id and language_code = 'en') <> '<p>نصٌّ نُقِّح بيد</p>' then
+    raise exception 'FAIL: دهَس الترحيلُ نصًّا نُقِّح بيد';
+  end if;
+  perform public.carry_year_to_archive(1447, v_sec, array[v_m]::uuid[], true);
+  if (select body_html from public.arch_versions
+       where sermon_id = v_id and language_code = 'en') <> '<p>The carried text</p>' then
+    raise exception 'FAIL: لم يُستبدَلِ النصُّ مع الإذن الصريح';
+  end if;
+
+  perform public.delete_arch_sermon(v_id);
+  delete from public.materials where id = v_m;
+  raise notice 'PASS: ترحيلُ أعمال العام إلى الأرشيف: يُضَمُّ ولا يتكرّر، ولا يدهس المنقَّح';
+end $$;
+
+-- والترحيلُ بإذن مدير المشروع وحدَه
+do $$
+declare v_tr uuid := '00000000-0000-0000-0000-00000000000c';
+        v_sec uuid;
+begin
+  select id into v_sec from public.arch_sections where h_year = 1447 and name = 'الخطب';
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  begin
+    perform public.carry_year_to_archive(1447, v_sec, null);
+    raise exception 'FAIL: رحَّل مَن لا إذنَ له';
+  exception when others then
+    if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  raise notice 'PASS: الترحيلُ من أرشيف الترجمة بإذن مدير المشروع';
+end $$;
+
+-- =====================================================================
+-- ٧٢) تنفيذُ الدوال مغلَقٌ بأصله: الزائرُ لا يصل إلا إلى ما قُصد كشفُه
+--      (إصلاحٌ أمنيٌّ — 0109)
+-- =====================================================================
+do $$
+declare v_open text[]; v_want text[] := array[
+  'can_see_track', 'can_view_reports', 'count_pages', 'hijri_month', 'hijri_year',
+  'hijri_year_calc', 'is_admin', 'is_manager', 'is_supervisor', 'is_viewer',
+  'my_role', 'open_page', 'page_needs_code', 'plain_text', 'public_translations',
+  'registration_open', 'registration_state', 'verify_card', 'verify_certificate',
+  'verify_doc'];
+  v_extra text[]; v_gone text[]; v_x text;
+begin
+  select coalesce(array_agg(distinct p.proname order by p.proname), '{}')
+    into v_open
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.prokind = 'f'
+     and p.proname not like '\_%'            -- دوالُّ الاختبار نفسِه
+     and has_function_privilege('anon', p.oid, 'execute');
+
+  select coalesce(array_agg(x), '{}') into v_extra
+    from unnest(v_open) x where not (x = any (v_want));
+  if v_extra <> '{}'::text[] then
+    raise exception 'FAIL: دوالُّ مفتوحةٌ للزائر بلا قصد: %', v_extra;
+  end if;
+  select coalesce(array_agg(x), '{}') into v_gone
+    from unnest(v_want) x where not (x = any (v_open));
+  if v_gone <> '{}'::text[] then
+    raise exception 'FAIL: أُغلق عن الزائر ما يحتاجه الموقعُ العامّ: %', v_gone;
+  end if;
+
+  -- والدوالُّ الداخليةُ مغلقةٌ عن العضو أيضًا
+  foreach v_x in array array[
+    'public.page_set_section(text, jsonb, text)',
+    'public.enqueue_notification(uuid, text, text, text, uuid)',
+    'public.meet_base(text, uuid)',
+    'public.ensure_card_key(uuid)',
+    'public.rate_for(uuid, text)',
+    'public.shift_recalc(uuid)'] loop
+    if to_regprocedure(v_x) is not null
+       and has_function_privilege('authenticated', to_regprocedure(v_x), 'execute') then
+      raise exception 'FAIL: دالةٌ داخليةٌ مفتوحةٌ للعضو: %', v_x;
+    end if;
+  end loop;
+
+  -- والدالةُ التي تُنشَأ بعد اليوم لا تنفتح للزائر من تلقاء نفسها
+  create or replace function public._probe_default_acl() returns int
+    language sql immutable as 'select 1';
+  if has_function_privilege('anon', 'public._probe_default_acl()'::regprocedure, 'execute') then
+    drop function public._probe_default_acl();
+    raise exception 'FAIL: دالةٌ جديدةٌ انفتحت للزائر بأصلها';
+  end if;
+  drop function public._probe_default_acl();
+
+  raise notice 'PASS: تنفيذُ الدوال مغلَقٌ بأصله، ولا يُفتَح للزائر إلا ما قُصد';
+end $$;
+
+-- وأرقامُ الإنتاج على أساس العقد لمن له الاطّلاع على التقارير
+do $$
+declare v_tr uuid := '00000000-0000-0000-0000-00000000000c';
+        v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+begin
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  if exists (select 1 from public.production_contract()) then
+    raise exception 'FAIL: رأى المترجمُ أرقامَ العقد';
+  end if;
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  if not exists (select 1 from public.production_contract()) then
+    raise exception 'FAIL: حُجبت أرقامُ العقد عن مدير المشروع';
+  end if;
+  raise notice 'PASS: أرقامُ الإنتاج على أساس العقد لمن له الاطّلاع وحدَه';
+end $$;
+
+-- =====================================================================
+-- ٧٣) صفحةُ المبادرة بلا ذكرِ مالٍ ولا تسعيرة (0110)
+-- =====================================================================
+do $$
+declare v text;
+begin
+  select content::text into v from public.page_content where key = 'initiative';
+  if v is null then raise notice 'PASS: لا صفحةَ مبادرةٍ في هذه القاعدة'; return; end if;
+  if position('ولا يأخذ عليهما شيئًا' in v) > 0
+     or position('وتُستثنى من الكميات المحتسَبة' in v) > 0 then
+    raise exception 'FAIL: بقي ذكرُ المال في صفحة المبادرة';
+  end if;
+  if position('لغتين يخدمهما خدمةً كاملة' in v) = 0 then
+    raise exception 'FAIL: ضاع بيانُ اللغتين المزيدتين من صفحة المبادرة';
+  end if;
+  if position('اطّلاع فقط' in (
+        select coalesce(d.description, '')
+          from pg_description d
+          join pg_attribute a on a.attrelid = d.objoid and a.attnum = d.objsubid
+         where d.objoid = 'public.profiles'::regclass and a.attname = 'role')) > 0 then
+    raise exception 'FAIL: بقيت «اطّلاع فقط» في وصف الدور';
+  end if;
+  raise notice 'PASS: صفحةُ المبادرة بيانٌ بلا تسعيرة، و«اطّلاع فقط» أُبدلت بـ«للمتابعة»';
+end $$;
+
+-- والمادةُ العامّةُ لا حرمَ لها، فلا تدخل صفَّ جمعةٍ ولا تُفسد الترحيل
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_sec uuid; v_m uuid; v_g jsonb;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select id into v_sec from public.arch_sections where h_year = 1447 and name = 'الخطب';
+  insert into public.materials (title, material_type, mosque, sermon_date, author,
+                                source_html, created_by)
+  values ('كتابٌ عامٌّ للترحيل', 'كتب', 'general', date '2025-07-18', 'دار النشر',
+          '<p>نص</p>', v_mgr)
+  returning id into v_m;
+  insert into public.tracks (material_id, language_code, status, translation_html,
+                             receipt_due_at, completed_at)
+  values (v_m, 'en', 'completed', '<p>text</p>', now(), now());
+
+  v_g := public.carry_year_to_archive(1447, v_sec, array[v_m]::uuid[]);
+  if (v_g ->> 'skipped')::int <> 1 then
+    raise exception 'FAIL: دخلت مادةٌ عامّةٌ صفَّ الحرمين (%)', v_g;
+  end if;
+  if (v_g -> 'rows' -> 0 ->> 'why') <> 'بلا مسجد' then
+    raise exception 'FAIL: لم يُبيَّن سببُ ردِّ المادة العامّة (%)', v_g;
+  end if;
+  if not exists (select 1 from public.arch_carry_preview(1447, v_sec) c
+                  where c.material_id = v_m and c.mosque is null) then
+    raise exception 'FAIL: عُدَّ «عامّة» حرمًا في المعاينة';
+  end if;
+  delete from public.materials where id = v_m;
+  raise notice 'PASS: المادةُ العامّةُ لا تدخل صفَّ الحرمين بالترحيل';
 end $$;

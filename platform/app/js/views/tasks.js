@@ -1,8 +1,7 @@
 // مهامي، ومساحة عمل المهمة لكل الأدوار
 import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDate, fmtDateTime, fmtMinutes, fmtDuration, digitalCountdown } from '../ui.js';
 import { db, storage, auth } from '../sb.js';
-import { state, isManager, isAdmin, TRACK_SELECT, MOSQUE, MOSQUE_ANY, PRIORITY, EVENT_LABEL, sortStages, currentStage,
-  langName, langDir, stageName } from '../store.js';
+import { state, isManager, isAdmin, TRACK_SELECT, MOSQUE_ANY, PRIORITY, EVENT_LABEL, sortStages, currentStage, langName, langDir, stageName } from '../store.js';
 import { statusBadge, trackTimer, progressBar, stageStrip, lateSummary } from './parts.js';
 import { createEditor } from '../editor.js';
 import { audioInfo, specLine, isAllowedAudio, AUDIO_EXTS, SPEC } from '../audiofile.js';
@@ -33,7 +32,7 @@ function audioOpen(t) {
 export function scoreBadge(score) {
   if (score == null) return h('span.badge', '—');
   const kind = score >= 100 ? 'ok' : score >= 80 ? 'gold' : score >= 60 ? 'warn' : 'bad';
-  return h('span.badge', { class: kind, title: 'التقييم حسب الالتزام بالوقت المحدد' }, score >= 100 ? 'العلامة الكاملة 100' : `${score} / 100`);
+  return h('span.badge', { class: kind, title: 'درجةُ الالتزام بالوقت المحدد — تُحسب آليًّا، وليست تقييمَ الهيئة' }, score >= 100 ? 'العلامة الكاملة 100' : `${score} / 100`);
 }
 
 // ---------------------------------------------------------------------
@@ -127,9 +126,9 @@ export async function list() {
     h('div', { style: { flex: 1 } }, h('b', r.title), h('div.small.muted', brief(r))),
     h('span.badge', 'بانتظار المراحل السابقة')));
 
-  // السجل: البيانات الرئيسية والوقت المستغرق والتقييم فقط — المادة نفسها تُغلق بعد إتمام الدور
+  // السجل: البيانات الرئيسية والوقت المستغرق ودرجة الالتزام — المادة نفسها تُغلق بعد إتمام الدور
   const doneTable = h('div.table-wrap', h('table.responsive',
-    h('thead', h('tr', ['#', 'المادة', 'اللغة والدور', 'الانتهاء', 'الوقت المستغرق', 'المحدد', 'التأخير', 'التقييم'].map(x => h('th', x)))),
+    h('thead', h('tr', ['#', 'المادة', 'اللغة والدور', 'الانتهاء', 'الوقت المستغرق', 'المحدد', 'التأخير', 'الالتزام'].map(x => h('th', x)))),
     h('tbody', done.map((r, i) => h('tr',
       h('td', { 'data-label': '#' }, String(i + 1)),
       h('td', { 'data-label': 'المادة' }, h('b', r.title), h('span.sub', heading(r))),
@@ -138,7 +137,7 @@ export async function list() {
       h('td', { 'data-label': 'المستغرق' }, r.started_at && r.finished_at ? fmtDuration((new Date(r.finished_at) - new Date(r.started_at)) / 1000) : '—'),
       h('td', { 'data-label': 'المحدد' }, r.planned_minutes ? fmtMinutes(r.planned_minutes) : '—'),
       h('td', { 'data-label': 'التأخير' }, r.late_seconds > 0 ? h('span.badge.bad', fmtDuration(r.late_seconds)) : h('span.badge.ok', 'في الوقت')),
-      h('td', { 'data-label': 'التقييم' }, scoreBadge(r.score)))))));
+      h('td', { 'data-label': 'الالتزام' }, scoreBadge(r.score)))))));
 
   const section = (title, count, content, emptyText) => h('section', { style: { marginBottom: '24px' } },
     h('h2', `${title} (${count})`), count ? content : h('p.muted', emptyText));
@@ -160,7 +159,7 @@ export async function list() {
   const empty = !now.length && !upcoming.length && !done.length && !(glTasks || []).length;
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'مساحة العمل'), h('h1', 'مهامي')),
-      avg != null && h('div', { style: { textAlign: 'center' } }, h('div.small.muted', 'متوسط تقييمك'), scoreBadge(avg))),
+      avg != null && h('div', { style: { textAlign: 'center' } }, h('div.small.muted', 'متوسطُ التزامك بالمواعيد'), scoreBadge(avg))),
     empty ? emptyState('لا مهام مسندة إليك بعد', 'ستظهر هنا فور إسناد المنسق مادةً إليك.') : h('div',
       section('تحتاج إجراءً منك الآن', now.length, h('div.stack', now.map(card)), 'لا شيء بانتظارك حاليًا.'),
       (glTasks || []).length
@@ -168,7 +167,7 @@ export async function list() {
         : null,
       section('قادمة', upcoming.length, h('div.stack', upcoming.map(upcomingRow)), 'لا مراحل قادمة مسندة إليك.'),
       section('سجل أعمالي', done.length, doneTable, 'لم تُتم أي مرحلة بعد.'),
-      done.length ? h('p.small.muted', 'التقييم 100 عند الإنجاز ضمن الوقت المحدد، وينقص بقدر التأخير. بعد إتمام دورك تُغلق المادة ولا يبقى منها إلا هذا السجل.') : null));
+      done.length ? h('p.small.muted', 'درجةُ الالتزام 100 عند الإنجاز ضمن الوقت المحدد، وتنقص بقدر التأخير — وهي حسابٌ آليٌّ للمواعيد لا تقييمًا للعمل؛ فتقييمُ الأداء يأتي من مشرفي الهيئة. وبعد إتمام دورك تُغلق المادة ولا يبقى منها إلا هذا السجل.') : null));
 }
 
 // ---------------------------------------------------------------------

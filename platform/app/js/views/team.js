@@ -822,7 +822,7 @@ export async function render(ctx, opts = {}) {
               catch (err) { toast(err.message, 'bad'); }
             });
           } }, 'حذف'))))
-          : h('p.muted.small', 'لا تقييمات بعد.'));
+          : h('p.muted.small', 'لا تقديرَ بعد.'));
       } catch (err) { list.replaceChildren(h('p.small.bad', err.message)); }
     };
     drawList();
@@ -833,9 +833,9 @@ export async function render(ctx, opts = {}) {
     const add = h('button.btn.sm.primary', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
       try {
         await db.rpc('rate_member', { p_member: m.id, p_score: Number(score.value), p_note: note.value.trim() || null });
-        note.value = ''; toast('سُجّل التقييم.', 'ok'); drawList();
+        note.value = ''; toast('سُجّل التقدير.', 'ok'); drawList();
       } catch (err) { toast(err.message, 'bad'); }
-    }) }, 'إضافة التقييم');
+    }) }, 'سجِّلِ التقدير');
 
     const pct = onTimePct(r);
     const sg = signOf[m.id];
@@ -848,14 +848,16 @@ export async function render(ctx, opts = {}) {
           h('div', h('div.small.muted', 'مجموع التأخير'), h('div.v', hours(r.late_seconds))),
           h('div', h('div.small.muted', 'مرات الإعادة'), h('div.v', String(r.redo_rounds ?? 0))),
           h('div', h('div.small.muted', 'مهام مفتوحة'), h('div.v', String(r.open_stages ?? 0))),
-          h('div', h('div.small.muted', 'معدل التقييم'), h('div.v', sum.avg_score ? `${sum.avg_score} / 5` : '—'),
-            h('div.small.muted', sum.ratings_count ? `${sum.ratings_count} تقييم` : ''))),
+          h('div', h('div.small.muted', 'معدل التقدير الداخلي'), h('div.v', sum.avg_score ? `${sum.avg_score} / 5` : '—'),
+            h('div.small.muted', sum.ratings_count ? `${sum.ratings_count} تقدير` : ''))),
         h('p.small.muted', sg
           ? `وقّع ميثاق العمل (نسخة ${sg.policy_version}) باسم «${sg.signed_name}» في ${fmtDateTime(sg.accepted_at)}.`
           : 'لم يوقّع على ميثاق العمل بنسخته الحالية بعد.'),
-        h('fieldset', h('legend', 'تقييم جديد'),
+        h('fieldset', h('legend', 'تقديرٌ داخليٌّ جديد'),
+          h('p.small.muted', 'تقديرٌ داخليٌّ للمتابعة. وتقييمُ الأداء يأتي من مشرفي الهيئة، '
+            + 'ونحن نسجِّله في بابه لا نُنشئه.'),
           h('div.stack', { style: { gap: '8px' } }, h('label.field', 'الدرجة', score), h('label.field', 'ملاحظة', note), h('div.row', add))),
-        h('fieldset', h('legend', 'سجل التقييمات'), list)),
+        h('fieldset', h('legend', 'سجلُّ التقدير الداخلي'), list)),
       buttons: [{ label: 'إغلاق', value: null }]
     });
   }

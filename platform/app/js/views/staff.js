@@ -1,7 +1,7 @@
 // شؤون الفريق: الانضمام والأعضاء، وتدقيق المستندات، والحسابات البنكية في شاشة واحدة (ملاحظة ٩٨)
 // وتحت «الفريق» ثلاث قوائم مستقلة: الإداريون، والمترجمون المتخصصون،
 // والمرشدون المكانيون (ملاحظتا ٩٩ و١٠١)
-import { h, toast, busy, dialog, fmtDate, fmtDateTime, confirm } from '../ui.js';
+import { fill, h, toast, busy, dialog, fmtDate, fmtDateTime, confirm } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { state, isManager } from '../store.js';
 import { render as teamRender } from './team.js';
@@ -156,7 +156,7 @@ function registrationCard(ctx0) {
     copy.onclick = () => navigator.clipboard.writeText(url)
       .then(() => toast('نُسخ رابط التسجيل.', 'ok')).catch(() => toast('انسخه من شريط العنوان.', 'bad'));
 
-    card.replaceChildren(
+    fill(card, 
       h('div.row.between', h('h3', 'باب التسجيل في المنصة'),
         h('span.badge', { class: open ? 'ok' : 'bad' }, open ? 'مفتوح' : 'مغلق')),
       h('p.small.muted', 'العدد معروف وقليل، فالأصل إغلاقه. افتحه مدةً معلومة حتى يُسجّل من دُعي، '
@@ -616,7 +616,7 @@ async function docsSection(ctx, team, scr, group = 'translators') {
 
     summary.textContent = `في هذه القائمة: ${inScope.length} عضوًا · ينتظر التدقيق: ${waiting} · لم يكتمل رفعهم: ${missing.length}`;
 
-    box.replaceChildren(
+    fill(box, 
       want === 'missing'
         ? (missing.length
             ? h('div.table-wrap', h('table.responsive',

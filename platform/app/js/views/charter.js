@@ -2,7 +2,7 @@
 // (ملاحظة ١٢٥؛ وهو ما كان يُسمّى «سياسة السرية»، والتوقيعات السابقة باقية بتواريخها)
 import { h, toast, busy, fmtDate, fmtDateTime } from '../ui.js';
 import { db } from '../sb.js';
-import { state, isAdmin, ROLE_LABEL, roleLabel} from '../store.js';
+import { isAdmin, roleLabel } from '../store.js';
 import { POLICY_KEY, POLICY_VERSION, POLICY_TITLE } from '../policy.js';
 import { policyText } from './policy.js';
 import { exportExcel, exportPdf, exportWord } from '../teamexport.js';

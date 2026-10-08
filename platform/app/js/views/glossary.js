@@ -1,10 +1,10 @@
 // الدليل المصطلحي الشرعي الموحَّد — التزامٌ في العقد (ملاحظة ١٥٠)
 //   مصطلحٌ عربي، وشرحٌ يوضّح معناه الشرعي، ومقابله المعتمد في كل لغة.
 //   الرجوع إليه إلزامي عند لبس المصطلح.
-import { h, dialog, toast, busy, confirm, fmtDate, req, markBad } from '../ui.js';
+import { fill, h, dialog, toast, busy, confirm, fmtDate, req, markBad } from '../ui.js';
 import { db } from '../sb.js';
 import { state, langName, trLangs, langByName, isAdmin, isManager, can } from '../store.js';
-import { icon } from '../icons.js';
+
 import { buildXlsx, buildXlsxBook, downloadBlob, readWorkbook } from '../xlsx.js';
 import { arBare } from '../teamexport.js';
 
@@ -308,7 +308,7 @@ async function observatoryCard(onAdded) {
     info.textContent = rows.length
       ? `${rows.length} مرشَّحًا ينتظر النظر — الأعلى تكرارًا أولًا.`
       : 'لا مرشَّحين. اضغط «ارصد الآن» ليمسح المرصدُ أصولَ الأرشيف.';
-    box.replaceChildren(rows.length ? h('div.cand-wrap', rows.map(chip)) : null);
+    fill(box, rows.length ? h('div.cand-wrap', rows.map(chip)) : null);
     genBtn.disabled = !picked.size;
     dispBtn.disabled = !picked.size;
     genBtn.textContent = picked.size ? `ولِّدْ المحدَّد (${picked.size})` : 'ولِّدْ المحدَّد';
@@ -1021,7 +1021,7 @@ export async function render(ctx) {
         tableEl()),
       buttons: [{ label: 'إغلاق', value: null }] });
 
-    queue.replaceChildren(pend.length
+    fill(queue, pend.length
       ? h('div.card.row.between.wrap.gl-pend',
           h('span.small', h('b', `${pend.length}`), ' مقترحًا ينتظر النظر'),
           h('div.row', { style: { gap: '6px' } }, openBtn, allBtn))

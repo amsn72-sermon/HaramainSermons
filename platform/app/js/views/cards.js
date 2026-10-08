@@ -1,14 +1,9 @@
 // بطاقات عمل فريق الترجمة: تصميمها بالسحب والإفلات وطباعتها (ملاحظتا ٨٥ و٨٦)
 import { h, toast, busy, escapeHtml, fmtDate } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { ROLE_LABEL, langName, roleLabel} from '../store.js';
+import { langName, roleLabel } from '../store.js';
 import { urlToDataUrl } from '../photo.js';
-import {
-  CARD, HARAMAIN_LOGO, ITEM_LABEL, ITEM_ORDER, COLORS, PRESETS, PRESET_LAYOUT,
-  DEFAULT_LAYOUT, normalizeLayout, clampLayout, photoH, itemText, itemStyle,
-  bandStyle, ruleStyle, scaleStyle, logoExtra, newCustom, customLabel, CARD_FONTS, fontStack,
-  cardVerifyUrl
-} from '../carddesign.js';
+import { CARD, HARAMAIN_LOGO, ITEM_LABEL, ITEM_ORDER, COLORS, PRESETS, PRESET_LAYOUT, DEFAULT_LAYOUT, normalizeLayout, clampLayout, photoH, itemText, itemStyle, bandStyle, ruleStyle, scaleStyle, logoExtra, newCustom, customLabel, CARD_FONTS, fontStack, cardVerifyUrl } from '../carddesign.js';
 import { qrDataUri } from '../qr.js';
 
 const SCALE = 6;                           // بكسل لكل مليمتر على الشاشة

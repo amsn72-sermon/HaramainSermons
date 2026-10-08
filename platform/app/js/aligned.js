@@ -6,7 +6,7 @@
 //   والمحاذاةُ تُصنع بالترتيب: الأولُ إلى الأول. فإن اختلف العددُ نبّهنا
 //   عليه ولم نُخفِه، وتُعرض الزيادةُ في جهتها فلا يضيع نص.
 import { h, escapeHtml, fmtDate } from './ui.js';
-import { PAGE, LETTERHEAD } from './page.js';
+import { PAGE } from './page.js';
 import { buildXlsxBook, downloadBlob } from './xlsx.js';
 import { openSheetWindow, measureBlocks, flowBlocks, mm2px, sheetCss, winHeight } from './sheetflow.js';
 import { langName, langDir } from './store.js';
@@ -171,7 +171,8 @@ export async function alignedWord(work, parts, mode, note = '') {
 
 // نافذةُ الخيارات ثم التصدير
 // work: { title, source_html }، tracks: [{ language_code, translation_html }]
-export async function exportAligned(work, tracks, { dialog, h: hh } = {}) {
+export async function exportAligned(work, tracks, { dialog } = {}) {
+  if (typeof dialog !== 'function') throw new Error('exportAligned: نافذةُ الخيارات لازمة');
   const avail = (tracks || []).filter(t => t.translation_html);
   if (!avail.length) return { ok: false, why: 'لا ترجمةً في هذا العمل بعد.' };
 

@@ -1,20 +1,31 @@
 // مجمَّعُ الخطب السنوي: يُبنى في المنصة على التصميم القائم
-// (ملاحظات ٣٠٤ و٣٠٩ و٣١٠ و٣١١)
+// (ملاحظات ٣٠٤ و٣٠٩ و٣١٠ و٣١١، ثم ٣٣٤ و٣٣٥ و٣٣٦)
 //
-//   الغلافُ ثم البسملةُ ثم المقدمةُ ثم الفهرسُ، ثم صفحةُ عنوانٍ لكلِّ
-//   خطبةٍ ومتنُها. والصفحاتُ تُقاس وتُقطع بأيدينا كما في كلِّ مُخرَجات
-//   المنصة منذ ملاحظة ٢٧٤ — فلا يفيض شيءٌ ولا يُترك فراغٌ عبثًا.
+//   الغلافُ ثم البسملةُ ثم صفحةُ الحقوقِ ثم المقدمةُ ثم الفهرسُ، ثم
+//   صفحةُ عنوانٍ لكلِّ خطبةٍ ومتنُها. والصفحاتُ تُقاس وتُقطع بأيدينا كما
+//   في كلِّ مُخرَجات المنصة منذ ملاحظة ٢٧٤ — فلا يفيض شيءٌ ولا يُترك
+//   فراغٌ عبثًا.
 //
-//   ولا يُغيَّر من التصميم إلا الشعاران: الهيئةُ العامةُ الجديد،
-//   وجامعةُ أمِّ القرى (ملاحظة ٣٠٤).
+//   وما استُدرك في ملاحظات ٣٣٤–٣٣٦:
+//   ١) المتنُ كان يُشقُّ عند كلِّ وسمٍ داخليٍّ فتتناثر الكلمةُ أحرفًا
+//      («Mu» ثم «ṣ» ثم «ḥ» ثم «af»)، وكانت رموزُ HTML تُهرَّب مرتين
+//      فتُطبع `&#39;` على وجهها. فصار الشقُّ على الفقرات وحدَها،
+//      والزينةُ الداخليةُ تبقى كما كتبها المترجم.
+//   ٢) البسملةُ صارت صورةَ الهيئة لا رسمًا تقريبيًّا.
+//   ٣) وصُمِّم الغلافُ وصفحةُ عنوان الخطبة والكليشةُ الداخليةُ وترقيمُ
+//      الصفحات على نسقٍ واحد: ورقٌ عاجيٌّ ورايةٌ خضراءُ وحليةٌ ذهبية.
 import { openSheetWindow, measureBlocks, flowBlocks, mm2px } from './sheetflow.js';
-import { h, toast, busy, dialog, escapeHtml, fmtHijri } from './ui.js';
+import { h, toast, dialog, escapeHtml, fmtHijri } from './ui.js';
 import { db } from './sb.js';
-import { langName, langDir, MOSQUE } from './store.js';
+import { langName, MOSQUE } from './store.js';
 import { qrDataUri } from './qr.js';
 
 const AR = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn');
 const ARY = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn', { useGrouping: false });
+
+// مسارٌ مطلق: ما يُكتب في نافذة المعاينة لا أصلَ له يُسنِد إليه النسبيّ
+const abs = src => (/^(data:|blob:|https?:)/.test(String(src))
+  ? String(src) : new URL(String(src), location.origin).href);
 
 // المقاساتُ تُختار عند التصدير لا تُثبَّت في الأرشفة (ملاحظة ٣٠٥)
 export const SIZES = {
@@ -37,6 +48,10 @@ export const BOOK_MARKS = [
   { src: '/assets/uqu-logo.png',             x: 74, y: 6, h: 16 }
 ];
 
+// صورتا الهيئة: البسملةُ في معيَّنها، وشريطُها الكوفيُّ (ملاحظة ٣٣٥)
+export const BASMALA_IMG  = '/assets/basmala.png';
+export const BASMALA_BAND = '/assets/basmala-band.jpg';
+
 // خطُّ كلِّ لغةٍ ومقاسُه (ملاحظة ٣١١)
 const FONTS = {
   ar:  { stack: '"Noto Naskh Arabic","Amiri",serif',        size: 13,   line: 1.8,  dir: 'rtl' },
@@ -54,16 +69,16 @@ const FONTS = {
 };
 export const fontOf = code => FONTS[code] || FONTS.def;
 
-// القالبُ الافتراضي: تصميمُك القائم كما هو (ملاحظة ٣١٠)
+// القالبُ الافتراضي: الورقُ العاجيُّ والرايةُ الخضراء (ملاحظتا ٣١٠ و٣٣٦)
 export const DEFAULT_TPL = () => ({
   size: 'book',
   cover: {
-    bg: '/assets/cover-kaaba.jpg', fade: 55, pattern: true,
+    bg: null, fade: 22, pattern: true,
     marks: BOOK_MARKS.map(m => ({ ...m })),
-    ink: '#1a4d3a', gold: '#b9975b'
+    paper: '#f5efe4', ink: '#174a38', gold: '#b9975b'
   },
-  divider: { paper: '#f5efe4', banner: true, ghost: true, ink: '#1a4d3a' },
-  inner: { head: true, foot: true, ink: '#1d2b3a', gold: '#b9975b', paper: '#ffffff' },
+  divider: { paper: '#f5efe4', banner: true, ghost: false, ink: '#174a38' },
+  inner: { head: true, foot: true, band: true, ink: '#1d2b3a', gold: '#b9975b', paper: '#ffffff' },
   intro: ''
 });
 
@@ -79,7 +94,7 @@ export async function bookDialog(year, section) {
   try {
     const saved = await db.rpc('book_template', { p_year: year });
     const t = Array.isArray(saved) ? saved[0] : saved;
-    if (t && t.tpl) tpl = { ...tpl, ...t.tpl };
+    if (t && t.tpl) tpl = mergeTpl(tpl, t.tpl);
   } catch { /* الافتراضيُّ يكفي */ }
 
   const lang = h('select', { 'aria-label': 'اللغة' },
@@ -113,7 +128,7 @@ export async function bookDialog(year, section) {
   const res = await dialog({
     title: `إصدارُ مجمَّع ${ARY(year)}هـ`,
     body: h('div.stack',
-      h('p.small.muted', 'يُبنى المجمَّعُ من خطب العام: غلافٌ ثم بسملةٌ ثم مقدمةٌ ثم فهرس، '
+      h('p.small.muted', 'يُبنى المجمَّعُ من خطب العام: غلافٌ ثم بسملةٌ ثم حقوقٌ ثم مقدمةٌ ثم فهرس، '
         + 'ثم صفحةُ عنوانٍ لكلِّ خطبةٍ ومتنُها. ويُعايَن قبل أن يخرج.'),
       h('div.grid-2',
         h('label.field', 'اللغة', lang),
@@ -150,18 +165,26 @@ export async function bookDialog(year, section) {
   }
 }
 
+// القوالبُ المحفوظةُ قديمًا تنقصها حقولُ التصميم الجديدة، فتُستكمل
+// بالافتراضيّ بدل أن تخرج بلا أرضيةٍ ولا كليشة (ملاحظة ٣٣٦)
+function mergeTpl(base, saved) {
+  const out = { ...base, ...saved };
+  for (const k of ['cover', 'divider', 'inner']) {
+    out[k] = { ...base[k], ...(saved[k] || {}) };
+  }
+  if (!Array.isArray(out.cover.marks) || !out.cover.marks.length) {
+    out.cover.marks = BOOK_MARKS.map(m => ({ ...m }));
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------
 // تصميمُ القالب: ثلاثةُ أبوابٍ — الغلافُ وصفحةُ عنوان الخطبة والصفحاتُ
 //   الداخلية. والافتراضيُّ لا يُمَسّ: من عدّل أنشأ قالبًا باسمه
 //   (ملاحظة ٣١٠)
 // ---------------------------------------------------------------------
 async function templateDialog(cur, year) {
-  const t = JSON.parse(JSON.stringify(cur));
-  t.cover = t.cover || DEFAULT_TPL().cover;
-  t.divider = t.divider || DEFAULT_TPL().divider;
-  t.inner = t.inner || DEFAULT_TPL().inner;
-  t.cover.marks = Array.isArray(t.cover.marks) && t.cover.marks.length
-    ? t.cover.marks : BOOK_MARKS.map(m => ({ ...m }));
+  const t = mergeTpl(DEFAULT_TPL(), JSON.parse(JSON.stringify(cur)));
 
   const name = h('input', { value: t.name || '', 'aria-label': 'اسم القالب',
     placeholder: `قالبُ ${ARY(year)}هـ` });
@@ -191,7 +214,7 @@ async function templateDialog(cur, year) {
   const bgPrev = h('div.mark-prev');
   const drawBg = () => bgPrev.replaceChildren(t.cover.bg
     ? h('img', { src: t.cover.bg, alt: 'خلفيةُ الغلاف' })
-    : h('span.small.muted', 'بلا صورة — أرضيةٌ سادة'));
+    : h('span.small.muted', 'بلا صورة — ورقٌ عاجيٌّ ورايةٌ مزخرفة'));
   const bgUp = h('button.btn.xs', { type: 'button', onclick: () => bgFile.click() }, '⤒ ارفعْ صورة');
   bgFile.onchange = async () => {
     const f = bgFile.files?.[0]; if (!f) return;
@@ -245,7 +268,12 @@ async function templateDialog(cur, year) {
         + 'باسمه، والافتراضيُّ يبقى مرجعًا لا يُمَسّ.'),
 
       h('fieldset.stack', h('legend', 'الغلاف'),
-        h('div.row.between.wrap', h('span.small.muted', 'صورةُ الخلفية'),
+        h('div.grid-2',
+          h('label.field', 'لونُ الورق', colorIn(t.cover.paper, v => { t.cover.paper = v; })),
+          h('label.field', 'اللونُ الأخضر', colorIn(t.cover.ink, v => { t.cover.ink = v; })),
+          h('label.field', 'اللونُ الذهبي', colorIn(t.cover.gold, v => { t.cover.gold = v; }))),
+        check(t.cover.pattern, 'نقشٌ باهتٌ خلفَ الغلاف', v => { t.cover.pattern = v; }),
+        h('div.row.between.wrap', h('span.small.muted', 'صورةٌ في ذيل الغلاف (اختيارية)'),
           h('div.row', bgUp, bgFile, bgClear)),
         h('div.row.wrap', { style: { gap: '6px' } }, COVER_BGS.map(([src, label]) => {
           const b = h('button.btn.xs' + (t.cover.bg === src ? '.primary' : ''),
@@ -255,11 +283,7 @@ async function templateDialog(cur, year) {
         })),
         bgPrev,
         h('label.field', 'شدّةُ ظهور الصورة',
-          rangeIn(t.cover.fade, 10, 100, v => { t.cover.fade = v; })),
-        check(t.cover.pattern, 'نقشٌ باهتٌ خلفَ الغلاف', v => { t.cover.pattern = v; }),
-        h('div.grid-2',
-          h('label.field', 'لونُ العنوان', colorIn(t.cover.ink, v => { t.cover.ink = v; })),
-          h('label.field', 'اللونُ الذهبي', colorIn(t.cover.gold, v => { t.cover.gold = v; }))),
+          rangeIn(t.cover.fade, 5, 100, v => { t.cover.fade = v; })),
         h('div.row.between.wrap', h('span.small.muted', 'الشعارات'),
           h('div.row',
             h('button.btn.xs', { type: 'button', onclick: () => markFile.click() }, '＋ شعار'),
@@ -282,7 +306,8 @@ async function templateDialog(cur, year) {
           h('label.field', 'لونُ الحبر', colorIn(t.inner.ink, v => { t.inner.ink = v; })),
           h('label.field', 'لونُ الحلية', colorIn(t.inner.gold, v => { t.inner.gold = v; }))),
         check(t.inner.head, 'كليشةٌ في رأس الصفحة', v => { t.inner.head = v; }),
-        check(t.inner.foot, 'شريطٌ في الذيل مع الترقيم', v => { t.inner.foot = v; })),
+        check(t.inner.band, 'شريطُ البسملةِ في صدر كلِّ خطبة', v => { t.inner.band = v; }),
+        check(t.inner.foot, 'ترقيمُ الصفحات في الذيل', v => { t.inner.foot = v; })),
 
       h('fieldset.stack', h('legend', 'حفظُ القالب'),
         h('label.field', 'اسمُ القالب', name),
@@ -310,14 +335,104 @@ async function templateDialog(cur, year) {
 }
 
 // ---------------------------------------------------------------------
+// نصُّ النسخة ← فقراتُه (ملاحظة ٣٣٤)
+//
+//   كان الشقُّ يستبدل بكلِّ وسمٍ سطرًا جديدًا، والوسومُ الداخليةُ
+//   (<strong> و<em>) تُحيط بحرفٍ واحدٍ في أسماء الأعلام المنقولةِ
+//   بالحروف اللاتينية، فتخرج الكلمةُ الواحدةُ أربعَ فقرات. والشقُّ
+//   الآن على عناصر الفقرات وحدَها، والزينةُ تبقى، ورموزُ HTML تُفكُّ
+//   مرةً واحدةً فلا يُطبع `&#39;` على وجهه.
+// ---------------------------------------------------------------------
+const BLOCK_TAGS = new Set(['P', 'DIV', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+  'BLOCKQUOTE', 'PRE', 'TD', 'TH', 'SECTION', 'ARTICLE', 'FIGCAPTION']);
+const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'HEAD', 'TEMPLATE']);
+
+export function htmlParagraphs(html) {
+  const src = String(html || '').trim();
+  if (!src) return [];
+  let body;
+  try {
+    body = new DOMParser().parseFromString(src, 'text/html').body;
+  } catch { body = null; }
+  if (!body) return [];
+
+  // نصٌّ خامٌ بلا وسمٍ كُتليٍّ البتّة: يُشقُّ على أسطره لا على فراغاته
+  if (!body.querySelector('p,div,li,h1,h2,h3,h4,h5,h6,blockquote,pre,table,ul,ol,br')) {
+    return (body.textContent || '').split(/\n+/)
+      .map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
+      .map(t => ({ html: escapeHtml(t), text: t }));
+  }
+
+  const out = [];
+  let buf = '';                      // ما تجمَّع من وسومٍ داخليةٍ ونصٍّ طليق
+  const flush = () => {
+    const text = stripTags(buf);
+    if (text) out.push({ html: buf.trim(), text });
+    buf = '';
+  };
+
+  const walk = node => {
+    for (const n of node.childNodes) {
+      if (n.nodeType === 3) {        // نصٌّ طليقٌ لا يضيع
+        buf += escapeHtml(n.textContent || '');
+        continue;
+      }
+      if (n.nodeType !== 1) continue;
+      if (SKIP_TAGS.has(n.tagName)) continue;
+      if (n.tagName === 'BR') { buf += '<br>'; continue; }
+      if (BLOCK_TAGS.has(n.tagName) || n.tagName === 'TABLE'
+          || n.tagName === 'UL' || n.tagName === 'OL' || n.tagName === 'TR') {
+        // فقرةٌ جديدةٌ تبدأ هنا، وما قبلها يُغلَق
+        flush();
+        if ([...n.children].some(c => BLOCK_TAGS.has(c.tagName) || c.tagName === 'TABLE'
+              || c.tagName === 'UL' || c.tagName === 'OL' || c.tagName === 'TR')) {
+          walk(n);                   // فيها فقراتٌ أخرى: تُفكّ
+        } else {
+          buf = n.innerHTML;         // ورقةٌ: زينتُها الداخليةُ تبقى كما هي
+        }
+        flush();
+        continue;
+      }
+      buf += n.outerHTML;            // وسمٌ داخليٌّ: <strong> و<em> وأشباهُهما
+    }
+  };
+  walk(body);
+  flush();
+
+  return out;
+}
+
+// نصُّ فقرةٍ من HTML: تُنزَع الوسومُ وتُفَكُّ الرموزُ مرةً واحدة
+function stripTags(frag) {
+  const d = document.createElement('div');
+  d.innerHTML = String(frag || '');
+  return (d.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
+// فصلُ الخطبة الأولى عن الثانية: العبارةُ المعتادةُ في المتن
+export function splitKhutbas(html) {
+  const paras = htmlParagraphs(html);
+  const TAIL = '\\s*\\)?\\s*[:：.،]?\\s*$';
+  const second = new RegExp('^\\(?\\s*(الخطبة|الخُطبة|الخطبه)\\s*(الثانية|الثانيه)' + TAIL);
+  const first  = new RegExp('^\\(?\\s*(الخطبة|الخُطبة|الخطبه)\\s*(الأولى|الاولى|الأولي)' + TAIL);
+  const out = [[]];
+  for (const p of paras) {
+    if (second.test(p.text)) { out.push([]); continue; }
+    if (first.test(p.text)) continue;
+    out[out.length - 1].push(p);
+  }
+  return out.filter(a => a.length);
+}
+
+// ---------------------------------------------------------------------
 // بناءُ المجمَّع: صفحاتٌ حقيقيةٌ تُقاس وتُقطع (ملاحظات ٣٠٩ و٣١٠ و٣١١)
 // ---------------------------------------------------------------------
 export function buildBook(rows, { year, lang, title, intro, tpl }) {
+  tpl = mergeTpl(DEFAULT_TPL(), tpl || {});
   const S = SIZES[tpl.size] || SIZES.book;
   const F = fontOf(lang);
-  const rtl = F.dir === 'rtl';
   // الهامشُ الداخليُّ أوسعُ: الخيطُ يأكل منه (ملاحظة ٣١١)
-  const M = { top: 20, bottom: 18, inner: 22, outer: 16 };
+  const M = { top: 22, bottom: 18, inner: 22, outer: 16 };
   const WIN_W = S.w - M.inner - M.outer;
   const WIN_H = S.h - M.top - M.bottom - 10;      // ١٠ مم لشريط الترقيم
 
@@ -327,16 +442,21 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
   const { el, img, pages, measure, w, d } = ctx;
 
   const esc = escapeHtml;
+  const pagesOut = [];
   const sheet = (cls = '') => {
     const s = el('div', 'sheet' + (cls ? ' ' + cls : ''));
     pagesOut.push(s);
     return s;
   };
-  const pagesOut = [];
+  const winBox = s => {
+    const win = el('div', 'win');
+    s.append(win);
+    return win;
+  };
 
   ctx.ready(() => {
-    // ـــ ١) الغلاف (ملاحظة ٣٠٩)
-    const cv = sheet('cover-sheet');
+    // ـــ ١) الغلاف (ملاحظتا ٣٠٩ و٣٣٦)
+    const cv = sheet('cover-sheet front');
     const c = el('div', 'cover');
     if (tpl.cover.pattern) c.append(el('div', 'cover-pat'));
     if (tpl.cover.bg) {
@@ -353,34 +473,38 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
       marks.append(im);
     }
     c.append(marks);
+    // الرايةُ المزخرفةُ معلّقةٌ من رأس الغلاف، على نسق صفحات العنوان
+    const cban = el('div', 'cover-banner');
+    cban.innerHTML = pennantSvg(tpl.cover.ink, tpl.cover.gold);
+    c.append(cban);
     const mid = el('div', 'cover-mid');
     mid.append(el('h1', 'ct', esc(title)));
+    mid.append(el('div', 'crule'));
     mid.append(el('div', 'cs', esc(`لخُطب ${rowsMosque(rows)} المترجمة`)));
     mid.append(el('div', 'cs2', esc(`إلى ${langName(lang)}`)));
     mid.append(el('div', 'cy', esc(`لعام ${ARY(year)}هـ`)));
     c.append(mid);
+    const foot = el('div', 'cover-foot');
+    foot.innerHTML = '<span>الهيئةُ العامة للعناية بشؤون المسجد الحرام والمسجد النبوي</span>'
+      + '<span>مشروعُ خادم الحرمين الشريفين لترجمة خطب الحرمين — بتنفيذ جامعة أمِّ القرى</span>';
+    c.append(foot);
     cv.append(c);
 
-    // ـــ ٢) صفحةُ البسملة
-    const bs = sheet('plain-sheet');
+    // ـــ ٢) صفحةُ البسملة — صورةُ الهيئة لا رسمًا تقريبيًّا (ملاحظة ٣٣٥)
+    const bs = sheet('plain-sheet front');
     const bd = el('div', 'basmala');
-    bd.innerHTML = '<svg viewBox="0 0 120 120" aria-hidden="true">'
-      + '<rect x="24" y="24" width="72" height="72" transform="rotate(45 60 60)"'
-      + ` fill="none" stroke="${tpl.cover.gold}" stroke-width="2"/>`
-      + `<text x="60" y="56" text-anchor="middle" font-size="13" fill="${tpl.cover.gold}">بسم الله</text>`
-      + `<text x="60" y="74" text-anchor="middle" font-size="13" fill="${tpl.cover.gold}">الرحمن الرحيم</text>`
-      + '</svg>';
+    bd.append(img(BASMALA_IMG, 'bsm'));
     bs.append(bd);
 
     // ـــ ٣) صفحةُ الحقوق
-    const co = sheet('plain-sheet');
+    const co = sheet('plain-sheet front');
     const cob = el('div', 'colo');
     cob.innerHTML = `<h2>${esc(title)}</h2>`
       + `<p>لخُطب ${esc(rowsMosque(rows))} المترجمة إلى ${esc(langName(lang))}`
       + ` لعام ${esc(ARY(year))}هـ.</p>`
       + '<p>الهيئةُ العامة للعناية بشؤون المسجد الحرام والمسجد النبوي — '
       + 'مشروعُ خادم الحرمين الشريفين لترجمة خطب الحرمين، بتنفيذ جامعة أمِّ القرى.</p>'
-      + `<div class="rights">حقوقُ الطبع محفوظة. ويُرجَع إلى أصلِ كلِّ خطبةٍ في المنصة`
+      + '<div class="rights">حقوقُ الطبع محفوظة. ويُرجَع إلى أصلِ كلِّ خطبةٍ في المنصة'
       + ` برقم توثيقها المطبوع في ذيل صفحتها.<br>عددُ الخطب: ${esc(AR(rows.length))}`
       + ` · أُصدر في ${esc(fmtHijri(new Date().toISOString().slice(0, 10)))}</div>`;
     const qr = d.createElement('img');
@@ -394,95 +518,93 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
     if (intro) {
       const blocks = intro.split(/\n{2,}/).filter(Boolean)
         .map(p => ({ html: `<p class="intro-p">${esc(p)}</p>` }));
-      blocks.unshift({ html: '<h1 class="sec-h">المقدمة</h1>', keep: 24 });
+      blocks.unshift({ html: '<h1 class="sec-h">المقدمة</h1>', keep: mm2px(12) });
       measureBlocks(w, measure, blocks);
-      flowBlocks(blocks, mm2px(WIN_H), () => {
-        const s = sheet();
-        const win = el('div', 'win');
-        s.append(win);
-        return win;
-      });
+      flowBlocks(blocks, mm2px(WIN_H), () => winBox(sheet()));
     }
 
-    // ـــ ٥) الفهرس
-    const idx = [{ html: '<h1 class="sec-h">الفهرس</h1>', keep: 24 },
-      { html: '<table class="idx"><thead><tr><th>م</th><th>موضوع الخطبة</th>'
-          + '<th>الخطيب</th><th>التاريخ</th><th>الصفحة</th></tr></thead></table>' }];
+    // ـــ ٥) الفهرس — جدولٌ واحدٌ يُضاف إليه صفٌّ صفًّا (ملاحظة ٣٣٤)
+    const idxHead = { html: '<h1 class="sec-h">الفهرس</h1>', keep: mm2px(16) };
     const idxRows = rows.map((r, i) => ({
-      html: `<table class="idx"><tbody><tr><td class="n">${AR(i + 1)}</td>`
-        + `<td>${esc(r.title)}</td><td>${esc(r.khateeb || '—')}</td>`
-        + `<td class="dt">${esc(r.hijri_text || (r.sermon_date ? fmtHijri(r.sermon_date) : '—'))}</td>`
-        + `<td class="pg" data-seq="${i}">…</td></tr></tbody></table>`
+      head: i === 0,
+      html: `<div class="idx-row" data-seq="${i}">`
+        + `<span class="n">${AR(i + 1)}</span>`
+        + `<span class="ti">${esc(r.title || '—')}</span>`
+        + `<span class="kh">${esc(r.khateeb || '—')}</span>`
+        + `<span class="dt">${esc(r.hijri_text
+            || (r.sermon_date ? fmtHijri(r.sermon_date) : '—'))}</span>`
+        + '<span class="pg">…</span></div>'
     }));
-    const idxAll = idx.concat(idxRows);
+    const idxAll = [idxHead,
+      { html: '<div class="idx-row idx-th"><span class="n">م</span>'
+          + '<span class="ti">موضوع الخطبة</span><span class="kh">الخطيب</span>'
+          + '<span class="dt">التاريخ</span><span class="pg">الصفحة</span></div>',
+        keep: mm2px(10) },
+      ...idxRows];
     measureBlocks(w, measure, idxAll);
-    flowBlocks(idxAll, mm2px(WIN_H), () => {
-      const s = sheet();
-      const win = el('div', 'win');
-      s.append(win);
-      return win;
-    });
+    flowBlocks(idxAll, mm2px(WIN_H), () => winBox(sheet()));
 
     // ـــ ٦) الخطب: صفحةُ عنوانٍ ثم متن
-    const pageOfSermon = [];
+    const sheetOfSermon = [];
     rows.forEach((r, i) => {
-      // صفحةُ العنوان (ملاحظة ٣٠٩)
+      // صفحةُ العنوان (ملاحظتا ٣٠٩ و٣٣٦)
       const ds = sheet('div-sheet');
       const dv = el('div', 'divider');
       if (tpl.divider.banner) {
         const bn = el('div', 'banner');
-        bn.innerHTML = bannerSvg(tpl.divider.ink, tpl.cover.gold);
+        bn.innerHTML = pennantSvg(tpl.divider.ink, tpl.cover.gold);
         dv.append(bn);
       }
-      if (tpl.divider.ghost && tpl.cover.bg) {
-        const g = img(tpl.cover.bg, 'div-ghost');
-        dv.append(g);
-      }
+      if (tpl.divider.ghost && tpl.cover.bg) dv.append(img(tpl.cover.bg, 'div-ghost'));
+      const stamp = el('div', 'div-stamp');
+      stamp.innerHTML = `<div>${esc(r.sermon_type || 'خطبة الجمعة')}</div>`
+        + `<div>${esc(r.hijri_text || (r.sermon_date ? fmtHijri(r.sermon_date) : ''))}</div>`
+        + (r.sermon_date ? `<div>الموافق ${esc(gregLine(r.sermon_date))}</div>` : '');
+      dv.append(stamp);
       const dm = el('div', 'div-mid');
       dm.innerHTML = '<div class="dl">موضـوع الخطبة:</div>'
         + `<div class="dt">${esc(r.title)}</div>`
         + (r.khateeb ? '<div class="dl2">لفضيـلة الشيـخ</div>'
             + `<div class="dn">${esc(r.khateeb)}</div>` : '')
         + '<div class="drule"></div>'
-        + `<div class="dmeta">${esc(r.sermon_type)} من ${esc(MOSQUE[r.mosque] || '')}</div>`
-        + `<div class="dmeta">${esc(langName(lang))}</div>`
-        // العنوانُ ثم اللغةُ ثم التاريخ، والهجريُّ وحدَه (ملاحظتا ٣٠٩ و١٦٠)
-        + `<div class="dmeta">${esc(r.hijri_text
-            || (r.sermon_date ? fmtHijri(r.sermon_date) : ''))}</div>`;
+        + `<div class="dmeta">${esc(MOSQUE[r.mosque] || '')}`
+        + `${r.mosque ? ' · ' : ''}${esc(langName(lang))}</div>`;
       dv.append(dm);
       ds.append(dv);
 
       // المتن: يبدأ من أوّل سطرٍ في الصفحة التالية (ملاحظة ٣٠٩)
-      pageOfSermon[i] = pagesOut.length + 1;
+      sheetOfSermon[i] = pagesOut.length;      // أوّلُ صفحةِ متنٍ تُنشأ بعدها
       const parts = splitKhutbas(r.body_html || '');
       const blocks = [];
+      if (tpl.inner.band) {
+        // المسارُ مطلقٌ: نافذةُ المعاينة لا أصلَ لها تُسنِد إليه النسبيّ
+        blocks.push({ kind: 'band', h: mm2px(17), keep: mm2px(10),
+          html: `<div class="sbd"><img src="${abs(BASMALA_BAND)}" alt=""></div>` });
+      }
       parts.forEach((part, k) => {
-        blocks.push({ kind: 'head', keep: mm2px(18),
-          html: `<h2 class="kh">(${k === 0 ? 'الخطبةُ الأولى' : 'الخطبةُ الثانية'})</h2>` });
-        for (const p of part) {
-          blocks.push({ html: `<p class="bp">${esc(p)}</p>` });
-        }
+        blocks.push({ kind: 'head', keep: mm2px(16),
+          html: `<h2 class="kh2">(${k === 0 ? 'الخطبةُ الأولى' : 'الخطبةُ الثانية'})</h2>` });
+        for (const p of part) blocks.push({ html: `<p class="bp">${p.html}</p>` });
       });
-      if (!blocks.length) blocks.push({ html: '<p class="bp muted">لا نصَّ محفوظٌ لهذه النسخة.</p>' });
+      if (!blocks.length || !parts.length) {
+        blocks.push({ html: '<p class="bp muted">لا نصَّ محفوظٌ لهذه النسخة.</p>' });
+      }
       blocks.push({ html: `<div class="docno" dir="ltr">${esc(r.doc_no || '')}</div>` });
 
-      measureBlocks(w, measure, blocks);
-      let used = 0, box = null;
-      const next = () => {
-        const s = sheet();
-        const win = el('div', 'win');
-        s.append(win);
-        used = 0;
-        return win;
-      };
-      box = next();
+      // الشريطُ ارتفاعُه معلومٌ بالقياس لا بالصورة، فالصورةُ قد لا تُحمَّل بعد
+      const toMeasure = blocks.filter(b => b.kind !== 'band');
+      measureBlocks(w, measure, toMeasure);
+
+      const boxPx = mm2px(WIN_H);
+      let used = 0;
+      let box = winBox(sheet());
+      const next = () => { used = 0; return winBox(sheet()); };
       for (const b of blocks) {
         // «الخطبةُ الثانية» تتبع الأولى إن بقي أكثرُ من نصف الصفحة،
         //   وإلا انتقلت إلى رأس التالية (ملاحظة ٣٠٩)
-        const half = mm2px(WIN_H) / 2;
-        if (b.kind === 'head' && used > 0 && (mm2px(WIN_H) - used) <= half) {
+        if (b.kind === 'head' && used > 0 && (boxPx - used) <= boxPx / 2) {
           box = next();
-        } else if (used + b.h + (b.keep || 0) > mm2px(WIN_H) && used > 0) {
+        } else if (used + b.h + (b.keep || 0) > boxPx && used > 0) {
           box = next();
         }
         box.insertAdjacentHTML('beforeend', b.html);
@@ -490,26 +612,34 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
       }
     });
 
-    // أرقامُ الصفحات، والفهرسُ يُملأ بها
+    pages.replaceChildren(...pagesOut);
+
+    // ـــ ٧) الترقيم: المقدماتُ بلا رقم، ثم يبدأ العدُّ من المتن
+    //       (ملاحظة ٣٣٦ — «وترقيم الصفحات»)
+    const folio = new Array(pagesOut.length).fill(0);
+    let n = 0;
     pagesOut.forEach((s, i) => {
-      if (s.classList.contains('cover-sheet')) return;
-      const n = el('div', 'pageno');
-      n.innerHTML = `<span class="pno">${AR(i + 1)}</span>`;
-      s.append(n);
-      if (tpl.inner.head && !s.classList.contains('plain-sheet')
-          && !s.classList.contains('div-sheet')) {
+      if (s.classList.contains('front')) return;   // الغلافُ والبسملةُ والحقوق
+      folio[i] = ++n;
+      if (tpl.inner.foot && !s.classList.contains('div-sheet')) {
+        const box = el('div', 'pageno');
+        box.innerHTML = `<span class="pno">${AR(folio[i])}</span>`;
+        s.append(box);
+      }
+      if (tpl.inner.head && !s.classList.contains('div-sheet')) {
         const hd = el('div', 'runhead');
         hd.innerHTML = `<span>${esc(title)}</span>`
           + `<span>${esc(`لعام ${ARY(year)}هـ`)}</span>`;
         s.append(hd);
       }
     });
-    pages.replaceChildren(...pagesOut);
-    // الفهرسُ يُملأ بعد أن تستقرَّ الصفحاتُ في الوثيقة
-    d.querySelectorAll('.idx .pg[data-seq]').forEach(td => {
-      const i = Number(td.getAttribute('data-seq'));
-      td.textContent = AR(pageOfSermon[i] || 0);
+
+    // الفهرسُ يُملأ بأرقام الترقيم لا بمواضع الصفحات
+    d.querySelectorAll('.idx-row[data-seq] .pg').forEach(span => {
+      const i = Number(span.parentElement.getAttribute('data-seq'));
+      span.textContent = AR(folio[sheetOfSermon[i]] || 0);
     });
+
     measure.remove();
     addPreviewBar(ctx, pagesOut, WIN_H);
   }, { autoPrint: false });   // تُعايَن أولًا ثم تُطبع (ملاحظة ٣١١)
@@ -522,30 +652,46 @@ const rowsMosque = rows => {
   return 'الحرمين الشريفين';
 };
 
-// فصلُ الخطبة الأولى عن الثانية: العبارةُ المعتادةُ في المتن
-function splitKhutbas(html) {
-  const text = String(html).replace(/<[^>]*>/g, '\n');
-  const paras = text.split(/\n+/).map(s => s.trim()).filter(Boolean);
-  const mark = /^\(?\s*(الخطبة|الخُطبة)\s*(الثانية|الثانيه)\s*\)?\s*$/;
-  const out = [[]];
-  for (const p of paras) {
-    if (mark.test(p)) { out.push([]); continue; }
-    if (/^\(?\s*(الخطبة|الخُطبة)\s*(الأولى|الاولى)\s*\)?\s*$/.test(p)) continue;
-    out[out.length - 1].push(p);
-  }
-  return out.filter(a => a.length);
-}
+// التاريخُ الميلاديُّ كما يُكتب في صفحات العنوان: ٢٠٢٣/٨/٥م
+const gregLine = iso => {
+  const d = new Date(`${String(iso).slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getUTCFullYear()}/${d.getUTCMonth() + 1}/${d.getUTCDate()}م`;
+};
 
-function bannerSvg(ink, gold) {
-  return `<svg viewBox="0 0 60 150" aria-hidden="true">
-    <path d="M0 0 H60 V120 L30 150 L0 120 Z" fill="${ink}"/>
-    <path d="M4 4 H56 V118 L30 144 L4 118 Z" fill="none" stroke="${gold}" stroke-width="1.2"/>
-    <g fill="none" stroke="${gold}" stroke-width="1" opacity=".85">
-      <rect x="16" y="22" width="28" height="28"/>
-      <rect x="16" y="22" width="28" height="28" transform="rotate(45 30 36)"/>
-      <rect x="16" y="66" width="28" height="28"/>
-      <rect x="16" y="66" width="28" height="28" transform="rotate(45 30 80)"/>
-    </g></svg>`;
+// الرايةُ المعلَّقة: درعٌ أخضرُ بحليةٍ ذهبيةٍ ونجومٍ ثمانيةٍ متشابكة
+// (على نسق صفحات العنوان في مطبوعات المشروع — ملاحظة ٣٣٦)
+let pennantSeq = 0;
+function pennantSvg(ink, gold) {
+  // المعرِّفُ فريدٌ لكلِّ رايةٍ: المعرِّفاتُ المكرَّرةُ في وثيقةٍ واحدةٍ
+  //   تجعل القصَّ يتبع أوّلَها (ملاحظة ٣٣٦)
+  const id = `pen${++pennantSeq}`;
+  const star = (cx, cy, r) => {
+    const pts = [];
+    for (let k = 0; k < 16; k++) {
+      const rad = (k % 2 === 0) ? r : r * 0.46;
+      const a = (Math.PI / 8) * k - Math.PI / 2;
+      pts.push(`${(cx + rad * Math.cos(a)).toFixed(2)},${(cy + rad * Math.sin(a)).toFixed(2)}`);
+    }
+    return `<polygon points="${pts.join(' ')}"/>`;
+  };
+  let lattice = '';
+  for (let row = 0; row < 7; row++) {
+    for (let col = 0; col < 3; col++) {
+      lattice += star(14 + col * 16, 16 + row * 22, 11);
+      if (col < 2) lattice += star(22 + col * 16, 27 + row * 22, 7);
+    }
+  }
+  return `<svg viewBox="0 0 60 170" preserveAspectRatio="xMidYMin meet" aria-hidden="true">
+    <defs><clipPath id="${id}"><path d="M0 0 H60 V132 L30 168 L0 132 Z"/></clipPath></defs>
+    <path d="M0 0 H60 V132 L30 168 L0 132 Z" fill="${ink}"/>
+    <g clip-path="url(#${id})" fill="none" stroke="${gold}" stroke-width=".9" opacity=".75">
+      ${lattice}
+    </g>
+    <path d="M3 0 V130.5 L30 163 L57 130.5 V0" fill="none" stroke="${gold}" stroke-width="1.3"/>
+    <path d="M5.6 0 V129.2 L30 158.5 L54.4 129.2 V0" fill="none" stroke="${gold}"
+      stroke-width=".5" opacity=".8"/>
+  </svg>`;
 }
 
 // ---------------------------------------------------------------------
@@ -579,7 +725,9 @@ function addPreviewBar(ctx, sheets, winH) {
   grid.onclick = () => d.body.classList.toggle('grid-view');
 
   const print = el('button', 'btn primary', '🖨 صدِّرْ PDF');
-  print.onclick = () => { d.body.classList.remove('grid-view'); setTimeout(() => w.print(), 120); };
+  print.disabled = true;
+  print.textContent = '⏳ تُحمَّل الصور…';
+  print.onclick = () => { d.body.classList.remove('grid-view'); setTimeout(() => w.print(), 150); };
 
   const sizeMinus = el('button', 'btn', 'ـأ');
   const sizePlus = el('button', 'btn', 'أـ');
@@ -595,13 +743,33 @@ function addPreviewBar(ctx, sheets, winH) {
   bar.append(info, sizeMinus, sizePlus, grid, print);
   d.body.append(bar);
   applyFs();
+
+  // لا يُطبَع قبل أن تُحمَّل الصورُ كلُّها، وإلا خرج الغلافُ مربّعًا
+  // رماديًّا والبسملةُ بياضًا (ملاحظة ٣٣٤)
+  allImagesReady(d).then(() => {
+    print.disabled = false;
+    print.textContent = '🖨 صدِّرْ PDF';
+  });
+}
+
+function allImagesReady(d) {
+  const imgs = [...d.images];
+  return Promise.all(imgs.map(im => (im.complete && im.naturalWidth)
+    ? Promise.resolve()
+    : new Promise(res => {
+        const done = () => res();
+        im.addEventListener('load', done, { once: true });
+        im.addEventListener('error', done, { once: true });
+        setTimeout(done, 8000);
+      })));
 }
 
 // ---------------------------------------------------------------------
-// أنماطُ المجمَّع — على التصميم القائم (ملاحظتا ٣٠٤ و٣١١)
+// أنماطُ المجمَّع — على التصميم القائم (ملاحظات ٣٠٤ و٣١١ و٣٣٦)
 // ---------------------------------------------------------------------
 function bookCss(S, M, winW, winH, F, tpl) {
   const g = tpl.cover.gold, ink = tpl.inner.ink, green = tpl.cover.ink;
+  const paper = tpl.cover.paper || '#f5efe4';
   return `
   :root { --fs: 100%; }
   @page { size: ${S.w}mm ${S.h}mm; margin: 0; }
@@ -617,44 +785,59 @@ function bookCss(S, M, winW, winH, F, tpl) {
     font-size: calc(${F.size}pt * var(--fs) / 100); line-height: ${F.line};
     text-align: justify; direction: ${F.dir}; unicode-bidi: plaintext; }
   #measure { position: absolute; visibility: hidden; top: -10000mm; inset-inline-start: 0;
-    width: ${winW}mm; font-size: calc(${F.size}pt * var(--fs) / 100); line-height: ${F.line}; }
+    width: ${winW}mm; font-size: calc(${F.size}pt * var(--fs) / 100); line-height: ${F.line};
+    direction: ${F.dir}; text-align: justify; }
   .bp { margin: 0 0 4mm; }
   .bp.muted { color: #8a8a8a; }
-  .kh { font-size: calc(${F.size + 2}pt * var(--fs) / 100); color: ${green};
+  .bp strong { font-weight: 700; }
+  .kh2 { font-size: calc(${F.size + 2}pt * var(--fs) / 100); color: ${green};
     text-align: center; margin: 2mm 0 4mm; font-weight: 700; }
-  .kh::before, .kh::after { content: ''; display: block; height: .3mm;
+  .kh2::before, .kh2::after { content: ''; display: block; height: .3mm;
     background: ${g}; opacity: .5; margin: 2mm auto; width: 40mm; }
   .docno { margin-top: 4mm; font-size: 8pt; color: #8a7a5c; text-align: center; direction: ltr; }
   .sec-h { font-size: calc(${F.size + 5}pt * var(--fs) / 100); color: ${green};
-    text-align: center; margin: 0 0 6mm; }
-  .intro-p { margin: 0 0 4mm; text-indent: 0; }
+    text-align: center; margin: 0 0 6mm; direction: rtl; }
+  .intro-p { margin: 0 0 4mm; }
 
-  /* الغلاف (ملاحظتا ٣٠٤ و٣١٠) */
-  .cover-sheet { background: #fff; }
+  /* شريطُ البسملةِ في صدر كلِّ خطبة — الكليشةُ الداخلية (ملاحظتا ٣٣٥ و٣٣٦) */
+  .sbd { height: 15mm; margin: 0 0 4mm; overflow: hidden; border-radius: 1mm;
+    border-bottom: .3mm solid ${g}; }
+  .sbd img { width: 100%; height: 100%; object-fit: cover; object-position: center;
+    display: block; }
+
+  /* الغلاف (ملاحظات ٣٠٤ و٣١٠ و٣٣٦) */
+  .cover-sheet { background: ${paper}; }
   .cover { position: absolute; inset: 0; overflow: hidden; }
   .cover-bg { position: absolute; left: 0; right: 0; bottom: 0; width: 100%;
-    height: 58%; object-fit: cover;
-    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 32%);
-    mask-image: linear-gradient(to bottom, transparent, #000 32%); }
-  .cover-pat { position: absolute; inset: 0; opacity: .05;
-    background: radial-gradient(circle at 30% 20%, ${g} 0 2px, transparent 3px) 0 0/18mm 18mm; }
+    height: 34%; object-fit: cover; }
+  .cover-pat { position: absolute; inset: 0; opacity: .07;
+    background:
+      radial-gradient(circle at 50% 50%, ${g} 0 1.1px, transparent 1.6px) 0 0/12mm 12mm,
+      radial-gradient(circle at 50% 50%, ${g} 0 .8px, transparent 1.3px) 6mm 6mm/12mm 12mm; }
   .cover-marks { position: absolute; inset: 0; }
   .cover-marks .mk { position: absolute; }
-  .cover-mid { position: absolute; inset-inline: ${M.outer}mm; top: 28%;
-    text-align: center; }
-  .cover .ct { font-size: 30pt; font-weight: 700; color: ${green}; margin: 0;
-    line-height: 1.4; }
-  .cover .cs { margin-top: 6mm; font-size: 14pt; color: ${g}; font-weight: 700; }
+  .cover-banner { position: absolute; top: 26mm; inset-inline: 0; display: flex;
+    justify-content: center; }
+  .cover-banner svg { width: 30mm; height: ${Math.round(S.h * 0.34)}mm; display: block; }
+  .cover-mid { position: absolute; inset-inline: ${M.outer}mm;
+    top: ${Math.round(S.h * 0.52)}mm; text-align: center; }
+  .cover .ct { font-size: 28pt; font-weight: 700; color: ${green}; margin: 0;
+    line-height: 1.5; letter-spacing: .4mm; }
+  .cover .crule { width: 54mm; height: .5mm; background: ${g}; margin: 5mm auto; opacity: .85; }
+  .cover .cs { font-size: 14pt; color: ${g}; font-weight: 700; }
   .cover .cs2 { margin-top: 2mm; font-size: 13pt; color: ${g}; }
-  .cover .cy { margin-top: 4mm; font-size: 12pt; color: #5a6a78; }
+  .cover .cy { margin-top: 5mm; font-size: 12pt; color: ${green}; opacity: .8; }
+  .cover-foot { position: absolute; inset-inline: ${M.outer}mm; bottom: 10mm;
+    display: flex; flex-direction: column; gap: 1.5mm; text-align: center;
+    font-size: 8.5pt; color: ${green}; opacity: .75; }
 
   /* البسملةُ وصفحةُ الحقوق */
   .plain-sheet { background: #fff; }
   .basmala { position: absolute; inset: 0; display: flex; align-items: center;
     justify-content: center; }
-  .basmala svg { width: 70mm; height: 70mm; }
+  .basmala .bsm { width: ${Math.min(90, S.w - 50)}mm; height: auto; }
   .colo { position: absolute; top: ${M.top}mm; inset-inline-start: ${M.inner}mm;
-    width: ${winW}mm; font-size: 10.5pt; line-height: 2; }
+    width: ${winW}mm; font-size: 10.5pt; line-height: 2; direction: rtl; text-align: start; }
   .colo h2 { font-size: 14pt; color: ${green}; margin: 0 0 5mm;
     border-bottom: .4mm solid ${g}; padding-bottom: 2mm; }
   .colo p { margin: 0 0 4mm; }
@@ -662,43 +845,54 @@ function bookCss(S, M, winW, winH, F, tpl) {
     background: #fbf8f2; font-size: 9.5pt; }
   .colo-qr { width: 22mm; height: 22mm; margin-top: 5mm; }
 
-  /* صفحةُ عنوان الخطبة (ملاحظة ٣٠٩) */
+  /* صفحةُ عنوان الخطبة (ملاحظتا ٣٠٩ و٣٣٦) */
   .div-sheet { background: ${tpl.divider.paper}; }
   .divider { position: absolute; inset: 0; }
-  .divider .banner { position: absolute; top: 0; inset-inline-start: ${M.inner}mm;
-    width: 26mm; }
-  .divider .banner svg { width: 100%; height: auto; display: block; }
+  .divider .banner { position: absolute; top: 0; inset-inline: 0; display: flex;
+    justify-content: center; }
+  .divider .banner svg { width: 34mm; height: ${Math.round(S.h * 0.56)}mm; display: block; }
+  .div-stamp { position: absolute; top: ${M.top - 10}mm; inset-inline-end: ${M.outer}mm;
+    text-align: end; direction: rtl; font-size: 9.5pt; font-weight: 700;
+    color: ${tpl.divider.ink}; line-height: 2; }
   .div-ghost { position: absolute; bottom: 0; inset-inline-end: 0; width: 55%;
-    opacity: .12;
-    -webkit-mask-image: linear-gradient(to top, #000 35%, transparent 100%);
-    mask-image: linear-gradient(to top, #000 35%, transparent 100%); }
-  .div-mid { position: absolute; inset-inline: ${M.outer}mm; top: 46%;
-    text-align: center; }
-  .div-mid .dl { font-size: 12pt; color: ${green}; }
-  .div-mid .dt { font-size: 22pt; font-weight: 700; color: ${green}; margin-top: 2mm; }
-  .div-mid .dl2 { margin-top: 8mm; font-size: 11pt; color: ${green}; }
-  .div-mid .dn { font-size: 16pt; font-weight: 700; color: ${green}; margin-top: 1mm; }
+    opacity: .12; }
+  .div-mid { position: absolute; inset-inline: ${M.outer}mm;
+    top: ${Math.round(S.h * 0.62)}mm; text-align: center; direction: rtl; }
+  .div-mid .dl { font-size: 13pt; color: ${tpl.divider.ink}; letter-spacing: .6mm; }
+  .div-mid .dt { font-size: 21pt; font-weight: 700; color: ${tpl.divider.ink};
+    margin-top: 3mm; line-height: 1.5; }
+  .div-mid .dl2 { margin-top: 9mm; font-size: 12pt; color: ${tpl.divider.ink};
+    letter-spacing: .5mm; }
+  .div-mid .dn { font-size: 16pt; font-weight: 700; color: ${tpl.divider.ink}; margin-top: 2mm; }
   .div-mid .drule { width: 46mm; height: .35mm; background: ${g}; margin: 8mm auto 4mm;
     opacity: .7; }
-  .div-mid .dmeta { font-size: 10pt; color: #6b6257; line-height: 1.8; }
+  .div-mid .dmeta { font-size: 10pt; color: ${tpl.divider.ink}; opacity: .7; line-height: 1.8; }
 
-  /* الرأسُ والذيلُ والترقيم */
+  /* الرأسُ والذيلُ والترقيم (ملاحظة ٣٣٦) */
   .runhead { position: absolute; top: ${M.top - 9}mm; inset-inline-start: ${M.inner}mm;
     width: ${winW}mm; display: flex; justify-content: space-between; font-size: 8pt;
-    color: #8a7a5c; border-bottom: .3mm solid ${g}; padding-bottom: 1.2mm; opacity: .9; }
-  .pageno { position: absolute; bottom: ${M.bottom - 12}mm; inset-inline: 0;
+    color: #8a7a5c; border-bottom: .3mm solid ${g}; padding-bottom: 1.2mm; opacity: .9;
+    direction: rtl; }
+  .pageno { position: absolute; bottom: ${Math.max(5, M.bottom - 12)}mm; inset-inline: 0;
     display: flex; justify-content: center; }
   .pageno .pno { display: inline-flex; align-items: center; justify-content: center;
     width: 8mm; height: 8mm; border-radius: 50%; border: .3mm solid ${g};
-    font-size: 9pt; color: ${ink}; }
+    font-size: 9pt; color: ${ink}; background: #fff9; }
+  .div-sheet .pageno .pno { background: transparent; }
 
-  /* الفهرس */
-  table.idx { width: 100%; border-collapse: collapse; font-size: 9pt; }
-  table.idx th { color: #6b6257; font-weight: 600; font-size: 8.5pt;
-    border-bottom: .4mm solid ${g}; padding: 1.5mm 1mm; text-align: start; }
-  table.idx td { border-bottom: .2mm solid #eee6d8; padding: 1.4mm 1mm; }
-  table.idx td.n, table.idx td.pg { text-align: center; width: 10mm; }
-  table.idx td.dt { white-space: nowrap; font-size: 8.5pt; color: #6b6257; }
+  /* الفهرس — صفوفٌ تُقطع فُرادى فلا تنكسر خليةٌ عن أختها (ملاحظة ٣٣٤) */
+  .idx-row { display: flex; align-items: baseline; gap: 2mm; direction: rtl;
+    font-size: 9.5pt; padding: 1.5mm 1mm; border-bottom: .2mm solid #eee6d8;
+    text-align: start; }
+  .idx-row .n  { width: 9mm; text-align: center; flex: none; color: #6b6257; }
+  .idx-row .ti { flex: 1 1 auto; font-weight: 600; }
+  .idx-row .kh { width: 38mm; flex: none; color: #4a5560; font-size: 9pt; }
+  .idx-row .dt { width: 26mm; flex: none; color: #6b6257; font-size: 8.5pt;
+    white-space: nowrap; direction: rtl; }
+  .idx-row .pg { width: 11mm; flex: none; text-align: center; color: ${green}; }
+  .idx-th { border-bottom: .5mm solid ${g}; color: #6b6257; font-weight: 600;
+    font-size: 8.5pt; }
+  .idx-th .ti, .idx-th .pg { font-weight: 600; color: #6b6257; }
 
   /* المعاينة على الشاشة (ملاحظة ٣١١) */
   @media screen {
@@ -717,6 +911,7 @@ function bookCss(S, M, winW, winH, F, tpl) {
       border-radius: 8px; padding: 6px 12px; cursor: pointer; font: inherit; font-size: 13px; }
     .prev-bar .btn.primary { background: #bc9661; border-color: #bc9661; color: #1a232d;
       font-weight: 700; }
+    .prev-bar .btn[disabled] { opacity: .55; cursor: progress; }
     .prev-info { font-size: 13px; opacity: .9; margin-inline-end: 8px; }
   }
   @media print {
@@ -732,7 +927,7 @@ async function bookWord(rows, { year, lang, title, intro, tpl }) {
   const { loadDocx } = await import('./export.js');
   const { downloadBlob } = await import('./xlsx.js');
   const docx = await loadDocx();
-  const { Document, Packer, Paragraph, TextRun, AlignmentType, PageBreak, HeadingLevel } = docx;
+  const { Document, Packer, Paragraph, TextRun, AlignmentType } = docx;
   const S = SIZES[tpl.size] || SIZES.book;
   const F = fontOf(lang);
 
@@ -781,7 +976,7 @@ async function bookWord(rows, { year, lang, title, intro, tpl }) {
       kids.push(p(`(${k === 0 ? 'الخطبةُ الأولى' : 'الخطبةُ الثانية'})`,
         { align: AlignmentType.CENTER, bold: true, size: F.size + 2,
           br: k === 0, after: 160 }));
-      for (const s of part) kids.push(p(s));
+      for (const s of part) kids.push(p(s.text));
     });
     if (r.doc_no) kids.push(p(r.doc_no, { align: AlignmentType.CENTER, size: 8, after: 200 }));
   });

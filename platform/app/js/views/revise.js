@@ -1,6 +1,6 @@
 // إعادة تنشيط الخطبة للتعديل على أصلها (ملاحظة ٢٨)
 // التعديل يأتي غالبًا من الشيخ على نصه العربي، فيُحدَّد على الأصل لا على الترجمة.
-import { h, toast, busy, dialog, confirm, fmtDateTime } from '../ui.js';
+import { fill, h, toast, busy, dialog, confirm, fmtDateTime } from '../ui.js';
 import { db, storage, auth } from '../sb.js';
 import { state, langName, isAdmin, stageName } from '../store.js';
 import { heading } from '../page.js';
@@ -133,7 +133,7 @@ export async function render(ctx) {
     viewer && viewer.setMarks(rev.marks || []);
     draw();
     drawState();
-    headRow.replaceChildren(h('a.btn.sm', { href: '/app/archive' }, 'رجوع'),
+    fill(headRow, h('a.btn.sm', { href: '/app/archive' }, 'رجوع'),
       isAdmin() ? closeBtn() : null,
       isAdmin() ? h('button.btn.sm.primary', { type: 'button', onclick: () => {
         toast('التحديدات محفوظة ويراها المترجمون الآن.', 'ok');
@@ -203,7 +203,7 @@ export async function render(ctx) {
     viewerBox.replaceChildren(h('p.muted', 'هذه الخطبة أصلها نص مكتوب لا ملف PDF — استخدم الملاحظة النصية.'));
   }
   draw(); drawState();
-  headRow.replaceChildren(h('a.btn.sm', { href: '/app/archive' }, 'رجوع'),
+  fill(headRow, h('a.btn.sm', { href: '/app/archive' }, 'رجوع'),
     isAdmin() ? closeBtn() : null,
     isAdmin() ? h('button.btn.sm.primary', { type: 'button', onclick: () => {
       toast('التحديدات محفوظة ويراها المترجمون الآن.', 'ok');

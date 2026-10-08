@@ -4,7 +4,7 @@
 //   مجموعُها عشرين في المئة من القيمة الإجمالية للعقد. فتُسجَّل الواقعةُ
 //   بتاريخها ومادتها ولغتها، وتحتسب المنصة مقدارَها من الجدول، ويبقى للمدير
 //   تثبيتُ غيره بسببٍ مكتوب، ويُنبَّه إذا قارب المجموعُ السقف.
-import { h, toast, confirm, dialog, req, fmtDate } from './ui.js';
+import { h, fill, toast, confirm, dialog, req, fmtDate } from './ui.js';
 import { db } from './sb.js';
 import { buildXlsx, downloadBlob } from './xlsx.js';
 
@@ -253,7 +253,7 @@ export async function penaltySection() {
                 : null)))))))
       : h('p.muted', 'لا وقائعَ مسجَّلة — ولله الحمد.');
 
-    box.replaceChildren(
+    fill(box, 
       h('div.row.between',
         h('p.small.muted', { style: { margin: 0 } },
           'جدولُ الجزاءات من العقد نفسه. والمنصة تحتسب المقدار ولا تفرضه: '

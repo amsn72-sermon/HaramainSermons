@@ -1,6 +1,6 @@
 // التقرير الشهري للتكاليف التشغيلية — يُعرض داخل «بنود العقد والمستخلص»
 // (ملاحظات ١٩٠ و١٩٥ و١٩٦)
-import { h, toast, confirm, dialog, req, fmtDate } from './ui.js';
+import { h, fill, toast, confirm, dialog, req, fmtDate } from './ui.js';
 import { db } from './sb.js';
 import { monthStart, thisMonth } from './pay.js';
 import { buildXlsx, downloadBlob } from './xlsx.js';
@@ -375,7 +375,7 @@ export async function opsSection() {
     const line = (label, value, cls = '') => h('div.row.between.ops-line', { class: cls },
       h('span', label), h('b', { dir: 'ltr' }, n2(value)));
 
-    box.replaceChildren(
+    fill(box, 
       h('div.row.between',
         h('p.small.muted', { style: { margin: 0 } },
           'بنود هذا التقرير من كراسة المنافسة: فريق الإرشاد المكاني والديني بموقعيه ومواسمه. '

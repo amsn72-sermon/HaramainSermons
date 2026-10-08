@@ -1,7 +1,7 @@
 // «بياناتي»: بيانات العضو كاملة، وصورته الشخصية، وحسابه البنكي أسفلها (ملاحظة ٨٥)
 import { h, toast, busy, dialog, fmtDate, fmtDateTime } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, ROLE_LABEL, STATUS_LABEL, TRACK_LABEL, CITY, NO_FATWA, langName, roleLabel} from '../store.js';
+import { state, STATUS_LABEL, TRACK_LABEL, CITY, NO_FATWA, langName, roleLabel } from '../store.js';
 import { PHOTO_RULES, preparePhoto, readStashed, clearStashed, dataUrlToBlob, urlToDataUrl } from '../photo.js';
 import { bankSection } from './bank.js';
 import { normalizeLayout, staticCard, HARAMAIN_LOGO, CARD } from '../carddesign.js';

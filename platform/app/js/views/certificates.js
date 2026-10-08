@@ -140,7 +140,7 @@ export async function render() {
 
     const q = h('input', { type: 'search', placeholder: 'ابحثْ بالاسم',
       'aria-label': 'البحث عن عضو' });
-    const box = h('div.pick-list');
+    const box = h('div.pick-list.tall');
     const chosen = new Set();
     const paintList = () => {
       const k = q.value.trim();
@@ -315,7 +315,7 @@ export async function render() {
       'aria-label': 'ملفُّ التوقيع' });
     const signUp = h('button.btn.xs', { type: 'button' }, '⤒ ارفع صورةَ التوقيع');
     const signPrev = h('div.mark-prev');
-    const drawSignPrev = () => signPrev.replaceChildren(signSrc.value.trim()
+    const drawSignPrev = () => fill(signPrev, signSrc.value.trim()
       ? h('img', { src: signSrc.value.trim(), alt: 'التوقيع' }) : null);
     signUp.onclick = () => signFile.click();
     signFile.onchange = async () => {

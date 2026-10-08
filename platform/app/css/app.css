@@ -27,6 +27,13 @@
   --radius-sm: 8px;
   --shadow: none;
   --font: 'Haramain Arabic', 'IBM Plex Sans Arabic', -apple-system, 'Segoe UI', Tahoma, sans-serif;
+  /* أسماءٌ مرادفةٌ استُعملت في الأنماط ولم تُعرَّف، فكانت تُفسِد خاصّيتَها
+     وتجعلها شفّافةً أو بلا حدّ — كلُّ var() لا قيمةَ له يُبطِل سطرَه
+     عند الحساب لا عند التحليل، فلا يرِثُ ما قبلَه (إصلاح) */
+  --card: var(--surface);
+  --line: var(--border);
+  --accent: var(--gold);
+  --bg-soft: var(--soft);
   color-scheme: dark;
 }
 :root[data-theme="light"] {
@@ -1621,10 +1628,13 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .gl-pick { max-height: 240px; overflow: auto; border: 1px solid var(--border);
   border-radius: 10px; padding: 8px; }
 .gl-hist { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px; }
-/* عددُ المصطلحات رقمٌ بارز، و«مصطلحًا» صغيرةٌ تحته (ملاحظة ٢٥٨) */
-.lang-count { display: flex; align-items: baseline; gap: 5px; margin-top: 6px; }
-.lang-count b { font-size: 1.6rem; line-height: 1; font-variant-numeric: tabular-nums; color: var(--accent-text, var(--gold)); }
-.lang-count small { font-size: .72rem; color: var(--muted); }
+/* عددُ المصطلحات رقمٌ بارز، و«مصطلحًا» صغيرةٌ تحته (ملاحظة ٢٥٨).
+   ويُقصَر على بطاقة اللغة: الاسمُ نفسُه لشارة لغات خطبة عرفة أعلاه،
+   وكان يدهسها فتفقد استدارتَها ومحاذاتَها (إصلاح) */
+.lang-card .lang-count { display: flex; align-items: baseline; gap: 5px; margin-top: 6px;
+  padding: 0; border: 0; border-radius: 0; background: none; white-space: normal; }
+.lang-card .lang-count b { font-size: 1.6rem; line-height: 1; font-variant-numeric: tabular-nums; color: var(--accent-text, var(--gold)); }
+.lang-card .lang-count small { font-size: .72rem; color: var(--muted); }
 .lang-card.native { border-color: var(--gold); }
 
 /* ------------------------------------------------------------------
@@ -1673,7 +1683,6 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .repo-all td, .repo-all th { padding: 4px 8px; }
 .repo-all td b { font-weight: 600; }
 .repo-ico.sm { display: inline-flex; vertical-align: -3px; margin-inline-end: 6px; }
-.repo-acts { gap: 4px; }
 .repo-view .repo-text { font-size: .86rem; color: var(--muted); max-height: 9rem;
   overflow: auto; white-space: pre-wrap; }
 
@@ -1741,16 +1750,24 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .weeks { display: grid; gap: 10px; }
 .week-card { border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
   background: var(--card); }
-.week-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+/* رأسُ الأسبوع في بطاقة الأرشيف — مقصورٌ عليها، فاسمُه مُستعمَلٌ في
+   صفحات الموقع العامّ بتنسيقٍ آخر (إصلاح) */
+.week-card .week-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 8px 12px; background: var(--bg); border-bottom: 1px solid var(--border); }
-.week-body { display: grid; gap: 6px; padding: 8px 12px; }
+.week-card .week-body { display: grid; gap: 6px; padding: 8px 12px; }
 .sm-row { padding: 6px 0; }
 .sm-row + .sm-row { border-top: 1px dashed var(--border); }
 .sm-row.gone { opacity: .72; }
 .sm-no { display: inline-block; min-width: 2.2em; color: var(--muted); font-size: .78rem;
   direction: ltr; }
 .sm-title { color: var(--gold); }
-.lang-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+/* شريطُ اللغات: سطرٌ واحدٌ يُمرَّر أفقيًّا، لا جدارٌ من الوسوم */
+.lang-chips { display: flex; flex-wrap: nowrap; gap: 4px; margin-top: 2px;
+  overflow-x: auto; overflow-y: hidden; padding-bottom: 2px;
+  scrollbar-width: thin; }
+.lang-chips > * { flex: 0 0 auto; }
+.lang-chips::-webkit-scrollbar { height: 6px; }
+.lang-chips::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 .lang-chip { border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px;
   font-size: .74rem; background: transparent; color: var(--muted); cursor: pointer; font: inherit;
   font-size: .74rem; }
@@ -1817,8 +1834,7 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
   background: rgba(188,150,97,.10); font-size: .62rem; padding: 1px 4px; }
 .cert-handle.text.on { border-color: var(--gold); background: rgba(188,150,97,.25); }
 .vars summary { cursor: pointer; color: var(--muted); }
-.pick-list { max-height: 34vh; overflow: auto; border: 1px solid var(--border);
-  border-radius: 8px; padding: 6px 8px; }
+.pick-list.tall { max-height: 34vh; padding: 6px 8px; border-radius: 8px; }
 .pick-row { display: flex; gap: 8px; align-items: center; padding: 2px 0; }
 .tpl-card { padding: 10px 12px; }
 
@@ -1851,3 +1867,33 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .week-card .lang-chip { padding: 0 7px; font-size: .72rem; }
 .week-card .mosque-head .btn { padding: 1px 7px; font-size: .74rem; line-height: 1.5; }
 .week-card .badge { line-height: 1.5; }
+
+/* ـــ صفُّ الأسبوع عمودان، وتظليلٌ يميّزه عن الحرمين (ملاحظتا ٣٣٠ و٣٣٣) */
+.week-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0; direction: rtl; }
+.week-cols > .mosque-group { border-top: 0; min-width: 0; }
+/* الحدُّ بين العمودين منطقيٌّ لا يمينيّ: يستقيم في العربية والإنجليزية */
+.week-cols > .mosque-group + .mosque-group { border-inline-start: 1px solid var(--border); }
+@media (max-width: 760px) {
+  .week-cols { grid-template-columns: 1fr; }
+  .week-cols > .mosque-group + .mosque-group {
+    border-inline-start: 0; border-top: 1px solid var(--border); }
+}
+.mosque-sub { padding: 0 8px 2px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.mosque-group.shut .mosque-sub { opacity: .75; }
+.sm-acts { display: inline-flex; gap: 2px; flex: 0 0 auto; }
+.head-acts { gap: 4px; align-items: center; flex-wrap: nowrap; }
+.week-card .head-acts .icon-btn { padding: 0 3px; }
+.week-card .week-cols .sm-row > .row > div:first-child { min-width: 0; }
+.week-card .week-cols .sm-title,
+.week-card .week-cols .sm-row b { overflow-wrap: anywhere; }
+
+/* صفُّ الأسبوع مظلَّلٌ بلونٍ ذهبيٍّ خفيف، وصفّا الحرمين على أرضية البطاقة */
+.week-card > .week-head {
+  background: color-mix(in srgb, var(--gold) 22%, var(--surface));
+  border-bottom: 1px solid color-mix(in srgb, var(--gold) 45%, var(--border));
+  border-inline-start: 3px solid var(--gold);
+  font-weight: 600; }
+.week-card > .week-head > b { color: var(--accent-text, var(--text)); }
+.week-card .mosque-head { background: var(--surface); }
+.week-card .mosque-group.shut { opacity: .92; }
