@@ -1,0 +1,663 @@
+// قاعات الاجتماعات والتدريب: تُدخَل ببطاقتين كبيرتين، ثم قاعاتُ النوع
+// ولقاءاتُه — القادم بطاقات، والمنتهي سطرًا سطرًا بأيقوناته (ملاحظتا ١٦٣ و١٦٧).
+//   ولكل قاعة رابطها الدائم، يُقترح تلقائيًّا ويُعدَّل عند الحاجة (ملاحظة ١٦٦).
+import { h, dialog, toast, busy, confirm, fmtDateTime, req, markBad } from '../ui.js';
+import { db } from '../sb.js';
+import { state, isAdmin, isManager, can, ROLE_LABEL, CITY } from '../store.js';
+import { agendaDialog, minutesDialog } from '../meetingdoc.js';
+
+export const KINDS = ['دورة تدريبية', 'اجتماع', 'ورشة عمل', 'أخرى'];
+const KIND_ICON = { 'دورة تدريبية': '🎓', 'اجتماع': '🗂', 'ورشة عمل': '🛠', 'أخرى': '📌' };
+
+// النوعان اللذان تُدخل بهما الشاشة
+// لكل فريقٍ قاعاته، والإدارة ترى الجميع (ملاحظة ١٧٧)
+export const AUDIENCE = {
+  all: 'للجميع',
+  translation: 'الترجمة التخصصية',
+  field: 'الإرشاد المكاني',
+  admins: 'الإداريون'
+};
+
+export const ROOM_KINDS = {
+  meeting: { title: 'قاعة الاجتماعات', lead: 'اجتماعات الإدارة والمنسقين ولقاءات العمل', defaultKind: 'اجتماع' },
+  training: { title: 'قاعة التدريب', lead: 'الدورات التدريبية وورش العمل لفريق الترجمة', defaultKind: 'دورة تدريبية' }
+};
+
+// رسمٌ خطّي لكل بطاقة — من صنعنا، بهوية الهيئة
+const ART = {
+  meeting: '<path d="M4 6.5h16v11H4z"/><path d="M8 21h8M12 17.5V21"/>'
+    + '<circle cx="8.5" cy="11" r="1.6"/><circle cx="15.5" cy="11" r="1.6"/>'
+    + '<path d="M5.8 14.6a3.2 3.2 0 0 1 5.4 0M12.8 14.6a3.2 3.2 0 0 1 5.4 0"/>',
+  training: '<path d="M2.5 8.5 12 4l9.5 4.5L12 13z"/><path d="M6.5 10.6V16c0 1.7 2.5 3 5.5 3s5.5-1.3 5.5-3v-5.4"/>'
+    + '<path d="M21.5 8.5v5"/>'
+};
+
+const ICONS = {
+  log: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+  edit: '<path d="M4 20h4l10-10-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
+  qr: '<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z"/>',
+  cancel: '<circle cx="12" cy="12" r="9"/><path d="M8 8l8 8M16 8l-8 8"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.3 9.2a2.7 2.7 0 1 1 3.4 2.6c-.5.2-.7.6-.7 1.1v.6"/>'
+    + '<path d="M12 16.6h.01"/>',
+  agenda: '<path d="M8 4h11a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H8z"/><path d="M8 4H5a1 1 0 0 0-1 1v15a1 1 0 0 0 1 1h3"/>'
+    + '<path d="M11 9h6M11 13h6M11 17h4"/>',
+  minutes: '<path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>'
+    + '<path d="M15 3v5h5"/><path d="M9 13h7M9 17h5"/>'
+};
+function icon(name, size = 18) {
+  const s = h('span.ico', { 'aria-hidden': 'true' });
+  s.innerHTML = `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor"
+    stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
+  return s;
+}
+const iconBtn = (name, title, onclick, cls = '') =>
+  h('button.icon-btn', { class: cls, type: 'button', title, 'aria-label': title, onclick }, icon(name));
+
+const ar = n => Number(n || 0).toLocaleString('en-US');
+const mins = s => Math.round((s || 0) / 60);
+const toLocal = iso => {
+  const d = new Date(iso);
+  return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+};
+
+export const isOpen = m => {
+  const s = new Date(m.starts_at), e = new Date(m.ends_at || s);
+  const now = Date.now();
+  return m.status === 'scheduled' && now >= s.getTime() - 15 * 60000 && now <= e.getTime() + 30 * 60000;
+};
+export const isPast = m => new Date(m.ends_at || m.starts_at).getTime() < Date.now();
+
+// الاسم العربي يُكتب بحروف لاتينية، فيبقى الرابط مقروءًا لا مُرمَّزًا
+const TRANSLIT = {
+  'ا': 'a', 'أ': 'a', 'إ': 'i', 'آ': 'a', 'ب': 'b', 'ت': 't', 'ث': 'th', 'ج': 'j', 'ح': 'h',
+  'خ': 'kh', 'د': 'd', 'ذ': 'dh', 'ر': 'r', 'ز': 'z', 'س': 's', 'ش': 'sh', 'ص': 's', 'ض': 'd',
+  'ط': 't', 'ظ': 'z', 'ع': 'a', 'غ': 'gh', 'ف': 'f', 'ق': 'q', 'ك': 'k', 'ل': 'l', 'م': 'm',
+  'ن': 'n', 'ه': 'h', 'و': 'w', 'ي': 'y', 'ى': 'a', 'ة': 'h', 'ئ': 'y', 'ؤ': 'w', 'ء': ''
+};
+export const slugOf = name => String(name || '')
+  .replace(/[ً-ْـ]/g, '')
+  .split('').map(c => (TRANSLIT[c] !== undefined ? TRANSLIT[c] : c)).join('')
+  .replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase().slice(0, 40);
+
+// اسمٌ مميّز للرابط، فلا يدخل غريبٌ على اسمٍ شائع
+export function suggestUrl(name) {
+  const rnd = Math.random().toString(36).slice(2, 7);
+  return `https://meet.jit.si/haramain-${slugOf(name) || 'room'}-${rnd}`;
+}
+
+export async function load() {
+  const [meetings, rooms, members] = await Promise.all([
+    db.select('meeting_rows', { select: '*', order: 'starts_at.desc' }).catch(() => []),
+    db.select('rooms', { select: '*', order: 'sort' }).catch(() => []),
+    db.select('profiles', { select: 'id,full_name,role,track,city,status', status: 'eq.active', order: 'full_name' })
+      .catch(() => [])
+  ]);
+  return { meetings, rooms, members };
+}
+
+// ---------------------------------------------------------------------
+// نافذة اللقاء
+// ---------------------------------------------------------------------
+function meetingDialog(data, kind, row = null) {
+  const rooms = data.rooms.filter(r => r.kind === kind && (r.is_active || r.id === row?.room_id));
+  const f = {
+    title: h('input', { value: row?.title || '', 'aria-label': 'عنوان اللقاء' }),
+    kind: h('select', { 'aria-label': 'نوع اللقاء' },
+      KINDS.map(k => h('option', { value: k, selected: (row?.kind || ROOM_KINDS[kind].defaultKind) === k }, k))),
+    room: h('select', { 'aria-label': 'القاعة' },
+      rooms.length ? null : h('option', { value: '' }, '— لا قاعات بعد —'),
+      rooms.map(r => h('option', { value: r.id, selected: row?.room_id === r.id }, `${r.name} (${r.capacity})`))),
+    at: h('input', { type: 'datetime-local', 'aria-label': 'موعد اللقاء', value: row ? toLocal(row.starts_at) : '' }),
+    minutes: h('input', { type: 'number', min: 5, max: 720, step: 5, value: row?.minutes ?? 60,
+      'aria-label': 'المدة بالدقائق' }),
+    url: h('input', { value: row?.join_url || '', dir: 'ltr', placeholder: 'https://meet.jit.si/…',
+      'aria-label': 'رابط الانضمام' }),
+    desc: h('textarea', { rows: 2, 'aria-label': 'وصف اللقاء' }, row?.description || ''),
+    // التدريب إمّا لمرةٍ واحدة وإمّا جلساتٍ متتابعة (ملاحظة ١٨٤)
+    days: h('input', { type: 'number', min: 1, max: 60, value: 1, 'aria-label': 'عدد الجلسات' }),
+    content: h('textarea', { rows: 2, 'aria-label': 'المحتوى التدريبي',
+      placeholder: 'روابط المادة التدريبية أو عناوينها — سطرٌ لكل واحد' },
+      (row?.content || []).map(c => (typeof c === 'string' ? c : c.url || c.title || '')).join('\n'))
+  };
+
+  // الرابط: من القاعة إن كان لها رابط دائم، وإلا اقتُرح واحدٌ يُقبل أو يُغيَّر (ملاحظة ١٦٦)
+  const urlHint = h('small');
+  const fresh = h('button.btn.xs', { type: 'button' }, 'اقترح رابطًا آخر');
+  fresh.onclick = () => { f.url.value = suggestUrl(f.title.value || ROOM_KINDS[kind].title); delete f.url.dataset.auto; };
+  const syncUrl = () => {
+    const room = rooms.find(r => r.id === f.room.value);
+    if (row) { urlHint.textContent = 'رابط الجلسة — دائمٌ ما دام الاسم كما هو'; return; }
+    if (room?.join_url) {
+      urlHint.textContent = `الرابط الدائم لـ«${room.name}» — اقبله أو غيّره`;
+      if (!f.url.value.trim() || f.url.dataset.auto === 'yes') { f.url.value = room.join_url; f.url.dataset.auto = 'yes'; }
+    } else if (!f.url.value.trim() || f.url.dataset.auto === 'yes') {
+      f.url.value = suggestUrl(f.title.value || ROOM_KINDS[kind].title);
+      f.url.dataset.auto = 'yes';
+      urlHint.textContent = 'رابطٌ مقترح لهذا اللقاء — اقبله أو غيّره';
+    }
+  };
+  f.room.addEventListener('change', syncUrl);
+  f.url.addEventListener('input', () => { delete f.url.dataset.auto; });
+  syncUrl();
+
+  // المدعوّون بمجموعاتهم — ومدير المشروع من الهيئة منهم
+  const picked = new Set(row?.invitees || []);
+  const boxes = new Map();
+  // والمرشدون يُفرزون بمدينتهم، فاجتماع مكة لأهلها واجتماع المدينة لأهلها
+  // (ملاحظة ١٨٥)
+  const groupOf = m => (m.role === 'supervisor' ? 'مديرو المشروع من الهيئة'
+    : ['manager', 'coordinator'].includes(m.role) ? 'الحسابات الإدارية'
+      : m.track === 'answers' ? 'المخصَّصون لإجابة السائلين'
+        : m.track === 'field'
+          ? `المرشدون المكانيون — ${CITY[m.city] || 'بلا مدينة'}`
+          : 'المترجمون المتخصصون');
+  const groups = [...new Set(data.members.map(groupOf))];
+  const count = h('span.badge');
+  const paint = () => { count.textContent = `${picked.size} مدعوًّا`; };
+  const list = h('div.stack', groups.map(g => {
+    const people = data.members.filter(m => groupOf(m) === g);
+    const all = h('button.btn.xs', { type: 'button' }, 'الكل');
+    const none = h('button.btn.xs', { type: 'button' }, 'لا أحد');
+    const rows = people.map(m => {
+      const cb = h('input', { type: 'checkbox', checked: picked.has(m.id), 'aria-label': m.full_name });
+      cb.onchange = () => { cb.checked ? picked.add(m.id) : picked.delete(m.id); paint(); };
+      boxes.set(m.id, cb);
+      return h('label.row.inv-row', { style: { gap: '6px', alignItems: 'center' } },
+        cb, h('span', m.full_name), h('span.small.muted', ROLE_LABEL[m.role] || ''));
+    });
+    all.onclick = () => { people.forEach(m => { picked.add(m.id); boxes.get(m.id).checked = true; }); paint(); };
+    none.onclick = () => { people.forEach(m => { picked.delete(m.id); boxes.get(m.id).checked = false; }); paint(); };
+    return h('div.card.stack', h('div.row.between', h('b', g), h('div.row', all, none)), h('div.inv-grid', rows));
+  }));
+  paint();
+
+  const bad = [];
+  const body = h('div.stack',
+    h('div.grid-2',
+      h('label.field', req('عنوان اللقاء'), f.title),
+      h('label.field', 'النوع', f.kind),
+      h('label.field', 'القاعة', f.room),
+      h('label.field', req('الموعد'), f.at),
+      h('label.field', req('المدة بالدقائق'), f.minutes)),
+    h('label.field', req('رابط الانضمام'), urlHint, h('div.row', f.url, fresh)),
+    h('label.field', 'وصف اللقاء وجدول أعماله', f.desc),
+    kind === 'training' && !row ? h('div.card.stack',
+      h('b', 'التكرار'),
+      h('p.small.muted', 'الدورة إمّا جلسةٌ واحدة وإمّا جلساتٌ متتابعة في الأيام التالية، '
+        + 'بالموعد والمدة نفسيهما. ولكل جلسة حضورها ومحضرها.'),
+      h('div.grid-2',
+        h('label.field', 'عدد الجلسات', f.days,
+          h('small', 'جلسةٌ واحدة، أو خمسٌ مثلًا تبدأ من الموعد أعلاه يومًا بعد يوم')))) : null,
+    kind === 'training' ? h('label.field', 'المحتوى التدريبي (اختياري)',
+      h('small', 'روابط أو عناوين، سطرٌ لكل واحد — تظهر للمتدربين'), f.content) : null,
+    h('div.card.stack',
+      h('div.row.between', h('b', 'المدعوّون'), count),
+      h('p.small.muted', 'تصل الدعوة في بريد كل مدعوّ، ويظهر له زرّ الدخول قبل الموعد بربع ساعة. '
+        + 'والقائمة سجلٌّ للحضور وبيانٌ لك عند الإذن، لا قفلٌ على الباب.'),
+      list));
+
+  const validate = () => {
+    bad.forEach(el => markBad(el, false)); bad.length = 0;
+    const need = (el, cond, msg) => { if (cond) { bad.push(el); markBad(el, true); return msg; } return null; };
+    const errs = [
+      need(f.title, !f.title.value.trim(), 'اكتب عنوان اللقاء'),
+      need(f.at, !f.at.value, 'حدّد موعد اللقاء'),
+      need(f.minutes, !(Number(f.minutes.value) >= 5), 'المدة خمس دقائق فأكثر'),
+      need(f.url, !f.url.value.trim(), 'ألصق رابط الانضمام أو اقبل المقترح'),
+      need(f.url, f.url.value.trim() && !/^https:\/\//i.test(f.url.value.trim()), 'الرابط يبدأ بـ https://')
+    ].filter(Boolean);
+    if (!errs.length && !picked.size) return 'اختر مدعوًّا واحدًا على الأقل';
+    const room = rooms.find(r => r.id === f.room.value);
+    if (!errs.length && room && picked.size > room.capacity) {
+      toast(`المدعوّون ${picked.size} وسعة «${room.name}» ${room.capacity}.`, 'warn');
+    }
+    return errs.length ? errs[0] : true;
+  };
+
+  return dialog({
+    title: row ? 'تعديل اللقاء' : `لقاء جديد في ${ROOM_KINDS[kind].title}`,
+    body,
+    buttons: [
+      { label: 'إلغاء', value: null },
+      { label: 'حفظ وإرسال الدعوات', kind: 'primary', validate, value: () => ({
+        id: row?.id || null, title: f.title.value.trim(), kind: f.kind.value,
+        room_id: f.room.value || null, starts_at: new Date(f.at.value).toISOString(),
+        minutes: Number(f.minutes.value), description: f.desc.value.trim(),
+        provider: 'external', join_url: f.url.value.trim(), invitees: [...picked],
+        days: (kind === 'training' && !row) ? Math.max(1, Number(f.days.value) || 1) : 1,
+        content: f.content.value.split('\n').map(x => x.trim()).filter(Boolean)
+      }) }
+    ]
+  });
+}
+
+// ---------------------------------------------------------------------
+// نافذة القاعة
+// ---------------------------------------------------------------------
+function roomDialog(kind, row = null) {
+  const f = {
+    name: h('input', { value: row?.name || '', 'aria-label': 'اسم القاعة' }),
+    cap: h('input', { type: 'number', min: 2, max: 1000, value: row?.capacity ?? 25, 'aria-label': 'السعة' }),
+    desc: h('input', { value: row?.description || '', 'aria-label': 'وصف القاعة' }),
+    url: h('input', { value: row?.join_url || '', dir: 'ltr', placeholder: 'https://meet.jit.si/…',
+      'aria-label': 'رابط القاعة الدائم' }),
+    audience: h('select', { 'aria-label': 'جمهور القاعة' },
+      Object.entries(AUDIENCE).map(([k, v]) =>
+        h('option', { value: k, selected: (row?.audience || 'all') === k }, v)))
+  };
+  const suggest = h('button.btn.xs', { type: 'button' }, 'اقترح رابطًا');
+  suggest.onclick = () => { f.url.value = suggestUrl(f.name.value || ROOM_KINDS[kind].title); };
+  // القاعة الجديدة تُولَّد بلا طلب، ويبقى التغيير بيدك
+  if (!row) f.name.addEventListener('blur', () => { if (!f.url.value.trim() && f.name.value.trim()) suggest.click(); });
+
+  return dialog({
+    title: row ? 'تعديل القاعة' : `قاعة جديدة في ${ROOM_KINDS[kind].title}`,
+    body: h('div.stack',
+      h('div.grid-2',
+        h('label.field', req('اسم القاعة'), f.name),
+        h('label.field', 'السعة', f.cap),
+        h('label.field', 'من يراها', f.audience,
+          h('small', 'قاعة الفريق لا يراها غيره، والإدارة ترى الجميع'))),
+      h('label.field', 'الوصف', f.desc),
+      h('label.field', 'الرابط الدائم — يُضبط من هنا وحده',
+        h('small', 'يرثه كل لقاء يُجدوَل في هذه القاعة، ويمكن تغييره في لقاءٍ بعينه'),
+        h('div.row', f.url, suggest)),
+      h('p.small.muted', 'الرابطُ لا يظهر في الشاشة، والدخولُ بزرِّ «الدخول للقاعة». واجعلْه مميَّزًا لا كلمةً شائعة. ويفعِّل المنسِّقُ غرفةَ الانتظار أولَ ما يدخل.')),
+    buttons: [
+      { label: 'إلغاء', value: null },
+      { label: 'حفظ', kind: 'primary',
+        validate: () => {
+          if (!f.name.value.trim()) return 'اكتب اسم القاعة';
+          const u = f.url.value.trim();
+          if (u && !/^https:\/\//i.test(u)) return 'رابط القاعة يبدأ بـ https://';
+          return true;
+        },
+        value: () => ({ id: row?.id || null, kind, name: f.name.value.trim(),
+          capacity: Number(f.cap.value) || 25, description: f.desc.value.trim(),
+          audience: f.audience.value, join_url: f.url.value.trim() }) }
+    ]
+  });
+}
+
+// ---------------------------------------------------------------------
+// إرشادات المستخدمين (ملاحظة ١٦٨)
+// ---------------------------------------------------------------------
+const GUIDE = {
+  meeting: [
+    ['قبل الاجتماع',
+      ['تصلك الدعوة في بريد المنصة (الأجراس أعلى الشاشة) بموعدها ومدتها وعنوانها.',
+        'زرّ «الدخول للاجتماع» يظهر في بطاقته قبل الموعد بربع ساعة، ويبقى حتى نصف ساعة بعد انتهائه.',
+        'يُفتح لك باب الجلسة باسمك كما هو مسجَّل في المنصة — فلا تُسأل عن اسم ولا تكتب غيره.',
+        'قد تنتظر في غرفة الانتظار حتى يأذن لك المنسق، فلا تُغلق الصفحة.',
+        'جرّب الميكروفون والكاميرا قبل الموعد بدقائق، وادخل من حاسب أو جوّال متصل باتصال ثابت.']],
+    ['أثناء الاجتماع',
+      ['ادخل والميكروفون مكتوم، وافتحه عند الكلام فقط — فهذا أنقى للصوت.',
+        'اكتب اسمك الكامل كما هو في المنصة، فيُقيَّد حضورك على اسمه.',
+        'اطلب الكلمة بزرّ «رفع اليد» داخل الجلسة، ولا تقطع المتحدث.',
+        'مشاركة الشاشة من زرّ المشاركة في شريط الجلسة، وأغلقها بعد انتهاء عرضك.']],
+    ['بعد الاجتماع',
+      ['يُقيَّد حضورك ومدة بقائك تلقائيًّا، ويظهر الاجتماع في «المنتهي والملغى» بسطرٍ واحد.',
+        'يفتح المنسق سجلّ الحضور بأيقونة السجلّ أمام سطر الاجتماع.']],
+    ['للمنسق ومدير المشروع',
+      ['ادخل الاجتماع أولًا قبل الفريق، فغرفة الانتظار لا تُفعَّل إلا بيد المضيف.',
+        'من شريط الجلسة: الأمان (Security) ثم فعّل «غرفة الانتظار (Lobby)».',
+        'بعدها يصلك إشعارٌ باسم كل من يطلب الدخول، فتأذن له أو تردّه من داخل الجلسة.',
+        'وأسماء المدعوّين معروضةٌ لك في صفحة اللقاء بالمنصة، فتقابلها بما يصلك.']]
+  ],
+  training: [
+    ['قبل الدورة',
+      ['لكل قاعة تدريب بابها الثابت: تدخلها من المنصة بزرّ «الدخول للقاعة» طول الدورة.',
+        'تصلك دعوة كل لقاء في بريد المنصة، وزرّ «الدخول للاجتماع» يظهر قبل الموعد بربع ساعة.',
+        'يُفتح باب الجلسة باسمك المسجَّل، وقد تنتظر حتى يأذن لك المدرّب أو المنسق.',
+        'احضر من حاسب إن قدرت — فالعرض والشرح أوضح على شاشةٍ واسعة.']],
+    ['أثناء الدورة',
+      ['ادخل والميكروفون مكتوم، والكاميرا مفتوحة إن تيسّر، فحضورك أدعى للتفاعل.',
+        'الأسئلة في المحادثة المكتوبة داخل الجلسة، ويجيب المدرّب في وقت الأسئلة.',
+        'من احتاج الخروج فليخرج بهدوء ويرجع، ولا حاجة لاعتذار في المحادثة.']],
+    ['بعد الدورة',
+      ['مدة بقائك تُقيَّد تلقائيًّا، وعليها تُبنى شهادة الحضور.',
+        'من فاتته الجلسة يراجع منسق التدريب في تسجيلها إن كان قد سُجِّل.']]
+  ]
+};
+
+const TROUBLE = [
+  ['«حجب المتصفح النافذة»', 'اسمح بالنوافذ المنبثقة لهذا الموقع، ثم اضغط «الدخول للاجتماع» مرةً أخرى.'],
+  ['«في انتظار إذن المضيف»', 'أنت في غرفة الانتظار — المنسق يرى اسمك ويأذن لك. لا تُغلق الصفحة.'],
+  ['«الجلسة تنتظر المضيف»', 'المضيف يدخل أولًا ويسجّل دخوله مرة واحدة، ثم يدخل البقية بلا حساب.'],
+  ['لا صوت ولا صورة', 'اسمح للمتصفح باستخدام الميكروفون والكاميرا من قفل العنوان، ثم أعد تحميل الصفحة.'],
+  ['صوتٌ متقطّع', 'أوقف الكاميرا، وأغلق ما لا تحتاجه من تطبيقات، وقرّب جهازك من موجّه الشبكة.'],
+  ['لا أرى زرّ الدخول', 'إن لم تكن مدعوًّا فلن يظهر لك اللقاء أصلًا — راجع المنسق ليضيفك.'],
+  ['دخل من ليس مدعوًّا', 'رابط الجلسة مفتاحها، فلا يُنشر. وغرفة الانتظار تردّ من لا تأذن له، '
+    + 'فادخل أنت أولًا لتُفعَّل.']
+];
+
+function guideDialog(kind) {
+  const secs = GUIDE[kind] || GUIDE.meeting;
+  return dialog({
+    title: `إرشادات ${ROOM_KINDS[kind]?.title || 'القاعات'}`,
+    body: h('div.stack.guide',
+      h('p.small.muted', 'صفحةٌ واحدة تكفي: كيف تنضمّ، وكيف تتأدّب في الجلسة، وما تفعله إن تعثّرت.'),
+      ...secs.map(([t, items]) => h('section.card.stack',
+        h('b', t), h('ul.small', items.map(x => h('li', x))))),
+      h('section.card.stack',
+        h('b', 'إن تعثّرت'),
+        h('div.table-wrap', h('table.responsive',
+          h('thead', h('tr', h('th', 'ما يظهر لك'), h('th', 'ما تفعله'))),
+          h('tbody', TROUBLE.map(([q, a]) => h('tr',
+            h('td', { 'data-label': 'ما يظهر لك' }, q),
+            h('td', { 'data-label': 'ما تفعله' }, a))))))),
+      h('p.small.muted', 'ومجرى الصوت والصورة اليوم من رابط الجلسة الخارجي. '
+        + 'وحين يُستضاف خادم اللقاءات في الرياض يصير الانضمام داخل المنصة نفسها.')),
+    buttons: [{ label: 'فهمت', value: null }]
+  });
+}
+
+// ---------------------------------------------------------------------
+export async function render(ctx) {
+  const data = await load();
+  // جدولة اللقاءات وإدارة القاعات تتبع صلاحية «القاعات»، والرؤية للجميع (ملاحظة ١٧٢)
+  const admin = isAdmin() && can('rooms');
+  let level = ctx.query.get('kind') || '';
+  if (!ROOM_KINDS[level]) level = '';
+
+  const box = h('div.stack');
+  const head = h('div.page-head');
+
+  const go = k => {
+    level = k;
+    const url = k ? `/app/rooms?kind=${k}` : '/app/rooms';
+    history.replaceState(null, '', url);
+    draw();
+  };
+
+  const reload = async () => {
+    const fresh = await load();
+    Object.assign(data, fresh);
+    draw();
+  };
+
+  const ofKind = k => data.meetings.filter(m => (m.room_kind || 'meeting') === k);
+  const roomsOf = k => data.rooms.filter(r => r.kind === k);
+
+  // ---------------- الإجراءات ----------------
+  const edit = async row => {
+    let full = row;
+    if (row) {
+      const inv = await db.select('meeting_invitees', { select: 'member_id', meeting_id: `eq.${row.id}` }).catch(() => []);
+      full = { ...row, invitees: inv.map(x => x.member_id) };
+    }
+    const p = await meetingDialog(data, level || 'meeting', full);
+    if (!p) return;
+    try {
+      if (!row && Number(p.days) > 1) {
+        const r = await db.rpc('save_meeting_series', { p });
+        const n = (Array.isArray(r) ? r[0] : r)?.sessions?.length || p.days;
+        toast(`جُدولت ${n} جلسات وأُرسلت الدعوات.`, 'ok');
+      } else {
+        await db.rpc('save_meeting', { p });
+        toast('حُفظ اللقاء وأُرسلت الدعوات.', 'ok');
+      }
+      await reload();
+    } catch (err) { toast(err.message, 'bad'); }
+  };
+
+  // الدخول داخل المنصة: باسم العضو، وبغرفة انتظار يأذن منها المنسق (ملاحظة ١٧٥)
+  const join = (btn, m) => busy(btn, async () => {
+    if (!m.join_url) return toast('لا رابط لهذا اللقاء — راجع المنسق.', 'bad');
+    ctx.navigate(`/app/meet/m/${m.id}`);
+  });
+
+  const cancel = async m => {
+    if (!await confirm('إلغاء اللقاء', `يُلغى «${m.title}»، ويبقى في السجل. متابعة؟`, 'إلغاء اللقاء', 'bad')) return;
+    try { await db.rpc('cancel_meeting', { p_id: m.id, p_on: true }); toast('أُلغي اللقاء.', 'ok'); await reload(); }
+    catch (err) { toast(err.message, 'bad'); }
+  };
+
+  const removeMeeting = async m => {
+    if (!await confirm('حذف اللقاء', `يُحذف «${m.title}» وسجلّ حضوره حذفًا لا رجعة فيه. متابعة؟`, 'حذف', 'bad')) return;
+    try { await db.rpc('delete_meeting', { p_id: m.id }); toast('حُذف اللقاء.', 'ok'); await reload(); }
+    catch (err) { toast(err.message, 'bad'); }
+  };
+
+  // المحاور: يكتبها المنسق وأمين السرّ، ويقرؤها المدعوّ (ملاحظتا ١٨٢ و١٨٣)
+  const mayWrite = m => admin || m.secretary_id === state.profile?.id;
+  const openAgenda = async m => {
+    if (await agendaDialog(m, { readOnly: !mayWrite(m) })) await reload();
+  };
+  const openMinutes = async m => {
+    if (await minutesDialog(m, data.members, { readOnly: !mayWrite(m) })) await reload();
+  };
+
+  // أمين السرّ: من مدعوّي الاجتماع، يعيّنه المنسق
+  const pickSecretary = async m => {
+    const inv = await db.select('meeting_invitees', {
+      select: 'member_id,profiles(full_name)', meeting_id: `eq.${m.id}` }).catch(() => []);
+    if (!inv.length) return toast('ادعُ أعضاءً أولًا، فأمين السرّ منهم.', 'bad');
+    const sel = h('select', { 'aria-label': 'أمين السرّ' },
+      h('option', { value: '' }, '— بلا أمين سرّ —'),
+      inv.map(x => h('option', { value: x.member_id, selected: m.secretary_id === x.member_id },
+        x.profiles?.full_name || '—')));
+    const res = await dialog({
+      title: `أمين سرّ ${m.title}`,
+      body: h('div.stack',
+        h('p.small.muted', 'أمين السرّ يكتب محاور الاجتماع ومحضره، ويبقى الاعتماد للمنسق.'),
+        h('label.field', 'أمين السرّ', sel)),
+      buttons: [{ label: 'حفظ', kind: 'primary', value: () => sel.value || null },
+                { label: 'إلغاء', value: null }]
+    });
+    if (res === undefined) return;
+    try { await db.rpc('set_secretary', { p_id: m.id, p_member: res }); toast('حُفظ أمين السرّ.', 'ok'); await reload(); }
+    catch (err) { toast(err.message, 'bad'); }
+  };
+
+  const attendance = async m => {
+    const rows = await db.select('meeting_invitees', { select: 'member_id,joined_at,seconds', meeting_id: `eq.${m.id}` })
+      .catch(() => []);
+    const nameOf = id => data.members.find(x => x.id === id)?.full_name || '—';
+    await dialog({
+      title: `سجلّ الحضور — ${m.title}`,
+      body: h('div.stack',
+        h('p.small.muted', `${fmtDateTime(m.starts_at)} · ${m.minutes} دقيقة · ${m.room_name || 'بلا قاعة'}`),
+        h('div.table-wrap', h('table.responsive',
+          h('thead', h('tr', ['المدعوّ', 'الدخول', 'المدة'].map(t => h('th', t)))),
+          h('tbody', rows.length ? rows.map(r => h('tr',
+            h('td', { 'data-label': 'المدعوّ' }, nameOf(r.member_id)),
+            h('td', { 'data-label': 'الدخول' }, r.joined_at ? fmtDateTime(r.joined_at) : h('span.badge.warn', 'لم يحضر')),
+            h('td', { 'data-label': 'المدة' }, r.joined_at ? `${ar(mins(r.seconds))} دقيقة` : '—')))
+            : [h('tr', h('td', { colspan: '3' }, h('p.muted', 'لا مدعوّين.')))]))),
+        h('p.small.muted', `حضر ${rows.filter(r => r.joined_at).length} من ${rows.length}.`)),
+      buttons: [{ label: 'إغلاق', value: null }]
+    });
+  };
+
+  const roomCard = async r => {
+    const { qrImg } = await import('../qr.js');
+    const dl = h('button.btn.sm', { type: 'button' }, '⤓ تنزيل البطاقة');
+    dl.onclick = () => busy(dl, async () => {
+      try {
+        const { downloadCard } = await import('../servicecards.js');
+        await downloadCard({ title: r.name, note: r.description || 'قاعة اجتماعات وتدريب',
+          url: r.join_url, key: 'platform' });
+      } catch (err) { toast(err.message, 'bad'); }
+    });
+    const copy = h('button.btn.sm', { type: 'button' }, '⧉ نسخ الرابط');
+    copy.onclick = () => navigator.clipboard.writeText(r.join_url)
+      .then(() => toast('نُسخ رابط القاعة.', 'ok'))
+      .catch(() => toast('تعذّر النسخ — انسخه من إعداد القاعة.', 'bad'));
+    await dialog({
+      title: `رمز «${r.name}»`,
+      body: h('div.stack', { style: { textAlign: 'center' } },
+        qrImg(r.join_url, { size: 220, alt: `رمز ${r.name}` }),
+        h('p.small.muted', 'يُمسح بكاميرا الجوال فيدخل القاعة مباشرة، بلا حساب ولا تثبيت. '
+          + 'والرابط نفسه لا يُعرض، وضبطه من إعداد القاعة.'),
+        h('div.row', { style: { justifyContent: 'center' } }, dl,
+          admin ? copy : null)),
+      buttons: [{ label: 'إغلاق', value: null }]
+    });
+  };
+
+  const saveRoom = async (kind, row) => {
+    const p = await roomDialog(kind, row);
+    if (!p) return;
+    try { await db.rpc('save_room', { p }); toast(row ? 'حُفظت القاعة.' : 'أُضيفت القاعة.', 'ok'); await reload(); }
+    catch (err) { toast(err.message, 'bad'); }
+  };
+
+  const removeRoom = async r => {
+    if (!await confirm('حذف القاعة', `تُحذف «${r.name}»؟`, 'حذف', 'bad')) return;
+    try { await db.rpc('delete_room', { p_id: r.id }); toast('حُذفت القاعة.', 'ok'); await reload(); }
+    catch (err) { toast(err.message, 'bad'); }
+  };
+
+  // ---------------- بطاقة لقاءٍ قادم ----------------
+  function meetCard(m) {
+    const open = isOpen(m);
+    const joinBtn = h('button.btn.sm.primary', { type: 'button' }, '▶ الدخول للاجتماع');
+    joinBtn.onclick = e => join(e.currentTarget, m);
+    return h('article.card.stack.meet-card', { class: open ? 'open' : '' },
+      h('div.row.between',
+        h('div', h('b', `${KIND_ICON[m.kind] || '📌'} ${m.title}`),
+          h('div.small.muted', `${m.kind} · ${m.room_name || 'بلا قاعة'}`)),
+        open ? h('span.badge.ok', 'مفتوح الآن') : h('span.badge.gold', 'قادم')),
+      h('div.row.wrap.small.muted',
+        h('span', fmtDateTime(m.starts_at)),
+        h('span.sep', '·'), h('span', `${m.minutes} دقيقة`),
+        h('span.sep', '·'), h('span', `${ar(m.invited)} مدعوًّا`),
+        m.organizer ? h('span.sep', '·') : null,
+        m.organizer ? h('span', `نظّمه ${m.organizer}`) : null),
+      m.description ? h('p.small', m.description) : null,
+      // المحتوى التدريبي يراه المتدربون قبل الجلسة (ملاحظة ١٨٤)
+      (m.content || []).length ? h('div.small',
+        h('b', 'المحتوى التدريبي'),
+        h('ul', { style: { margin: '2px 0 0', paddingInlineStart: '18px' } },
+          m.content.map(c => {
+            const t = typeof c === 'string' ? c : (c.title || c.url || '');
+            return h('li', /^https?:\/\//i.test(t)
+              ? h('a', { href: t, target: '_blank', rel: 'noopener', dir: 'ltr' }, t)
+              : h('span', t));
+          }))) : null,
+      h('div.row.wrap.small.muted',
+        m.agenda_count ? h('span', `${ar(m.agenda_count)} محورًا`) : h('span', 'بلا محاور بعد'),
+        m.secretary_name ? h('span.sep', '·') : null,
+        m.secretary_name ? h('span', `أمين السرّ ${m.secretary_name}`) : null,
+        m.session_no ? h('span.sep', '·') : null,
+        m.session_no ? h('span', `الجلسة ${ar(m.session_no)}`) : null),
+      h('div.row.wrap',
+        open ? joinBtn : h('span.small.muted', 'يُفتح زرّ الدخول قبل الموعد بربع ساعة.'),
+        iconBtn('agenda', 'محاور الاجتماع', () => openAgenda(m)),
+        admin ? iconBtn('log', 'سجلّ الحضور', () => attendance(m)) : null,
+        admin ? iconBtn('edit', 'تعديل البيانات والموعد والرابط والمدعوّين', () => edit(m)) : null,
+        admin ? h('button.icon-btn', { type: 'button', title: 'أمين السرّ', 'aria-label': 'أمين السرّ',
+          onclick: () => pickSecretary(m) }, h('span.ico', { 'aria-hidden': 'true' }, '✎')) : null,
+        admin ? iconBtn('cancel', 'إلغاء اللقاء', () => cancel(m), 'danger') : null,
+        isManager() && can('rooms') ? iconBtn('trash', 'حذف الاجتماع', () => removeMeeting(m), 'danger') : null));
+  }
+
+  // ---------------- سطر لقاءٍ منتهٍ (ملاحظة ١٦٧) ----------------
+  function meetRow(m) {
+    return h('li.meet-row', { class: m.status === 'cancelled' ? 'off' : '' },
+      h('span.mr-title', h('b', m.title),
+        m.status === 'cancelled' ? h('span.badge.bad', 'ملغًى') : null),
+      h('span.small.muted.mr-meta',
+        `${fmtDateTime(m.starts_at)} · ${m.room_name || '—'} · حضر ${ar(m.attended)} من ${ar(m.invited)}`,
+        m.minutes_state === 'final' ? h('span.badge.ok', 'محضرٌ معتمَد')
+          : m.minutes_state === 'draft' ? h('span.badge.warn', 'محضرٌ مسودة') : null),
+      h('span.row.mr-acts',
+        iconBtn('agenda', 'محاور الاجتماع', () => openAgenda(m)),
+        iconBtn('minutes', m.minutes_state === 'final' ? 'محضر الاجتماع (معتمَد)'
+          : m.minutes_state === 'draft' ? 'محضر الاجتماع (مسودة)' : 'محضر الاجتماع',
+          () => openMinutes(m), m.minutes_state === 'final' ? 'ok' : ''),
+        admin ? iconBtn('log', 'سجلّ الحضور', () => attendance(m)) : null,
+        admin ? iconBtn('edit', 'تعديل البيانات والموعد والرابط والمدعوّين', () => edit(m)) : null,
+        isManager() && can('rooms') ? iconBtn('trash', 'حذف الاجتماع', () => removeMeeting(m), 'danger') : null));
+  }
+
+  // ---------------- الرسم ----------------
+  function drawTiles() {
+    const guide = h('button.btn.sm', { type: 'button', onclick: () => guideDialog('meeting'),
+      title: 'إرشادات المستخدمين', 'aria-label': 'إرشادات المستخدمين' },
+      icon('help', 16), h('span', 'إرشادات'));
+    head.replaceChildren(
+      h('div.row', { style: { marginInlineStart: 'auto', order: 2 } }, guide),
+      h('div.grow',
+        h('div.eyebrow', 'القاعات'), h('h1', 'قاعات الاجتماعات والتدريب'),
+        h('p.muted', 'ادخل القاعة التي تريد: تُجدوَل فيها اللقاءات، وتصل الدعوات، '
+          + 'ويُفتح زرّ الانضمام في وقته، ويُقيَّد الحضور.')));
+
+    const tile = k => {
+      const rooms = roomsOf(k);
+      const list = ofKind(k);
+      const soon = list.filter(m => !isPast(m) && m.status === 'scheduled');
+      const b = h('button.btn.room-tile', { type: 'button', onclick: () => go(k) });
+      b.innerHTML = `<span class="rt-art"><svg viewBox="0 0 24 24" width="64" height="64" fill="none"
+        stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${ART[k]}</svg></span>`;
+      b.append(
+        h('span.rt-title', ROOM_KINDS[k].title),
+        h('span.rt-lead', ROOM_KINDS[k].lead),
+        h('span.rt-meta',
+          h('b', ar(rooms.length)), h('span', rooms.length === 1 ? 'قاعة' : 'قاعات'),
+          h('span.sep', '·'),
+          h('b', ar(soon.length)), h('span', 'لقاء قادم')));
+      return b;
+    };
+    box.replaceChildren(h('div.room-tiles', tile('meeting'), tile('training')));
+  }
+
+  function drawKind(k) {
+    const cfg = ROOM_KINDS[k];
+    const back = h('button.btn.sm', { type: 'button', onclick: () => go('') }, '→ رجوع إلى القاعات');
+    const addMeet = admin ? h('button.btn.sm.primary', { type: 'button', onclick: () => edit(null) }, '+ لقاء جديد') : null;
+    const guide = h('button.btn.sm', { type: 'button', onclick: () => guideDialog(k),
+      title: 'إرشادات المستخدمين', 'aria-label': 'إرشادات المستخدمين' },
+      icon('help', 16), h('span', 'إرشادات'));
+    head.replaceChildren(
+      h('div.row', { style: { marginInlineStart: 'auto', order: 2 } }, addMeet, guide, back),
+      h('div.grow', h('div.eyebrow', 'القاعات'), h('h1', cfg.title), h('p.muted', cfg.lead)));
+
+    const rooms = roomsOf(k);
+    const list = ofKind(k);
+    const upcoming = list.filter(m => !isPast(m) && m.status === 'scheduled');
+    const done = list.filter(m => isPast(m) || m.status === 'cancelled');
+
+    const roomsCard = h('section.card.stack',
+      h('div.row.between', h('h3', 'القاعات'),
+        admin ? h('button.btn.xs', { type: 'button', onclick: () => saveRoom(k, null) }, '+ قاعة') : null),
+      rooms.length ? h('div.room-grid', rooms.map(r => h('div.card.stack.room-item',
+        h('div.row.between', h('b', r.name),
+          h('span.row', { style: { gap: '4px' } },
+            r.audience && r.audience !== 'all'
+              ? h('span.badge.gold', { title: 'لا يراها غير فريقها' }, AUDIENCE[r.audience]) : null,
+            r.is_fixed ? h('span.badge', { title: 'قاعةٌ أصلية: تُعدَّل بياناتها ولا تُحذف' }, 'ثابتة') : null,
+            h('span.badge', `${ar(r.capacity)} مقعدًا`))),
+        r.description ? h('p.small.muted', r.description) : null,
+        h('div.row.wrap',
+          r.join_url
+            ? h('button.btn.sm.primary', { type: 'button',
+                onclick: () => ctx.navigate(`/app/meet/r/${r.id}`) }, '▶ الدخول للقاعة')
+            : h('span.small.muted', 'لا باب لها بعد — اضبط رابطها من إعداد القاعة.'),
+          r.join_url ? iconBtn('qr', 'رمز القاعة', () => roomCard(r)) : null,
+          admin ? iconBtn('edit', 'إعداد القاعة: الاسم والسعة والرابط', () => saveRoom(k, r)) : null,
+          // القاعات الستّ الأصلية تُعدَّل ولا تُحذف (ملاحظة ١٧٨)
+          isManager() && can('rooms') && !r.is_fixed
+            ? iconBtn('trash', 'حذف القاعة', () => removeRoom(r), 'danger') : null))))
+        : h('p.muted', 'لا قاعات بعد — أضف أولاها.'));
+
+    box.replaceChildren(
+      roomsCard,
+      h('section.stack',
+        h('div.row.between', h('h3', 'اللقاءات القادمة'), h('span.badge', ar(upcoming.length))),
+        ...(upcoming.length ? upcoming.slice().reverse().map(meetCard) : [h('p.muted', 'لا لقاءات قادمة.')])),
+      h('section.stack',
+        h('div.row.between', h('h3', 'المنتهي والملغى'), h('span.badge', ar(done.length))),
+        done.length ? h('ul.meet-list', done.slice(0, 50).map(meetRow)) : h('p.muted', 'لا شيء بعد.')));
+  }
+
+  function draw() { level ? drawKind(level) : drawTiles(); }
+
+  draw();
+  const timer = setInterval(() => { if (!document.body.contains(box)) return clearInterval(timer); draw(); }, 30000);
+
+  return h('div', head, box,
+    h('p.small.muted', 'يدخل العضوُ الجلسةَ باسمه المسجَّل في نافذةٍ مستقلة. ويفعِّل المنسِّقُ غرفةَ الانتظار فيأذن لكلِّ طارقٍ أو يردُّه. والرابطُ لا يُنشر.'));
+}
