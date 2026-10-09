@@ -2,6 +2,13 @@
 import { h, toast, busy, confirm, dialog, fmtDateTime } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { state, isManager, can } from '../store.js';
+import { icon } from '../icons.js';
+
+// أيقونةُ صفٍّ معبِّرةٌ بلونها وعنوانها (ملاحظة ٤٠٤)
+const bankIcon = (name, label, run, cls = '', title = '') =>
+  h('button.icon-btn.row-act' + (cls ? '.' + cls : ''),
+    { type: 'button', title: title || label, 'aria-label': label,
+      onclick: ev => run(ev.currentTarget) }, icon(name, { size: 18 }));
 
 const clean = v => String(v || '').replace(/\s+/g, '').toUpperCase();
 export const ibanPretty = v => clean(v).replace(/(.{4})/g, '$1 ').trim();
@@ -332,37 +339,32 @@ export async function adminList(ctx, opts = {}) {
         h('span.badge', { class: kind },
           kind === 'ok' ? h('span.tick', { 'aria-hidden': 'true' }, '✓') : null, label),
         a.needs_fix ? h('span.sub', a.needs_fix) : null),
-      h('td', h('div.row.wrap', { style: { gap: '4px' } },
+      // أيقوناتٌ معبِّرةٌ بدل الأزرار، وخطٌّ قبل الاعتماد (ملاحظة ٤٠٤)
+      h('td', h('div.row.row-acts',
         a.doc_path
-          ? h('button.btn.sm', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
+          ? bankIcon('letter', 'الخطاب', b => busy(b, async () => {
               try {
                 window.open(await storage.signedUrl('bank-docs', a.doc_path, 600),
                   '_blank', 'noopener');
               } catch (err) { toast(err.message, 'bad'); }
-            }) }, 'الخطاب')
+            }))
           : null,
-        mayCheck()
-          ? h('button.btn.sm.ghost', { type: 'button', onclick: () => askDoc(a) },
-              'اطلبِ المستند')
-          : null,
-        mayCheck()
-          ? h('button.btn.sm.ghost', { type: 'button', onclick: () => fixIban(a) },
-              'صحِّحِ الرقم')
-          : null,
-        mayCheck()
-          ? h('button.btn.sm.ghost', { type: 'button', onclick: () => sendBack(a) },
-              'أعِدْه للتصحيح')
-          : null,
+        mayCheck() ? bankIcon('clipboard', 'اطلبِ المستند', () => askDoc(a)) : null,
+        mayCheck() ? bankIcon('fixnum', 'صحِّحِ الرقم', () => fixIban(a)) : null,
+        mayCheck() ? bankIcon('back', 'أعِدْه للتصحيح', () => sendBack(a), 'warn') : null,
         (mayVerify() || mayActivate())
-          ? h('button.btn.sm', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
-              const on = !a.verified_at;
-              if (on && !await confirm('توثيق الحساب',
-                `تؤكد مطابقة بيانات ${a.full_name} لخطاب البنك؟`, 'توثيق')) return;
-              try {
-                await db.rpc('verify_bank_account', { p_member: a.member_id, p_verified: on });
-                toast('تم.', 'ok'); reload();
-              } catch (err) { toast(err.message, 'bad'); }
-            }) }, a.verified_at ? 'إلغاء التوثيق' : 'وثِّقْ وفعِّلْ')
+          ? h('span.row-sep', { 'aria-hidden': 'true' }) : null,
+        (mayVerify() || mayActivate())
+          ? bankIcon('verify', a.verified_at ? 'إلغاء التوثيق' : 'وثِّقْ وفعِّلْ',
+              b => busy(b, async () => {
+                const on = !a.verified_at;
+                if (on && !await confirm('توثيق الحساب',
+                  `تؤكد مطابقة بيانات ${a.full_name} لخطاب البنك؟`, 'توثيق')) return;
+                try {
+                  await db.rpc('verify_bank_account', { p_member: a.member_id, p_verified: on });
+                  toast('تم.', 'ok'); reload();
+                } catch (err) { toast(err.message, 'bad'); }
+              }), a.verified_at ? 'on' : '')
           : null)));
   };
 

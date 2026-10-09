@@ -563,21 +563,10 @@ dialog:has(.circular-doc) .dlg-body { max-height: 82vh; }
 
 /* مصمِّم بطاقة العمل (ملاحظة ٨٦) — مربّعٌ واحدٌ بلا فراغٍ بين أقسامه،
    والفواصلُ خطوطٌ رفيعةٌ لا مسافات (ملاحظة ٢٨٣) */
-.cd-board { padding: 0; overflow: hidden; }
-.cd-board .cd-wrap > * { padding: 14px; }
-.cd-board .cd-wrap > * + * { border-inline-start: 1px solid var(--border); }
 .cd-board h3 { margin-top: 0; }
-.cd-board .cd-tabbody { padding: 12px; border: 1px solid var(--border); border-radius: 10px;
-  background: var(--bg); }
-/* البطاقةُ كبيرةٌ في عمودٍ واسع، وخياراتُها كلُّها إلى جانبها (ملاحظة ٣٩٥) */
-.cd-wrap { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 0.62fr);
-  gap: 0; align-items: start; }
-.cd-opts { position: sticky; top: 8px; max-height: calc(100vh - 24px); overflow: auto; }
-@media (max-width: 1100px) {
-  .cd-wrap { grid-template-columns: 1fr; }
-  .cd-opts { position: static; max-height: none; }
-  .cd-board .cd-wrap > * + * { border-inline-start: 0; border-top: 1px solid var(--border); }
-}
+/* البطاقةُ أعلى، فشريطُ القوائم، فإطارُ الإعدادات — بعرضٍ واحد (٤٠٠ و٤٠١) */
+.cd-board { padding: 14px; }
+.cd-actions { justify-content: center; margin-top: 12px; }
 .card-stage-wrap { display: flex; justify-content: center; padding: 14px 0; overflow: auto;
   background: repeating-conic-gradient(rgba(127,127,127,.10) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
   border-radius: 10px; }
@@ -951,7 +940,6 @@ button.lang-card:hover { border-color: var(--gold); }
 .cd-more + .cd-more { margin-top: 8px; }
 .cd-more > summary { cursor: pointer; font-weight: 600; }
 .cd-more[open] > summary { margin-bottom: 10px; }
-.cd-wrap .card-stage-wrap { display: flex; justify-content: center; }
 
 /* ------------------------------------------------------------------
    الرواتب والمستحقات (ملاحظة ١١٦)
@@ -1719,10 +1707,10 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .cert-stage-wrap { display: flex; justify-content: center; padding: 10px 0;
   background: repeating-conic-gradient(rgba(127,127,127,.10) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
   border-radius: 10px; }
-.cert-stage { position: relative; width: 100%; max-width: 560px; aspect-ratio: 297 / 210;
+.cert-stage { position: relative; width: 100%; max-width: 860px; aspect-ratio: 297 / 210;
   border: 1px solid #d8cfbd; border-radius: 8px; overflow: hidden;
   box-shadow: 0 4px 18px rgba(0,0,0,.28); background: #fff; }
-.cert-stage.portrait { aspect-ratio: 210 / 297; max-width: 400px; }
+.cert-stage.portrait { aspect-ratio: 210 / 297; max-width: 600px; }
 .cert-frame { position: absolute; inset: 0; width: 297mm; height: 210mm; border: 0;
   transform-origin: top right; pointer-events: none; }
 .cert-stage.portrait .cert-frame { width: 210mm; height: 297mm; }
@@ -1845,7 +1833,6 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 /* لوحةُ الشهادة تحفظ نسبتها ولو طال عمودُ الأدوات بجوارها */
 .cert-stage-wrap { align-items: flex-start; }
 .cert-stage { align-self: flex-start; }
-.cd-wrap > .cd-opts, .cd-wrap > .cd-stage { align-content: start; }
 
 /* الصفُّ الذي منع الاعتماد: يُظلَّل ويُقفَز إليه (ملاحظة ٣١٦) */
 .imp-tbl tr.bad-row { background: color-mix(in srgb, var(--bad, #8a3b3b) 22%, transparent);
@@ -1872,25 +1859,25 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .week-card .mosque-head .btn { padding: 1px 7px; font-size: .74rem; line-height: 1.5; }
 .week-card .badge { line-height: 1.5; }
 
-/* ـــ صفُّ الأسبوع عمودان، وتظليلٌ يميّزه عن الحرمين (ملاحظتا ٣٣٠ و٣٣٣) */
-.week-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0; direction: rtl; }
-.week-cols > .mosque-group { border-top: 0; min-width: 0; }
-/* الحدُّ بين العمودين منطقيٌّ لا يمينيّ: يستقيم في العربية والإنجليزية */
-.week-cols > .mosque-group + .mosque-group { border-inline-start: 1px solid var(--border); }
-@media (max-width: 760px) {
-  .week-cols { grid-template-columns: 1fr; }
-  .week-cols > .mosque-group + .mosque-group {
-    border-inline-start: 0; border-top: 1px solid var(--border); }
-}
-.mosque-sub { padding: 0 8px 2px; overflow: hidden; text-overflow: ellipsis;
+/* ـــ الأسبوعُ مسجدٌ تحت مسجدٍ لا جنبَه، فيتَّسع صفُّ اللغة لأيقوناته
+   الثماني (ملاحظة ٤١٥) */
+.week-stack { display: grid; grid-template-columns: 1fr; gap: 0; direction: rtl; }
+.week-stack > .mosque-group { border-top: 0; min-width: 0; }
+.week-stack > .mosque-group + .mosque-group { border-top: 1px solid var(--border); }
+/* سطرُ المسجد: العنوانُ والخطيبُ والتاريخُ والعدّاد في سطرٍ واحد */
+.mosque-head .mh-mosque { flex: 0 0 auto; white-space: nowrap; }
+.mosque-head .mh-title { min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
-.mosque-group.shut .mosque-sub { opacity: .75; }
+.mosque-head .mh-khateeb, .mosque-head .mh-when { white-space: nowrap; flex: 0 0 auto; }
+@media (max-width: 860px) {
+  .mosque-head .mh-khateeb, .mosque-head .mh-when { display: none; }
+}
 .sm-acts { display: inline-flex; gap: 2px; flex: 0 0 auto; }
 .head-acts { gap: 4px; align-items: center; flex-wrap: nowrap; }
 .week-card .head-acts .icon-btn { padding: 0 3px; }
-.week-card .week-cols .sm-row > .row > div:first-child { min-width: 0; }
-.week-card .week-cols .sm-title,
-.week-card .week-cols .sm-row b { overflow-wrap: anywhere; }
+.week-card .week-stack .sm-row > .row > div:first-child { min-width: 0; }
+.week-card .week-stack .sm-title,
+.week-card .week-stack .sm-row b { overflow-wrap: anywhere; }
 
 /* صفُّ الأسبوع مظلَّلٌ بلونٍ ذهبيٍّ خفيف، وصفّا الحرمين على أرضية البطاقة */
 .week-card > .week-head {
@@ -2081,9 +2068,10 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 /* ـــ صفٌّ لكلِّ لغة: عنوانٌ ومسجدٌ ولغةٌ ورمزُ توثيقٍ وأيقونات
       (ملاحظات ٣٦٥ و٣٦٦ و٣٧٠) */
 .lang-rows { display: grid; gap: 1px; }
-.lang-row { display: grid; align-items: center; gap: 6px; padding: 3px 4px;
+/* صفُّ اللغة: اسمُها ثم رقمُ التوثيق ثم الأيقونات (ملاحظة ٤١٥) */
+.lang-row { display: grid; align-items: center; gap: 8px; padding: 3px 6px;
   border-radius: 6px; font-size: .82rem; line-height: 1.5; min-width: 0;
-  grid-template-columns: minmax(0, 1.7fr) minmax(0, .9fr) minmax(0, .8fr) auto minmax(0, auto); }
+  grid-template-columns: minmax(96px, 200px) minmax(0, auto) 1fr; }
 .lang-row .lr-title { display: flex; flex-direction: column; gap: 0; min-width: 0; }
 .lang-row .lr-when { font-size: .68rem; color: var(--muted); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
@@ -2100,9 +2088,6 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
   white-space: nowrap; }
 .lang-row .lr-mosque, .lang-row .lr-lang { color: var(--muted); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
-.week-cols .lang-row { grid-template-columns:
-  minmax(0, 1.7fr) auto minmax(0, 1fr) auto auto; }
-.week-cols .lang-row .lr-mq-name { display: none; }
 .lang-row .lr-lang { color: var(--text); }
 .lang-row .lr-no { white-space: nowrap; }
 .lang-row .doc-no { font-size: .7rem; }
@@ -2177,3 +2162,95 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .bd-wm { position: absolute; inset: 0; display: flex; align-items: center;
   justify-content: center; z-index: 1; pointer-events: none; }
 .bd-wm img { height: auto; }
+
+/* ـــ قوالبُ التصدير ومحرِّرُ الكليشة (ملاحظتا ٤٠٩ و٤١٢) */
+.tpl-row { padding: 10px 12px; align-items: center; align-self: stretch; width: 100%; }
+.lh-sheet { position: relative; width: 100%; max-width: 440px; margin: 0 auto; aspect-ratio: 210 / 297;
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #fff;
+  box-shadow: 0 4px 18px rgba(0,0,0,.28); }
+.lh-sheet .lh-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+.lh-win { position: absolute; border: 2px dashed var(--gold);
+  background: color-mix(in srgb, var(--gold) 10%, transparent); }
+
+/* ـــ التصديرُ المجمَّع: لغاتٌ في شبكةٍ وعدّادٌ تحتها (ملاحظة ٤١٣) */
+.bulk-langs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 4px 10px; max-height: 240px; overflow: auto; padding: 6px;
+  border: 1px solid var(--border); border-radius: 8px; }
+.bulk-lang { margin: 0; }
+.bulk-count { padding: 6px 8px; border-radius: 8px;
+  background: color-mix(in srgb, var(--gold) 14%, transparent); }
+
+/* ـــ أيقوناتُ الصفِّ: فاصلٌ قبل التعطيل والحذف، ولونٌ يُنبئ (ملاحظتا ٤٠٣ و٤٠٤) */
+.row-acts { display: inline-flex; align-items: center; gap: 2px; flex-wrap: nowrap; }
+.row-sep { width: 1px; align-self: stretch; min-height: 20px; margin: 0 6px;
+  background: var(--border); }
+.icon-btn.row-act { padding: 3px 5px; border-radius: 7px; }
+.icon-btn.row-act:hover { background: color-mix(in srgb, var(--gold) 16%, transparent); }
+.icon-btn.row-act.on { color: var(--ok, #2f6b52); }
+.icon-btn.row-act.off { color: var(--bad, #b3261e); }
+.icon-btn.row-act.warn { color: var(--warn, #8a6f3c); }
+.icon-btn.row-act.danger { color: var(--bad, #b3261e); }
+
+/* ـــ قائمةُ الطباعة: ثلاثةُ فرقٍ في صفٍّ، وأسماؤها خلف سهم (ملاحظة ٤٠٢) */
+.pick-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px; align-items: start; }
+.pick-team { border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  background: var(--bg); }
+.pick-team-head { display: flex; align-items: center; gap: 6px; padding: 7px 10px;
+  background: color-mix(in srgb, var(--gold) 12%, transparent); }
+.pick-team-head .check { margin: 0; flex: 1 1 auto; }
+.pick-team-body { padding: 6px 10px 10px; display: grid; gap: 2px;
+  max-height: 320px; overflow: auto; }
+.pick-search input { width: 100%; }
+.pick-team.shut .pick-team-body { display: none; }
+ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: 3px; }
+
+/* ـــ لوحةُ الإعدادات الواحدة الثابتة (ملاحظات ٤٠٠ و٤٠١ و٤١٠)
+   ثلاثةُ أقسامٍ بعرضٍ واحد، والإطارُ لا يتغيّر حجمُه باختلاف القائمة. */
+.uni-wrap { --uni-w: 100%; --uni-h: 420px;
+  display: grid; justify-items: center; gap: 12px; }
+.uni-wrap > * { width: min(100%, var(--uni-w)); }
+.uni-stage { display: block; width: 100%; overflow: auto; }
+.uni-bar { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+  gap: 6px; direction: rtl; }
+.uni-tool { display: grid; gap: 2px; justify-items: center; text-align: center;
+  padding: 7px 4px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); color: var(--text); cursor: pointer; min-width: 0;
+  position: relative; }
+.uni-tool:hover { border-color: var(--gold); }
+.uni-tool.on { border-color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 16%, var(--surface)); }
+/* مؤشِّرٌ صغيرٌ يصل القائمةَ المفتوحةَ بإطارها أسفلها */
+.uni-tool.on::after { content: ''; position: absolute; bottom: -10px; inset-inline-start: 50%;
+  width: 10px; height: 10px; transform: translateX(50%) rotate(45deg);
+  background: color-mix(in srgb, var(--gold) 16%, var(--surface));
+  border-inline-start: 1px solid var(--gold); border-top: 1px solid var(--gold); }
+.uni-tool-icon { font-size: 1.15rem; line-height: 1.1; color: var(--gold); }
+.uni-tool { min-height: 58px; }
+.uni-tool b { font-size: .76rem; line-height: 1.2; white-space: normal; max-width: 100%;
+  overflow-wrap: anywhere; }
+.uni-panel { height: var(--uni-h); display: grid; grid-template-rows: auto 1fr auto;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
+  overflow: hidden; }
+.uni-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: baseline;
+  gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--gold) 9%, var(--surface)); }
+.uni-body { overflow-y: auto; overflow-x: hidden; padding: 12px;
+  display: grid; align-content: start; gap: 10px; }
+.uni-body > .stack, .uni-body > div { min-width: 0; }
+/* حقولُ القائمة في عمودين أو ثلاثة بحسب العرض، والطويلُ يمتدّ */
+.uni-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px 12px; align-items: end; }
+.uni-grid .wide { grid-column: 1 / -1; }
+.uni-foot:empty { display: none; }
+.uni-foot { display: flex; gap: 8px; padding: 8px 12px;
+  border-top: 1px solid var(--border); background: var(--bg); }
+@media (max-width: 900px) {
+  .uni-wrap { --uni-h: 340px; }
+  .uni-bar { grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
+  .uni-tool b { font-size: .72rem; }
+}
+.uni-wrap.bare { --uni-h: 460px; gap: 10px; }
+.uni-wrap.bare > * { width: 100%; }
+.uni-wrap.bare .uni-bar { grid-auto-flow: row;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); }

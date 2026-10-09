@@ -121,6 +121,7 @@ export function staffShell(view, path) {
     ...(extra || []),
     link('/app/sermons', 'أرشيف الخطب'),
     link('/app/archive', 'أرشيف الترجمة'),
+    link('/app/export-templates', 'قوالب التصدير'),
     link('/app/stats', 'دليل الإنتاج'),
     link('/app/interpretation', 'الترجمة الفورية')], { open: true });
 
@@ -151,8 +152,7 @@ export function staffShell(view, path) {
   const settingsGroup = group('الإعدادات', [
     link('/app/languages', 'اللغات'),
     link('/app/khateebs', 'الخطباء'),
-    link('/app/workflow', 'إعداد سير العمل'),
-    isManager() ? link('/app/roles', 'تسميات الأدوار') : null]);
+    link('/app/workflow', 'إعداد سير العمل')]);
 
   const mineGroup = (extra = []) => group('حسابي',
     [mine, link('/app/attend', 'حضوري'), link('/app/my-certificates', 'شهاداتي'),

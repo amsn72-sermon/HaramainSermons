@@ -17,6 +17,7 @@ import { isManager, can } from '../store.js';
 import { certHtml, CERT_THEMES, DEFAULT_CERT_MARKS, CERT_VARS, printCertificate,
          CERT_BLOCKS, normalizeBlocks } from '../certdoc.js';
 import { prepareMark } from '../photo.js';
+import { unifiedPanel } from '../unipanel.js';
 import { bgImage } from '../pdfview.js';
 
 const AR = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn');
@@ -110,6 +111,10 @@ export async function render(ctx) {
   stage.append(frame);
   const panel = h('div.cd-panel');
   const body = h('div.stack.cd-tabbody');
+  // تُملآن بعد بناء اللوحة: الإطارُ الواحدُ والانتقالُ إلى قائمة العنصر
+  let uniRef = null;
+  let jumpTo = () => {};
+  const drawTabs = () => { if (uniRef) uniRef.refresh(); };
 
   let picked = -1;          // شعارٌ مختار
   let pickedText = -1;      // نصٌّ مختار
@@ -187,7 +192,7 @@ export async function render(ctx) {
         title: `الشعار ${AR(i + 1)}` }, h('span', AR(i + 1)));
       dragger(el, () => ({ x: Number(g.x) || 0, y: Number(g.y) || 0 }),
         (x, y) => { g.x = x; g.y = y; },
-        () => { picked = i; pickedText = -1; drawProps(); });
+        () => { picked = i; pickedText = -1; drawProps(); jumpTo('item'); });
       kids.push(el);
     });
     (d.texts || []).forEach((t, i) => {
@@ -196,7 +201,7 @@ export async function render(ctx) {
         title: t.text || 'نصّ' }, h('span', 'نص'));
       dragger(el, () => ({ x: Number(t.x) || 0, y: Number(t.y) || 0 }),
         (x, y) => { t.x = x; t.y = y; },
-        () => { pickedText = i; picked = -1; drawProps(); });
+        () => { pickedText = i; picked = -1; drawProps(); jumpTo('item'); });
       kids.push(el);
     });
     handles.replaceChildren(...kids);
@@ -608,36 +613,28 @@ export async function render(ctx) {
     ['sign',  '✒', 'توقيعُ المسؤول', 'يُرفع صورةً أو يُترك فراغًا', signBox],
     ['save',  '💾', 'حفظُ القالب', 'باسمه، ويُمنَح به', saveBox]
   ];
-  const tools = h('div.cd-tools');
-  let open = 'fixed';
-  function drawTabs() {
-    tools.replaceChildren(...TABS.map(([key, icon, label, hint]) => {
-      const b = h('button.cd-tool' + (key === open ? '.on' : ''),
-        { type: 'button', 'aria-label': label, title: hint },
-        h('i.cd-tool-icon', { 'aria-hidden': 'true' }, icon),
-        h('b', label), h('span.small.muted', hint));
-      b.onclick = () => { open = key; drawTabs(); };
-      return b;
-    }));
-    const made = TABS.find(t => t[0] === open);
-    body.replaceChildren(h('h3', made[2]), made[4]());
-  }
+  // القوائمُ كلُّها في إطارٍ واحدٍ ثابتِ الأبعاد (ملاحظة ٤٠٠)
+  const stageWrap = h('div.cert-stage-wrap', stage);
+  uniRef = unifiedPanel({
+    stage: stageWrap, measure: stage,
+    tabs: [
+      { key: 'item', icon: '✥', label: 'خصائصُ العنصر', hint: 'ما اخترتَه على الشهادة',
+        make: () => { drawProps(); return panel; } },
+      ...TABS.map(([key, icon, label, hint, make]) => ({ key, icon, label, hint, make }))
+    ]
+  });
+  // الضغطُ على عنصرٍ في اللوحة ينقل إلى قائمته (ملاحظة ٤٠١)
+  const uni = uniRef;
+  jumpTo = key => uni.show(String(key || '').startsWith('mark:') ? 'marks'
+    : String(key || '').startsWith('text:') ? 'texts' : 'item');
 
-  drawTabs();
   drawProps();
   paintSample();
 
   return h('div',
     h('div.page-head', h('div.grow',
       h('div.eyebrow', 'الفريق'), h('h1', `تصميمُ الشهادة — ${name}`),
-      h('p.muted', 'ما تراه هنا هو ما يُطبَع: اللوحةُ تُرسَم بالمولِّد نفسِه. '
-        + 'املأْ بياناتِ القالب، واسحبِ الشعاراتِ والنصوصَ إلى مواضعها، ثم احفظْه باسمه.'))),
-    h('div.card.cd-board',
-      h('div.cd-wrap',
-        h('div.stack.cd-props', h('h3', 'خصائصُ العنصر'), panel),
-        h('div.stack.cd-stage',
-          h('h3', 'لوحةُ التصميم'),
-          h('div.cert-stage-wrap', stage),
-          h('p.small.muted', 'اسحبِ العنصرَ بالفأرة، أو اضبطْ موضعَه بالأشرطة.')),
-        h('div.stack.cd-side', tools, body))));
+      h('p.muted', 'ما تراه هنا هو ما يُطبَع. اضغطْ عنصرًا لتفتح خياراته، '
+        + 'أو اسحبْه إلى مكانه.'))),
+    h('div.card.cd-board', uni.el));
 }

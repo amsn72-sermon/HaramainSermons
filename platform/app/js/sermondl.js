@@ -85,14 +85,15 @@ export async function downloadSermonWord(id, prefer = null) {
 }
 
 // PDF على كليشة الهيئة: تُفتح نافذةُ الطباعة فيُحفَظ منها PDF
-export async function downloadSermonPdf(id, prefer = null, { autoPrint = true } = {}) {
+// lh: كليشةٌ مختارةٌ بدل كليشة الهيئة (ملاحظة ٤٠٩)
+export async function downloadSermonPdf(id, prefer = null, { autoPrint = true, lh = null } = {}) {
   const s = await sermonOf(id);
   const v = await pickVersion(s, prefer, 'has_text');
   if (!v) return;
   const text = await versionText(id, v.language_code);
   if (!text.body_html) { toast('لا نصَّ محفوظٌ لهذه النسخة.', 'bad'); return; }
   const { printTranslation } = await import('./export.js');
-  if (!printTranslation(asExportArgs(s, v, text), { autoPrint })) {
+  if (!printTranslation(asExportArgs(s, v, text), { autoPrint, lh })) {
     toast('اسمح بالنوافذ المنبثقة.', 'bad');
   }
 }

@@ -12,6 +12,7 @@
 import { h, fill, toast, busy, dialog, confirm, emptyState } from '../ui.js';
 import { db } from '../sb.js';
 import { isManager, can } from '../store.js';
+import { unifiedPanel } from '../unipanel.js';
 import { SIZES, COVER_BGS, BOOK_MARKS, DEFAULT_TPL, TPL_SLOTS, slotOf,
          BASMALA_IMG, BASMALA_BAND, pennantSvg, footOrnamentSvg } from '../sermonbook.js';
 
@@ -681,54 +682,54 @@ export async function render(ctx) {
           rangeIn(t.back.fade ?? 16, 5, 100, v => { t.back.fade = v; }, '٪'))))
   };
 
-  function drawProps() {
-    const m = t.margins || (t.margins = { top: 22, bottom: 18, inner: 22, outer: 16 });
-    fill(props,
-      // ـــ الصفحةُ المحدَّدة: شريطٌ يوازي ما في اللوحة
-      h('div.bd-pages', ...[...TPL_SLOTS, 'inner2'].map(k => {
-        const b = h('button.tab', { type: 'button',
-          'aria-selected': page === k ? 'true' : 'false' }, PAGE_LABEL[k]);
-        b.onclick = () => { page = k; station = stationOf(k); drawAll(); };
-        return b;
-      })),
-
-      // ـــ ما يعمُّ القالبَ كلَّه
-      h('details.bd-sec', { open: true },
-        h('summary', 'عامٌّ للقالب كلِّه'),
-        h('div.stack',
-          h('div.row.wrap', { style: { gap: '8px', alignItems: 'end' } },
+  // ـــ خياراتُ المصمِّم في إطارٍ واحدٍ ثابتِ الأبعاد، قائمةً قائمة
+  //   (ملاحظة ٤١٠). وعرضُ الصفحات على حاله.
+  const PROP_TABS = () => [
+    { key: 'page', icon: '▣', label: PAGE_LABEL[page],
+      hint: 'خصائصُ هذه الصفحةِ وحدَها',
+      make: () => (PAGE_PROPS[SLOT_OF(page)] || PAGE_PROPS.cover)() },
+    { key: 'bg', icon: '🏞', label: 'الخلفيةُ والشريط',
+      hint: 'خلفيةٌ تملأ الصفحةَ وشريطٌ وعلامةٌ مائية',
+      make: () => pagePanel(SLOT_OF(page)) },
+    { key: 'img', icon: '🖼', label: 'الصور', hint: 'شعاراتٌ وصورٌ على الصفحة',
+      make: () => imagesPanel(SLOT_OF(page)) },
+    { key: 'shape', icon: '◇', label: 'الأشكال', hint: 'مستطيلٌ ودائرةٌ وخطٌّ وإطار',
+      make: () => shapesPanel(SLOT_OF(page)) },
+    { key: 'text', icon: 'T', label: 'النصوص', hint: 'نصوصٌ حرّةٌ تُكتب وتُنسَّق',
+      make: () => textsPanel(SLOT_OF(page)) },
+    { key: 'num', icon: '№', label: 'ترقيمُ الصفحات', hint: 'شكلُ الرقم وبدايةُ العدّ',
+      make: () => h('div.stack',
+        check(t.inner.foot, 'اطبعْ أرقامَ الصفحات', v => { t.inner.foot = v; }),
+        h('label.field', 'شكلُ الرقم',
+          pick(t.inner.pageno || 'circle', [['circle', 'في دائرة'], ['plain', 'سطرٌ مجرَّد'],
+            ['ornament', 'بين خطَّين']], v => { t.inner.pageno = v; })),
+        num(t.inner, 'numStart', 'يبدأ العدُّ من', 1, 500, 1),
+        h('p.small.muted', 'الغلافُ والبسملةُ والحقوقُ وظهرُ الكتاب بلا رقم، '
+          + 'وصفحةُ العنوان تُعَدُّ ولا يُطبع رقمُها.')) },
+    { key: 'all', icon: '▦', label: 'عامٌّ للقالب كلِّه', hint: 'هوامشُ الكتاب',
+      make: () => {
+        const m = t.margins || (t.margins = { top: 22, bottom: 18, inner: 22, outer: 16 });
+        return h('div.stack',
+          h('div.uni-grid',
             num(m, 'top', 'هامشُ الرأس مم', 5, 60),
             num(m, 'bottom', 'هامشُ الذيل مم', 5, 60),
             num(m, 'inner', 'الهامشُ الداخلي مم', 5, 60),
             num(m, 'outer', 'الهامشُ الخارجي مم', 5, 60)),
-          h('p.small.muted', 'الهامشُ الداخليُّ أوسعُ فالخيطُ يأكل منه عند التجليد.'))),
+          h('p.small.muted', 'الهامشُ الداخليُّ أوسعُ فالخيطُ يأكل منه عند التجليد.'));
+      } }
+  ];
 
-      // ـــ ترقيمُ الصفحات
-      h('details.bd-sec', { open: true },
-        h('summary', 'ترقيمُ الصفحات'),
-        h('div.stack',
-          check(t.inner.foot, 'اطبعْ أرقامَ الصفحات', v => { t.inner.foot = v; }),
-          h('label.field', 'شكلُ الرقم',
-            pick(t.inner.pageno || 'circle', [['circle', 'في دائرة'], ['plain', 'سطرٌ مجرَّد'],
-              ['ornament', 'بين خطَّين']], v => { t.inner.pageno = v; })),
-          num(t.inner, 'numStart', 'يبدأ العدُّ من', 1, 500, 1),
-          h('p.small.muted', 'الغلافُ والبسملةُ والحقوقُ وظهرُ الكتاب بلا رقم، '
-            + 'وصفحةُ العنوان تُعَدُّ ولا يُطبع رقمُها.'))),
-
-      // ـــ ما يخصُّ الصفحةَ المحدَّدة
-      h('details.bd-sec', { open: true },
-        h('summary', `خصائصُ ${PAGE_LABEL[page]}`),
-        (PAGE_PROPS[SLOT_OF(page)] || PAGE_PROPS.cover)()),
-      h('details.bd-sec', { open: true },
-        h('summary', `خلفيةُ ${PAGE_LABEL[page]} وشريطُها وعلامتُها`),
-        pagePanel(SLOT_OF(page))),
-      h('details.bd-sec', { open: true },
-        h('summary', `صورُ ${PAGE_LABEL[page]}`), imagesPanel(SLOT_OF(page))),
-      h('details.bd-sec', { open: true },
-        h('summary', `أشكالُ ${PAGE_LABEL[page]}`), shapesPanel(SLOT_OF(page))),
-      h('details.bd-sec', { open: true },
-        h('summary', `نصوصُ ${PAGE_LABEL[page]}`), textsPanel(SLOT_OF(page))),
-      imgFile, bgFile, pageFile, wmFile);
+  let uni = null;
+  let uniKey = 'page';
+  function drawProps() {
+    const tabs = PROP_TABS();
+    // العناوينُ تتبع الصفحةَ المحدَّدة، فيُعاد بناءُ الشريط ويبقى
+    //   المفتوحُ مفتوحًا والإطارُ بحجمه (ملاحظة ٤١٠)
+    if (uni) uniKey = uni.active || uniKey;
+    uni = unifiedPanel({ stage: null, tabs,
+      onTab: k => { uniKey = k; } });
+    fill(props, uni.el, imgFile, bgFile, pageFile, wmFile);
+    if (tabs.some(x => x.key === uniKey)) uni.show(uniKey);
   }
 
   // -------------------------------------------------------------------

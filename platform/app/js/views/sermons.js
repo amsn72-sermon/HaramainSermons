@@ -45,7 +45,19 @@ const ICONS = {
   hide:  '<path d="M4 4l16 16"/><path d="M10.6 5.3A9 9 0 0 1 22 12a16 16 0 0 1-3.3 4"/>'
          + '<path d="M6.3 7.3A16 16 0 0 0 2 12s3.5 6 10 6a10 10 0 0 0 3.9-.8"/>',
   book:  '<path d="M4 4h7a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4z"/>'
-         + '<path d="M20 4h-7a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h7z"/>'
+         + '<path d="M20 4h-7a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h7z"/>',
+  // رفعُ وورد ورفعُ PDF أيقونتان لا واحدة، كلٌّ لا تقبل غيرَ نوعها،
+  //   ويُكتب حرفُ النوع فيهما فلا تلتبسان (ملاحظة ٤١٥)
+  upword: '<path d="M4 14v5a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5"/>'
+          + '<path d="M12 3v10"/><path d="M8.3 6.8 12 3.1l3.7 3.7"/>'
+          + '<text x="12" y="18.4" font-size="7" font-weight="700" text-anchor="middle"'
+          + ' fill="currentColor" stroke="none">W</text>',
+  uppdf:  '<path d="M4 14v5a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5"/>'
+          + '<path d="M12 3v10"/><path d="M8.3 6.8 12 3.1l3.7 3.7"/>'
+          + '<text x="12" y="18.4" font-size="7" font-weight="700" text-anchor="middle"'
+          + ' fill="currentColor" stroke="none">P</text>',
+  // تصديرٌ من قالبٍ مختار: صفحةٌ عليها إطارُ قالب (٤٠٩)
+  tpl:   '<path d="M4 4h16v16H4z"/><path d="M4 9h16"/><path d="M9 9v11"/>'
 };
 const ico = name => {
   const sp = document.createElement('span');
@@ -116,10 +128,15 @@ export async function render(ctx) {
   return h('div',
     h('div.page-head',
       h('div.row.wrap', { style: { marginInlineStart: 'auto', order: 2 } },
-        mayDesign()
-          ? h('a.btn.sm', { href: '/app/book-design',
-              title: 'الغلافُ وصفحاتُ العناوين والكليشةُ والترقيم' },
-              '🖌 قوالبُ المجمَّع السنوي')
+        // قوالبُ المجمَّع انتقلت إلى «قوالب التصدير»، ومكانَها التصديرُ
+        //   المجمَّع (ملاحظة ٤١٣)
+        mayExport()
+          ? h('button.btn.sm.primary', { type: 'button',
+              title: 'عامٌ أو شهرٌ، ولغاتٌ، وترتيبٌ، وقالبٌ أو كليشة',
+              onclick: ev => busy(ev.currentTarget, async () => {
+                const m = await import('../archbulk.js');
+                await m.bulkDialog(0, null);
+              }) }, '⤓ تصديرٌ مجمَّع')
           : null,
         // تصديرُ الأرشيف للتخزين مشجَّرًا (ملاحظتا ٣٨٣ و٣٨٥)
         mayExport()
@@ -394,56 +411,85 @@ async function yearPage(ctx, year) {
     const on = !!v;
     const name = code === 'ar' ? 'العربية (الأصل)' : (langName(code) || code);
     const need = (ok, why) => (ok ? true : (toast(why, 'warn'), false));
+    const hasText = () => need(v && v.has_text,
+      'لا نصَّ محفوظٌ لهذه النسخة — افتحْها على الكليشة واحفظْها أولًا.');
     const acts = on
       ? [
+          // ١) العين: اطّلاعٌ سريعٌ بلا تحرير
           act('open', 'استعراضُ النص', () => openSermon(s.id, code)),
+          // ٢ و٣) رفعُ وورد ورفعُ PDF، كلٌّ لا تقبل غيرَ نوعها
+          mayUpload() ? act('upword', 'استبدلْ ملفَّ وورد',
+            () => addVersion(s.id, code, 'docx')) : null,
+          mayUpload() ? act('uppdf', 'استبدلْ ملفَّ PDF',
+            () => addVersion(s.id, code, 'pdf')) : null,
+          // ٤) الكليشة: تُفتَح وتُنسَّق وتُحفَظ
           mayRefine() ? h('a.icon-btn', { href: `/app/sermon-edit/${s.id}?lang=${code}`,
-            title: 'افتحْها على الكليشة لتُنسَّق وتُحفَظ',
-            'aria-label': 'تنقيحٌ على الكليشة' }, ico('pen')) : null,
-          mayExport() ? act('word', 'تنزيلُ Word على كليشة الهيئة', btn => {
-            if (!need(v.has_text, 'لا نصَّ محفوظٌ لهذه النسخة — الملفُّ وحدَه.')) return;
-            dl(async () => {
-              const m = await import('../sermondl.js');
-              await m.downloadSermonWord(s.id, code);
-            }, btn);
-          }, v.has_text ? '' : 'dim') : null,
-          mayExport() ? act('pdf', 'تنزيلُ PDF على كليشة الهيئة', btn => {
-            if (!need(v.has_text, 'لا نصَّ محفوظٌ لهذه النسخة — الملفُّ وحدَه.')) return;
+            title: 'افتحْها على كليشة الهيئة لتُنسَّق وتُحفَظ',
+            'aria-label': 'الكليشةُ والتنسيق' }, ico('pen')) : null,
+          // ٥) تنزيلُ الملف: كما هو أو على الكليشة
+          mayExport() ? act('down', 'تنزيلُ الملف — كما هو أو على الكليشة',
+            btn => downloadMenu(s, code, v, btn)) : null,
+          // ٦) تصديرُ PDF على كليشة الهيئة
+          mayExport() ? act('pdf', 'تصديرُ PDF على كليشة الهيئة', btn => {
+            if (!hasText()) return;
             dl(async () => {
               const m = await import('../sermondl.js');
               await m.downloadSermonPdf(s.id, code);
             }, btn);
           }, v.has_text ? '' : 'dim') : null,
-          mayExport() ? act('file', 'الملفُّ المرفوعُ كما هو', btn => {
-            if (!need(v.has_file, 'لا ملفَّ مرفوعٌ لهذه النسخة — النصُّ وحدَه.')) return;
-            dl(async () => {
-              const m = await import('../sermondl.js');
-              await m.openSermonFile(s.id, code);
-            }, btn);
-          }, v.has_file ? '' : 'dim') : null,
-          mayUpload() ? act('up', 'استبدلْ ملفَّها أو نصَّها', () => addVersion(s.id, code)) : null,
+          // ٧) تصديرٌ من قالبٍ مختار (ملاحظة ٤٠٩)
+          mayExport() ? act('tpl', 'تصديرٌ من قالبٍ مختار',
+            btn => { if (hasText()) exportPick(s, code, btn); },
+            v.has_text ? '' : 'dim') : null,
+          // ٨) الحذف
           mayEdit() ? act('trash', 'حذفُ هذه النسخة', () => removeVersion(s, code), 'danger') : null
         ]
       : [
-          mayUpload() ? act('up', 'ارفعْ نسختَها بهذه اللغة', () => addVersion(s.id, code)) : null,
+          mayUpload() ? act('upword', 'ارفعْ نسختَها بوورد',
+            () => addVersion(s.id, code, 'docx')) : null,
+          mayUpload() ? act('uppdf', 'ارفعْ نسختَها بـPDF',
+            () => addVersion(s.id, code, 'pdf')) : null,
           mayEdit() && code !== 'ar'
             ? act('hide', 'احذفْ صفَّ هذه اللغة من الخطبة', () => hideLang(s, code)) : null
         ];
-    // «خطبةُ الجمعة ٣ محرَّم» ثمَّ العنوانُ ثمَّ المسجدُ ثمَّ اللغة (ملاحظة ٣٨١)
-    const when = s.hijri_text || (s.sermon_date ? fmtHijri(s.sermon_date) : '');
+    // العنوانُ والخطيبُ في سطر المسجد مرةً واحدة، فلا يُكرَّران في
+    //   صفوف اللغات الاثني عشر (ملاحظة ٤١٥)
     return h('div.lang-row' + (on ? '.has' : '.empty'),
-      h('span.lr-title', { title: `${s.sermon_type || 'خطبة'} ${when} — ${s.title || ''}` },
-        h('span.lr-when', when ? `${s.sermon_type || 'خطبة'} ${when}` : (s.sermon_type || 'خطبة')),
-        h('b.lr-name', s.title || '—')),
-      h('span.lr-mosque', { title: mosque ? MOSQUE[mosque] : 'بلا مسجد' },
-        mosque ? MOSQUE_ICON[mosque] : '⚠',
-        h('span.lr-mq-name', mosque ? ` ${MOSQUE[mosque]}` : ' بلا مسجد')),
       h('span.lr-lang', name),
       on && v.doc_no
         ? h('span.doc-no', { dir: 'ltr', title: 'رمزُ توثيق النسخة' }, v.doc_no)
         : h('span.lr-no.small.muted', on ? '—' : 'لم تُرفَعْ'),
       h('span.lr-acts', ...acts.filter(Boolean)));
   };
+
+  // تنزيلُ الملف: وورد كما هو، أو وورد على كليشة الهيئة (ملاحظة ٤١٥)
+  async function downloadMenu(s, code, v, btn) {
+    const pick = await dialog({
+      title: 'تنزيلُ الخطبة',
+      body: h('div.stack',
+        h('p.small.muted', 'الملفُّ كما رُفِع، أو وورد يُبنى من النصِّ على كليشة الهيئة.')),
+      buttons: [
+        { label: 'وورد على الكليشة', kind: 'primary', value: 'tpl' },
+        { label: 'الملفُّ كما هو', value: 'raw' },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!pick) return;
+    if (pick === 'raw') {
+      if (!v.has_file) return toast('لا ملفَّ مرفوعٌ لهذه النسخة — النصُّ وحدَه.', 'warn');
+      return dl(async () => {
+        const m = await import('../sermondl.js');
+        await m.openSermonFile(s.id, code);
+      }, btn);
+    }
+    if (!v.has_text) {
+      return toast('لا نصَّ محفوظٌ لهذه النسخة — افتحْها على الكليشة واحفظْها أولًا.', 'warn');
+    }
+    return dl(async () => {
+      const m = await import('../sermondl.js');
+      await m.downloadSermonWord(s.id, code);
+    }, btn);
+  }
 
   const langRowsOf = (s, mosque, friday) => {
     const have = new Map((s.versions || []).map(v => [v.language_code, v]));
@@ -489,8 +535,13 @@ async function yearPage(ctx, year) {
           h('span.small.bad', 'لم تُضَفْ'),
           h('span.row', { style: { gap: '6px', marginInlineStart: 'auto' } },
             mayUpload()
-              ? h('button.btn.xs', { type: 'button',
-                  onclick: () => sermonDialog(null, { mosque, friday: w.friday_on }) }, '⤒ ارفعْ')
+              ? h('button.btn.xs.primary', { type: 'button',
+                  title: 'اكتبِ العنوانَ والخطيبَ لتُفتَح صفوفُ اللغات',
+                  onclick: () => quickSermon({ mosque, friday: w.friday_on }) }, '＋ خطبة')
+              : null,
+            mayUpload()
+              ? h('button.btn.xs.ghost', { type: 'button', title: 'بكلِّ بياناتها',
+                  onclick: () => sermonDialog(null, { mosque, friday: w.friday_on }) }, 'تفصيلًا')
               : null)));
     }
     const shut = isShut(w.friday_on, mosque);
@@ -509,19 +560,20 @@ async function yearPage(ctx, year) {
       arrow.setAttribute('aria-expanded', now ? 'false' : 'true');
       setShut(w.friday_on, mosque, now);
     };
+    // سطرُ المسجد مرةً واحدة: العنوانُ والخطيبُ والتاريخُ والعدّاد،
+    //   فلا تتكرَّر في صفوف اللغات (ملاحظة ٤١٥)
+    const when = s.hijri_text || (s.sermon_date ? fmtHijri(s.sermon_date) : '');
     return h('div.mosque-group', { class: shut ? 'shut' : '' },
       h('div.mosque-head',
-        h('b', `${MOSQUE_ICON[mosque]} ${MOSQUE[mosque]}`),
+        h('b.mh-mosque', `${MOSQUE_ICON[mosque]} ${MOSQUE[mosque]}`),
+        h('b.mh-title', { title: s.title || '' }, s.title || '—'),
+        s.khateeb ? h('span.mh-khateeb.small.muted', s.khateeb) : null,
+        when ? h('span.mh-when.small.muted', when) : null,
+        s.doc_no ? h('span.doc-no', { dir: 'ltr', title: 'رقمُ توثيق الخطبة' }, s.doc_no) : null,
         h('span.badge', { class: n >= total ? 'ok' : n ? 'warn' : 'bad' },
           `${AR(n)} من ${AR(total)} لغة`),
         h('span.row.head-acts', { style: { marginInlineStart: 'auto' } },
           sermonActs(s, mosque, w.friday_on), arrow)),
-      h('div.mosque-sub.small.muted', s.title || '—',
-        s.doc_no ? h('span.doc-no', { dir: 'ltr', title: 'رقمُ توثيق الخطبة' }, s.doc_no) : null,
-        h('span.small.muted', ' '),
-        h('span.small.muted', [s.khateeb,
-          s.hijri_text || (s.sermon_date ? fmtHijri(s.sermon_date) : null)]
-          .filter(Boolean).join(' · '))),
       inner);
   };
 
@@ -530,7 +582,7 @@ async function yearPage(ctx, year) {
     const have = (w.makkah ? 1 : 0) + (w.madinah ? 1 : 0);
     const others = Array.isArray(w.others) ? w.others : [];
     const inner = h('div.week-inner',
-      h('div.week-cols',
+      h('div.week-stack',
         mosqueLine(w, 'makkah'),
         mosqueLine(w, 'madinah')),
       others.length
@@ -615,6 +667,42 @@ async function yearPage(ctx, year) {
   // -------------------------------------------------------------------
   // نافذةُ الخطبة: إنشاءٌ وتعديل
   // -------------------------------------------------------------------
+  // زرُّ «+» في صفِّ المسجد الخالي: عنوانٌ وخطيبٌ لا غير، فالتاريخُ
+  //   والمسجدُ معلومان من الصفِّ، ولكلِّ جمعةٍ عنوانٌ واحدٌ وخطيبٌ واحد.
+  //   فتُنشأ الخطبةُ وتُفتَح تحتها صفوفُ اللغات الثابتة (ملاحظة ٤١٥)
+  async function quickSermon({ mosque, friday }) {
+    const title = h('input', { 'aria-label': 'عنوان الخطبة', maxlength: 200 });
+    const khateeb = h('input', { 'aria-label': 'الخطيب', maxlength: 120 });
+    const hj = friday ? fmtHijri(friday) : '';
+    const res = await dialog({
+      title: `خطبةُ ${MOSQUE[mosque] || ''} — ${hj}`,
+      body: h('div.stack',
+        h('p.small.muted', 'التاريخُ والمسجدُ من الصفِّ، فاكتبِ العنوانَ والخطيبَ '
+          + 'لتُفتَح صفوفُ اللغات.'),
+        h('label.field', 'عنوان الخطبة', title),
+        h('label.field', 'الخطيب', khateeb)),
+      buttons: [
+        { label: 'أنشِئْ', kind: 'primary',
+          validate: () => (title.value.trim().length >= 2 ? true : 'اكتبْ عنوانَ الخطبة'),
+          value: () => ({ title: title.value.trim(), khateeb: khateeb.value.trim() }) },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
+    try {
+      await db.rpc('save_arch_sermon', { p: {
+        section_id: section?.id, h_year: year,
+        mosque, friday_on: friday, sermon_date: friday,
+        hijri_text: hj && hj !== '—' ? hj : null,
+        sermon_type: 'خطبة جمعة',
+        title: res.title, khateeb: res.khateeb || null
+      } });
+      toast('أُنشئت الخطبةُ — ارفعْ نسخَها بلغاتها.', 'ok');
+      setShut(friday, mosque, false);
+      drawWeeks();
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
   async function sermonDialog(id, { mosque, friday } = {}) {
     let cur = {};
     if (id) {
@@ -811,6 +899,24 @@ async function yearPage(ctx, year) {
   }
 
   // إصدارُ خطبةٍ واحدةٍ على قالب المجمَّع
+  // تصديرٌ من قالبٍ مختار: كليشةٌ أو قالبُ مجمَّع (ملاحظة ٤٠٩)
+  async function exportPick(s, code, btn) {
+    const m = await import('../letterhead.js');
+    const pick = await m.pickExportTemplate();
+    if (!pick) return;
+    if (pick.kind === 'book') {
+      const { rangeExportDialog } = await import('../archexport.js');
+      const d = s.sermon_date || null;
+      return rangeExportDialog(year, section,
+        { from: d, to: d, mosque: s.mosque || null, lang: code, tpl: pick.id });
+    }
+    const lh = pick.kind === 'lh' ? await m.lhForPrint(pick.id) : null;
+    return dl(async () => {
+      const dlm = await import('../sermondl.js');
+      await dlm.downloadSermonPdf(s.id, code, { lh });
+    }, btn);
+  }
+
   async function bookOne(s, mosque) {
     const { rangeExportDialog } = await import('../archexport.js');
     const d = s.sermon_date || null;
@@ -818,12 +924,14 @@ async function yearPage(ctx, year) {
   }
 
   // رفعُ نسخةٍ بلغة
-  async function addVersion(id, code) {
+  // only: 'docx' أو 'pdf' فلا تقبل الأيقونةُ غيرَ نوعها (ملاحظة ٤١٥)
+  async function addVersion(id, code, only = '') {
     const lang = h('select', { 'aria-label': 'اللغة' },
       h('option', { value: 'ar', selected: code === 'ar' }, 'العربية (الأصل)'),
       trLangs().filter(l => l.is_active).map(l =>
         h('option', { value: l.code, selected: code === l.code }, l.name_ar)));
-    const file = h('input', { type: 'file', accept: '.pdf,.doc,.docx', 'aria-label': 'ملف النسخة' });
+    const accept = only === 'docx' ? '.doc,.docx' : only === 'pdf' ? '.pdf' : '.pdf,.doc,.docx';
+    const file = h('input', { type: 'file', accept, 'aria-label': 'ملف النسخة' });
     const text = h('textarea', { rows: 5, 'aria-label': 'نصّ النسخة' });
     const note = h('small.muted');
     let path = null;
@@ -831,7 +939,14 @@ async function yearPage(ctx, year) {
     file.onchange = () => {
       const fl = file.files[0];
       if (!fl) { path = null; pending = null; note.textContent = ''; return; }
-      note.textContent = 'يُرفَع الملف…';
+      const kindOk = only === 'docx' ? /\.docx?$/i.test(fl.name)
+        : only === 'pdf' ? /\.pdf$/i.test(fl.name) : true;
+      if (!kindOk) {
+        file.value = ''; path = null; pending = null;
+        note.textContent = only === 'docx' ? 'هذه الأيقونةُ لوورد وحدَه.' : 'هذه الأيقونةُ لـPDF وحدَه.';
+        return;
+      }
+      note.textContent = 'يُرفَع الملف ويُقرأ نصُّه…';
       pending = (async () => {
         const safe = String(fl.name).replace(/[^\w.\-]+/g, '_');
         const at = `${id}/${Date.now()}_${safe}`;
@@ -844,16 +959,29 @@ async function yearPage(ctx, year) {
           note.textContent = `تعذّر رفعُ الملف: ${e.message}`;
           throw e;
         }
+        // ويُستخرَج نصُّه فتعمل الكليشةُ والتصدير (ملاحظة ٤٠٨)
+        if (text.value.trim()) return;
+        try {
+          const m = await import('../doctext.js');
+          const html = await m.extractText(fl);
+          text.value = html;
+          note.textContent = `رُفع الملف واستُخرج نصُّه: ${fl.name}`;
+        } catch (e) {
+          note.textContent = `رُفع الملف، ولم يُستخرَجْ نصُّه: ${e.message}`;
+        }
       })();
       pending.catch(() => { /* الخطأُ مكتوبٌ في السطر */ });
     };
 
     const res = await dialog({
-      title: 'نسخةٌ بلغة',
+      title: only === 'docx' ? 'رفعُ نسخةٍ بوورد'
+        : only === 'pdf' ? 'رفعُ نسخةٍ بـPDF' : 'نسخةٌ بلغة',
       body: h('div.stack',
-        h('p.small.muted', 'النصُّ يُبنى به المجمَّعُ السنوي، والملفُّ يُحفَظ معه ويُنزَّل.'),
+        h('p.small.muted', 'يُقرأ نصُّ الملف في متصفِّحك ويُحفَظ معه، '
+          + 'فتُفتَح الخطبةُ على الكليشة وتُصدَّر.'),
         h('label.field', 'اللغة', lang),
-        h('label.field', 'ملفُّ النسخة (PDF أو وورد)', file, note),
+        h('label.field', only === 'docx' ? 'ملفُّ وورد' : only === 'pdf' ? 'ملفُّ PDF' : 'ملفُّ النسخة (PDF أو وورد)',
+          file, note),
         h('label.field', 'النصّ', text)),
       buttons: [{ label: 'حفظ', kind: 'primary',
         validate: async () => {

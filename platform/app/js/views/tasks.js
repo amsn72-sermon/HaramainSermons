@@ -1,7 +1,7 @@
 // مهامي، ومساحة عمل المهمة لكل الأدوار
 import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDate, fmtDateTime, fmtMinutes, fmtDuration, digitalCountdown } from '../ui.js';
 import { db, storage, auth } from '../sb.js';
-import { state, isManager, isAdmin, TRACK_SELECT, MOSQUE_ANY, PRIORITY, EVENT_LABEL, sortStages, currentStage, langName, langDir, stageName } from '../store.js';
+import { state, isManager, isAdmin, TRACK_SELECT, MOSQUE_ANY, PRIORITY, EVENT_LABEL, sortStages, currentStage, langName, langDir, stageName, assigneeName } from '../store.js';
 import { statusBadge, trackTimer, progressBar, stageStrip, lateSummary } from './parts.js';
 import { createEditor } from '../editor.js';
 import { audioInfo, specLine, isAllowedAudio, AUDIO_EXTS, SPEC } from '../audiofile.js';
@@ -410,7 +410,7 @@ export async function workspace(ctx) {
       const needNew = t.audio_required_after && !takes.some(a => new Date(a.created_at) > new Date(t.audio_required_after));
       fill(box,
         needNew && h('p', h('span.badge.bad', 'إعادة التسجيل'), ' التعديل على أصل الخطبة يستوجب تسجيلًا صوتيًا جديدًا؛ التسجيلات السابقة محفوظة.'),
-        !audioNow && h('p.small', `التسجيل مسند إلى مرحلة «${stageName(t.audio_stage_key)}» — ${audioStage?.assignee?.full_name || ''}.`),
+        !audioNow && h('p.small', `التسجيل مسند إلى مرحلة «${stageName(t.audio_stage_key)}» — ${assigneeName(audioStage?.assignee)}.`),
         audioNow && !takes.length && h('p', h('span.badge.bad', 'مطلوب'), ' لم يُرفع التسجيل بعد، ولا يمكن إتمام المرحلة دونه.'),
         takes.map(row),
         isReviewer && h('p.small', 'استمع إلى التسجيل كاملًا وتحقق من مطابقته للترجمة. إن عدّلت الترجمة فارفع تسجيلًا جديدًا (يُحفظ السابق باسم صاحبه)، أو أعد المهمة إلى المترجم.'),
@@ -458,7 +458,7 @@ export async function workspace(ctx) {
           return;
         }
         blockersBox.hidden = true;
-        const target = nextStage ? `${stageName(nextStage.stage_key)} — ${nextStage.assignee?.full_name}` : 'الاعتماد النهائي والنشر على الموقع العام';
+        const target = nextStage ? `${stageName(nextStage.stage_key)} — ${assigneeName(nextStage.assignee)}` : 'الاعتماد النهائي والنشر على الموقع العام';
         const boxes = confirmItems().map(text => ({ text, input: h('input', { type: 'checkbox' }) }));
         const err = h('p.err', { hidden: true }, 'أكّد جميع البنود قبل الإتمام.');
         const ok = await dialog({
@@ -485,7 +485,7 @@ export async function workspace(ctx) {
   async function doReturn() {
     const earlier = t.stages.filter(s => cur && s.sort < cur.sort);
     if (!earlier.length) return;
-    const target = h('select', earlier.map(s => h('option', { value: s.stage_key }, `${stageName(s.stage_key)} — ${s.assignee?.full_name}`)));
+    const target = h('select', earlier.map(s => h('option', { value: s.stage_key }, `${stageName(s.stage_key)} — ${assigneeName(s.assignee)}`)));
     target.value = earlier[earlier.length - 1].stage_key;
     const reason = h('textarea', { rows: 4, placeholder: 'وضّح التعديلات المطلوبة (ومنها إعادة التسجيل الصوتي إن لزم)', required: true });
     const err = h('p.err', { hidden: true }, 'اكتب سبب الإعادة (3 أحرف على الأقل).');
@@ -547,7 +547,7 @@ export async function workspace(ctx) {
         try { await db.rpc('set_published', { p_track: t.id, p_published: !t.is_published }); reload(); } catch (err) { toast(err.message, 'bad'); }
       }) }, t.is_published ? 'إخفاء من الموقع العام' : 'إعادة النشر')));
   } else {
-    const who = t.status === 'awaiting_receipt' ? t.stages[0]?.assignee?.full_name : cur?.assignee?.full_name;
+    const who = t.status === 'awaiting_receipt' ? assigneeName(t.stages[0]?.assignee) : assigneeName(cur?.assignee);
     actions = h('div.card.stack', h('p', 'المهمة الآن لدى ', h('b', who || '—'), ' — ', statusBadge(t), '. تُعرض هنا للاطلاع.'), exportsRow);
   }
 

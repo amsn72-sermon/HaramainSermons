@@ -1,6 +1,7 @@
 // تصدير مجمَّع على هيئة كتاب: غلافٌ وفهرسٌ وخطبٌ مرقَّمة على كليشة الهيئة (ملاحظة ١٥٢)
 //   يُبنى في نافذة مستقلة كما تُبنى ورقة الطباعة، ثم يُطبع أو يُحفظ PDF.
-import { PAGE, LETTERHEAD, cardColumns, heading, docVerifyUrl } from './page.js';
+import { PAGE, LETTERHEAD, cardColumns, heading, docVerifyUrl,
+  DOC_STAMP_CSS, docStampNode } from './page.js';
 import { sanitize } from './sanitize.js';
 import { langDir, langName, MOSQUE_ANY } from './store.js';
 import { fmtHijri } from './ui.js';
@@ -50,12 +51,7 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 .print-body { --pt: 1pt; font-size: 12pt; line-height: 1.8; }
 .print-body .data-card { font-size: 11pt; }
 #measure { position: absolute; visibility: hidden; top: -10000mm; inset-inline-start: 0; width: ${BOX_W}mm; }
-.doc-stamp { position: absolute; top: 9mm; left: ${P.side}mm; display: flex; align-items: center;
-  gap: 3mm; font-size: 8pt; color: #3b3630; text-align: start; }
-.doc-stamp img.qr { width: 17mm; height: 17mm; }
-.doc-stamp .lbl { font-size: 7.5pt; color: #6b6257; }
-.doc-stamp .no { font-size: 11pt; font-weight: 700; letter-spacing: .6px; direction: ltr; margin: .4mm 0; }
-.doc-stamp .dt { font-size: 7.5pt; color: #3b3630; }
+${DOC_STAMP_CSS(P.side)}
 /* الغلاف: حديثٌ اقتصاديٌّ في الطباعة — أرضيةٌ بيضاء، ولونان لا غير،
    وشريطٌ رفيعٌ على الحافّة وحدَه ما يحمل لونًا ممتدًّا، وحِليةٌ خطّيّةٌ
    واحدة. والبناءُ بالفراغ لا بالحلية (ملاحظة ٢٧٣) */
@@ -120,18 +116,9 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
     return card;
   }
 
+  // الختمُ واحدٌ في كلِّ المخرجات (ملاحظة ٤١٤)
   function stampFor(track) {
-    if (!track.doc_no) return null;
-    const stamp = el('div', 'doc-stamp'); stamp.dir = 'rtl'; stamp.lang = 'ar';
-    let src = '';
-    try { src = qrPngDataUrl(docVerifyUrl(track.doc_no), { scale: 6 }); } catch { src = ''; }
-    if (src) { const img = el('img', 'qr'); img.alt = `رمز التحقق من ${track.doc_no}`; img.src = src; stamp.append(img); }
-    const box = el('div');
-    box.append(el('div', 'lbl', 'رقم التوثيق'));
-    const no = el('div', 'no', track.doc_no); no.dir = 'ltr'; box.append(no);
-    box.append(el('div', 'dt', `تاريخ الترجمة: ${fmtHijri(track.doc_no_at || track.completed_at)}`));
-    stamp.append(box);
-    return stamp;
+    return docStampNode(d, track, url => qrPngDataUrl(url, { scale: 6 }));
   }
 
   // مواضع نهايات الأسطر داخل تدفّق واحد

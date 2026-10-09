@@ -37,6 +37,8 @@ const routes = [
   ['/app/sermon-edit/:id', () => import('./views/sermonedit.js'), true, 'rp_archive'],
   // مصمِّمُ قوالب المجمَّع السنوي (ملاحظتا ٣٣٩ و٣٥٠)
   ['/app/book-design', () => import('./views/bookdesign.js'), true, 'arch_design'],
+  // قوالبُ التصدير: مجمَّعاتٌ وكليشات في بابٍ واحد (ملاحظتا ٤٠٩ و٤١٢)
+  ['/app/export-templates', () => import('./views/exporttpl.js'), true, 'arch_design'],
   // «حضوري» شاشةُ العضو لنفسه: تُفتح لكل مفعَّل، ولا تُعلَّق بصلاحية
   // إدارةِ الحضور — فتلك للاطّلاع على غيره (ملاحظة ٢٣٨)
   ['/app/attend', () => import('./views/attend.js'), true],
@@ -68,7 +70,6 @@ const routes = [
   // مصمِّمُ الشهادات شاشةٌ قائمةٌ بذاتها كمصمِّم البطاقات (ملاحظة ٣١٢)
   ['/app/cert-design', () => import('./views/certdesign.js'), true, true],
   ['/app/my-certificates', () => import('./views/certificates.js').then(m => ({ render: m.mine })), true],
-  ['/app/roles', () => import('./views/roles.js'), true, 'manager'],
   ['/app/rooms', () => import('./views/rooms.js'), true],
   ['/app/meet/:kind/:id', () => import('./views/meet.js'), true],
   ['/app/revise/:material', () => import('./views/revise.js'), true, true]
@@ -90,7 +91,8 @@ const PERM_OF = {
   '/app/languages': 'st_languages', '/app/khateebs': 'st_khateebs',
   '/app/workflow': 'st_workflow',
   '/app/stats': 'rp_stats', '/app/archive': 'rp_archive',
-  '/app/sermon-edit': 'rp_archive', '/app/book-design': 'arch_design'
+  '/app/sermon-edit': 'rp_archive', '/app/book-design': 'arch_design',
+  '/app/export-templates': 'arch_design'
 };
 
 function match(path) {

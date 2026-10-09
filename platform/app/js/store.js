@@ -68,6 +68,17 @@ export const roleLabel = m =>
   (m && m.job_title)
   || (m && m.admin_title && roleName(m.admin_title))
   || roleName(m?.role);
+// من أُسنِدت إليه المهمة: المنسِّقُ بمنصبه إن كُتب له منصب، وغيرُه
+//   باسمه (ملاحظة ٤٠٦)
+export const assigneeName = a => {
+  if (!a) return '';
+  if (a.role === 'coordinator') {
+    const t = a.job_title || (a.admin_title && roleName(a.admin_title));
+    if (t) return t;
+  }
+  return a.full_name || '';
+};
+
 export const STATUS_LABEL = { pending: 'بانتظار التفعيل', active: 'مفعّل', disabled: 'معطّل' };
 export const TRACK_STATUS = {
   awaiting_receipt: ['بانتظار الاستلام', 'warn'],
@@ -279,7 +290,7 @@ export function langByName(text) {
 }
 
 // استعلام المواد بمساراتها ومراحلها — الصلاحيات في قاعدة البيانات تحدد ما يعود
-export const TRACK_SELECT = '*,language:languages(code,name_ar,dir),stages:track_stages!track_stages_track_id_fkey(*,assignee:profiles(id,full_name))';
+export const TRACK_SELECT = '*,language:languages(code,name_ar,dir),stages:track_stages!track_stages_track_id_fkey(*,assignee:profiles(id,full_name,job_title,admin_title,role))';
 export const MATERIAL_SELECT = `*,khateeb:khateebs(name),tracks(${TRACK_SELECT})`;
 
 export function trackProgress(track) {

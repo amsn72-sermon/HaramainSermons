@@ -19,6 +19,9 @@ export async function render() {
   const list = h('div.stack');
   const tabs = h('div.tabs');
   let want = '';
+  // بحثٌ بالاسم وبرقم الشهادة وعنوانها (ملاحظة ٤٠٧)
+  const q = h('input', { type: 'search', 'aria-label': 'بحث في الشهادات',
+    placeholder: 'اسمُ صاحب الشهادة أو رقمُها أو عنوانُها…' });
 
   const addBtn = can('cert_draft')
     ? h('button.btn.sm.primary', { type: 'button', onclick: () => grantDialog() }, '＋ منحُ شهادة')
@@ -33,7 +36,7 @@ export async function render() {
       h('div.row', addBtn, oldBtn)),
     h('p.lead', 'شهاداتُ الدورات التدريبية وشهاداتُ الخبرة. يُنشئها المنسق مسوّدةً، '
       + 'ويعتمدها مديرُ المشروع فتصدر برقمها وباركودِ تحقّقها.'),
-    tabs, h('div.card.stack', list));
+    tabs, h('div.card.stack', h('label.field.cert-search', 'بحث', q), list));
 
   // قالبُ التصميم المحفوظ: يسري على كلِّ شهادةٍ تُصدَر (ملاحظة ٣١٢)
   let tpl = {};
@@ -72,8 +75,15 @@ export async function render() {
     let rows = [];
     try { rows = await db.rpc('certificates_list', { p_status: want || null }) || []; }
     catch (err) { fill(list, h('p.muted', err.message)); return; }
+    const k = q.value.trim().toLowerCase();
+    if (k) {
+      rows = rows.filter(r => [r.member_name, r.full_name, r.serial_no, r.title, r.subject]
+        .some(x => String(x || '').toLowerCase().includes(k)));
+    }
     if (!rows.length) {
-      fill(list, emptyState('لا شهادات', 'ما مُنحت شهادةٌ بعد في هذه القائمة.'));
+      fill(list, k
+        ? emptyState('لا شهادةَ تطابق البحث', 'جرِّبْ جزءًا من الاسم أو الرقم.')
+        : emptyState('لا شهادات', 'ما مُنحت شهادةٌ بعد في هذه القائمة.'));
       return;
     }
     // تُقسَّم بالنوع ثم بالسنة الهجرية، وتُرتَّب بترميزها (ملاحظة ٣٤٠)
@@ -508,6 +518,7 @@ export async function render() {
     } catch (err) { toast(err.message, 'bad'); }
   }
 
+  q.addEventListener('input', () => draw());
   drawTabs(); draw();
   return page;
 }

@@ -8186,3 +8186,154 @@ begin
 
   raise notice 'PASS: الورديةُ للمرشد المكانيِّ، ولا يدخلها التخصصيُّ إلا بوسمٍ يُرفَع';
 end $$;
+
+-- =====================================================================
+-- ٩٠) الكليشاتُ وقوالبُ التصدير في بابٍ واحد (ملاحظتا ٤٠٩ و٤١٢)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_id uuid; v_n int; v_books int;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  delete from public.letterheads where name like 'كليشةُ اختبار%';
+
+  v_id := public.save_letterhead(null, 'كليشةُ اختبار',
+    jsonb_build_object('v', 1, 'bg', null,
+      'page', jsonb_build_object('top', 40, 'bottom', 30, 'side', 18)), false);
+  if v_id is null then raise exception 'FAIL: لم تُحفَظِ الكليشة'; end if;
+
+  select count(*) into v_n from public.letterhead_list() where id = v_id;
+  if v_n <> 1 then raise exception 'FAIL: الكليشةُ لا تظهر في القائمة'; end if;
+
+  if (select (tpl -> 'page' ->> 'top')::int from public.letterheads where id = v_id) <> 40 then
+    raise exception 'FAIL: لم تُحفَظْ هوامشُ الكليشة';
+  end if;
+
+  -- والأصلُ واحدةٌ لا أكثر
+  perform public.save_letterhead(v_id, 'كليشةُ اختبار', null, true);
+  select count(*) into v_n from public.letterheads where is_default;
+  if v_n <> 1 then raise exception 'FAIL: أكثرُ من كليشةٍ أصل: %', v_n; end if;
+
+  -- وقوالبُ التصدير تجمع المجمَّعاتِ والكليشات
+  select count(*) filter (where kind = 'letterhead'),
+         count(*) filter (where kind = 'book')
+    into v_n, v_books from public.export_templates();
+  if v_n < 1 then raise exception 'FAIL: الكليشاتُ غائبةٌ عن قوالب التصدير'; end if;
+  if v_books < 1 then raise exception 'FAIL: قوالبُ المجمَّع غائبةٌ عن قوالب التصدير'; end if;
+
+  perform public.delete_letterhead(v_id);
+  if exists (select 1 from public.letterheads where id = v_id) then
+    raise exception 'FAIL: لم تُحذَفِ الكليشة';
+  end if;
+  raise notice 'PASS: الكليشاتُ تُحفَظ وتُحذَف، وقوالبُ التصدير تجمعها مع المجمَّعات';
+end $$;
+
+-- =====================================================================
+-- ٩١) البطاقة: أجلٌ يُطبَع، وظهورٌ يُرفَع ويوضَع (ملاحظة ٤٠٢)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_m uuid; v_n int; v_until date; v_shows boolean;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select id into v_m from public.profiles where status = 'active' and id <> v_mgr limit 1;
+  if v_m is null then raise notice 'PASS: لا أعضاءَ في القاعدة'; return; end if;
+
+  v_n := public.issue_member_cards_until(array[v_m], 3, null);
+  if v_n < 1 then raise exception 'FAIL: لم تُعتمَدِ البطاقة'; end if;
+  select valid_until into v_until from public.member_cards where member_id = v_m;
+  if v_until is null or v_until <= current_date then
+    raise exception 'FAIL: أجلُ البطاقة لم يُحسَبْ: %', v_until;
+  end if;
+  if v_until > current_date + 100 then
+    raise exception 'FAIL: ثلاثةُ أشهرٍ أطولُ من حدِّها: %', v_until;
+  end if;
+
+  select shows into v_shows from public.card_visibility() where member_id = v_m;
+  if not v_shows then raise exception 'FAIL: البطاقةُ المعتمَدةُ لا تظهر لصاحبها'; end if;
+
+  perform public.hide_member_card(v_m, true);
+  select shows into v_shows from public.card_visibility() where member_id = v_m;
+  if v_shows then raise exception 'FAIL: البطاقةُ المخفيّةُ ما زالت تظهر'; end if;
+
+  perform public.hide_member_card(v_m, false);
+  select shows into v_shows from public.card_visibility() where member_id = v_m;
+  if not v_shows then raise exception 'FAIL: لم تعدِ البطاقةُ للظهور'; end if;
+
+  -- وأجلٌ يُحدَّد بتاريخه
+  perform public.issue_member_cards_until(array[v_m], null, current_date + 200);
+  select valid_until into v_until from public.member_cards where member_id = v_m;
+  if v_until <> current_date + 200 then
+    raise exception 'FAIL: الأجلُ المحدَّدُ لم يُحفَظ: %', v_until;
+  end if;
+
+  delete from public.member_cards where member_id = v_m;
+  raise notice 'PASS: البطاقةُ لها أجلٌ وظهورٌ يُرفَع ويوضَع، ويُعرَف من تظهر له';
+end $$;
+
+-- =====================================================================
+-- ٩٢) التعطيلُ لا يقع بلا سبب، والسببُ يُقيَّد (ملاحظة ٤٠٣)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_m uuid; v_why text; v_st text;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select id into v_m from public.profiles
+   where status = 'active' and role = 'translator' and id <> v_mgr limit 1;
+  if v_m is null then raise notice 'PASS: لا مترجمَ في القاعدة'; return; end if;
+
+  begin
+    perform public.set_member_disabled(v_m, true, '  ');
+    raise exception 'FAIL: عُطّل الحسابُ بلا سبب';
+  exception when others then
+    if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+
+  perform public.set_member_disabled(v_m, true, 'انتهاءُ التكليف');
+  select status::text, disabled_reason into v_st, v_why
+    from public.profiles where id = v_m;
+  if v_st <> 'disabled' then raise exception 'FAIL: لم يُعطَّلِ الحساب: %', v_st; end if;
+  if v_why <> 'انتهاءُ التكليف' then raise exception 'FAIL: لم يُقيَّدِ السبب: %', v_why; end if;
+
+  perform public.set_member_disabled(v_m, false, null);
+  select status::text, disabled_reason into v_st, v_why
+    from public.profiles where id = v_m;
+  if v_st <> 'active' then raise exception 'FAIL: لم يُفعَّلِ الحساب'; end if;
+  if v_why is not null then raise exception 'FAIL: بقي سببُ التعطيل بعد التفعيل'; end if;
+
+  raise notice 'PASS: التعطيلُ لا يقع بلا سببٍ مكتوب، ويُمحى السببُ عند التفعيل';
+end $$;
+
+-- =====================================================================
+-- ٩٣) التصديرُ المجمَّع: عدَدُ الخطب والصفحات، والترتيبُ بالجمعة
+--     (ملاحظة ٤١٣)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_s int; v_v int; v_p int; v_first text; v_rows int;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+
+  select sermons, versions, pages into v_s, v_v, v_p
+    from public.arch_export_count(1445, null, null, null, null);
+  if v_s is null then raise exception 'FAIL: لم يُحسَبِ العدّ'; end if;
+  if v_v > 0 and v_p < v_v then
+    raise exception 'FAIL: الصفحاتُ أقلُّ من النسخ: % < %', v_p, v_v;
+  end if;
+
+  -- واللغةُ تُضيِّق العدّ
+  if v_v > 0 then
+    select versions into v_rows
+      from public.arch_export_count(1445, array['ar'], null, null, null);
+    if v_rows > v_v then raise exception 'FAIL: تضييقُ اللغة زاد العدّ'; end if;
+  end if;
+
+  -- وترتيبُ الصفوف: العربيةُ قبل لغاتها في الجمعة الواحدة
+  select language_code into v_first from public.arch_book_all(1445) limit 1;
+  if v_first is not null and v_first <> 'ar' then
+    raise exception 'FAIL: الصفُّ الأولُ ليس العربية: %', v_first;
+  end if;
+
+  raise notice 'PASS: التصديرُ المجمَّع يَعُدُّ خطبَه وصفحاتِه، والعربيةُ أولُ لغاته';
+end $$;

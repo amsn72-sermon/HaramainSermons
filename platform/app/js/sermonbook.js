@@ -561,7 +561,19 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
       if (!blocks.length || !parts.length) {
         blocks.push({ html: '<p class="bp muted">لا نصَّ محفوظٌ لهذه النسخة.</p>' });
       }
-      blocks.push({ html: `<div class="docno" dir="ltr">${esc(r.doc_no || '')}</div>` });
+      // ختمُ التوثيق كاملًا لا رقمًا مجرَّدًا (ملاحظة ٤١٤)
+      if (r.doc_no) {
+        const vurl = `https://haramainsermons.com/verify?doc=${encodeURIComponent(r.doc_no)}`;
+        let qsrc = '';
+        try { qsrc = qrDataUri(vurl, { margin: 1, dark: tpl.inner.ink }); } catch { qsrc = ''; }
+        const when = r.hijri_text || (r.sermon_date ? fmtHijri(r.sermon_date) : '');
+        blocks.push({ html: '<div class="docno">'
+          + (qsrc ? `<img class="qr" src="${qsrc}" alt="">` : '')
+          + '<div><div class="lbl">رقم التوثيق</div>'
+          + `<div class="no" dir="ltr">${esc(r.doc_no)}</div>`
+          + (when ? `<div class="dt">تاريخ الترجمة: ${esc(when)}</div>` : '')
+          + '</div></div>' });
+      }
 
       // الشريطُ ارتفاعُه معلومٌ بالقياس لا بالصورة، فالصورةُ قد لا تُحمَّل بعد
       const toMeasure = blocks.filter(b => b.kind !== 'band');
@@ -820,7 +832,15 @@ function bookCss(S, M, winW, winH, F, tpl) {
     text-align: center; margin: 2mm 0 4mm; font-weight: 700; }
   .kh2::before, .kh2::after { content: ''; display: block; height: .3mm;
     background: ${g}; opacity: .5; margin: 2mm auto; width: 40mm; }
-  .docno { margin-top: 4mm; font-size: 8pt; color: #8a7a5c; text-align: center; direction: ltr; }
+  /* ختمُ التوثيق في ذيل الخطبة: رقمُه وتاريخُه ورمزُه — كما في سائر
+     المخرجات (ملاحظة ٤١٤) */
+  .docno { margin-top: 5mm; display: flex; align-items: center; justify-content: center;
+    gap: 3mm; direction: rtl; }
+  .docno img.qr { width: 15mm; height: 15mm; }
+  .docno .lbl { font-size: 7.5pt; color: #8a7a5c; }
+  .docno .no { font-size: 10pt; font-weight: 700; letter-spacing: .6px; direction: ltr;
+    color: #3b3630; margin: .4mm 0; }
+  .docno .dt { font-size: 7.5pt; color: #6b6257; }
   .sec-h { font-size: calc(${F.size + 5}pt * var(--fs) / 100); color: ${green};
     text-align: center; margin: 0 0 6mm; direction: rtl; }
   .intro-p { margin: 0 0 4mm; }

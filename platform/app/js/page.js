@@ -20,6 +20,42 @@ export const winHeight = () => boxHeight() - BOX.numH - BOX.safeH;
 export const PUBLIC_SITE = 'https://haramainsermons.com';
 export const docVerifyUrl = no => `${PUBLIC_SITE}/verify?doc=${encodeURIComponent(no || '')}`;
 
+// ـــ ختمُ التوثيق: واحدٌ في كلِّ المخرجات — رقمُه وتاريخُه الهجريُّ
+//   ورمزُ تحقُّقه، في موضعٍ واحدٍ وهيئةٍ واحدة (ملاحظة ٤١٤)
+export const DOC_STAMP_CSS = (side = PAGE.side) => `
+.doc-stamp { position: absolute; top: 9mm; left: ${side}mm; display: flex; align-items: center;
+  gap: 3mm; font-size: 8pt; color: #3b3630; text-align: start; }
+.doc-stamp img.qr { width: 17mm; height: 17mm; }
+.doc-stamp .lbl { font-size: 7.5pt; color: #6b6257; }
+.doc-stamp .no { font-size: 11pt; font-weight: 700; letter-spacing: .6px; direction: ltr; margin: .4mm 0; }
+.doc-stamp .dt { font-size: 7.5pt; color: #3b3630; }`;
+
+// يُبنى الختمُ في مستندٍ مُعطًى. qr: دالّةٌ تُعطي صورةَ الرمز أو فراغًا.
+export function docStampNode(d, track, qr) {
+  const no = track && track.doc_no;
+  if (!no) return null;
+  const stamp = d.createElement('div');
+  stamp.className = 'doc-stamp'; stamp.dir = 'rtl'; stamp.lang = 'ar';
+  let src = '';
+  try { src = qr ? qr(docVerifyUrl(no)) : ''; } catch { src = ''; }
+  if (src) {
+    const img = d.createElement('img');
+    img.className = 'qr'; img.alt = `رمز التحقق من ${no}`; img.src = src;
+    stamp.append(img);
+  }
+  const box = d.createElement('div');
+  const mk = (cls, text, ltr) => {
+    const e = d.createElement('div');
+    e.className = cls; e.textContent = text;
+    if (ltr) e.dir = 'ltr';
+    return e;
+  };
+  box.append(mk('lbl', 'رقم التوثيق'), mk('no', no, true),
+    mk('dt', `تاريخ الترجمة: ${fmtHijri(track.doc_no_at || track.completed_at)}`));
+  stamp.append(box);
+  return stamp;
+}
+
 const SERMON_LABEL = { 'خطبة جمعة': 'خطبة الجمعة', 'خطبة عرفة': 'خطبة يوم عرفة',
   'خطبة عيد الأضحى': 'خطبة عيد الأضحى', 'خطبة عيد الفطر': 'خطبة عيد الفطر',
   'خطبة استسقاء': 'خطبة الاستسقاء', 'خطبة كسوف': 'خطبة الكسوف', 'خطبة خسوف': 'خطبة الخسوف' };

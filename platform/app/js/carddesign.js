@@ -347,7 +347,12 @@ export function itemText(key, { member, cfg, roleLabel, langsText }) {
     case 'langs': return langsText || '';
     case 'member_no': return member.member_no != null ? `No. ${member.member_no}` : '';
     case 'official': return [cfg.official_name, cfg.official_title].filter(Boolean).join('\n');
-    case 'valid': return cfg.valid_until_text ? `سارية حتى ${cfg.valid_until_text}` : '';
+    // أجلُ البطاقة: ما حُدِّد لصاحبها عند الاعتماد مقدَّمٌ على العامّ
+    //   (ملاحظة ٤٠٢)
+    case 'valid': {
+      const t = member?.valid_until_text || cfg.valid_until_text;
+      return t ? `سارية حتى ${t}` : '';
+    }
     default: return '';
   }
 }

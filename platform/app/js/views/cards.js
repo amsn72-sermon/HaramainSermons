@@ -1,11 +1,12 @@
 // بطاقات عمل فريق الترجمة: تصميمها بالسحب والإفلات وطباعتها (ملاحظتا ٨٥ و٨٦)
-import { h, toast, busy, escapeHtml, fmtDate } from '../ui.js';
+import { h, toast, busy, escapeHtml, fmtDate, dialog } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { langName, roleLabel } from '../store.js';
 import { urlToDataUrl } from '../photo.js';
 import { CARD, HARAMAIN_LOGO, ITEM_LABEL, ITEM_ORDER, COLORS, PRESETS, PRESET_LAYOUT, DEFAULT_LAYOUT, normalizeLayout, clampLayout, photoH, itemText, itemStyle, bandStyle, ruleStyle, scaleStyle, logoExtra, newCustom, customLabel, CARD_FONTS, fontStack, cardVerifyUrl,
   SHAPE_KINDS, newShape, shapeLabel, shapeStyle, bgStyle, wmStyle } from '../carddesign.js';
 import { qrDataUri } from '../qr.js';
+import { unifiedPanel } from '../unipanel.js';
 
 const AR = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn');
 
@@ -69,6 +70,9 @@ export async function render(ctx) {
   // لوحة التصميم: البطاقة بمقاسها الحقيقي مضروبًا في SCALE
   // ------------------------------------------------------------------
   const stage = h('div.card-stage', { tabindex: '0', 'aria-label': 'لوحة تصميم البطاقة' });
+  const stageWrap = h('div.card-stage-wrap', stage);
+  // تُملأ بعد بناء اللوحة: تنقل إلى قائمة العنصر المضغوط (ملاحظة ٤٠١)
+  let jumpTo = () => {};
   const panel = h('div.cd-panel');
   const bandBox = h('div.stack');
   const fontBox = h('div');   // نوع الخط ظاهر دائمًا لا داخل التفاصيل المطوية
@@ -187,6 +191,7 @@ export async function render(ctx) {
     selected = key;
     stage.querySelectorAll('.cd-item').forEach(el => el.classList.toggle('sel', el.dataset.key === key));
     drawPanel();
+    jumpTo(key);
     const it = itemOf(key);
     if (!it) return;
     const startX = e.clientX, startY = e.clientY, ox = it.x, oy = it.y;
@@ -710,6 +715,10 @@ export async function render(ctx) {
     field: 'المرشدون المكانيّون', answers: 'إجابةُ السائلين' };
   const TEAM_ORDER = ['admins', 'translators', 'field', 'answers'];
 
+  // أسماءُ الفريق مطويّةٌ خلف سهم، وفيها بحثٌ بالاسم (ملاحظة ٤٠٢)
+  const openTeam = new Set();
+  const teamQ = {};
+
   const drawList = () => {
     const groups = TEAM_ORDER
       .map(k => [k, pool.filter(m => TEAM_OF(m) === k)])
@@ -724,23 +733,47 @@ export async function render(ctx) {
         else list.forEach(m => picked.delete(m.id));
         drawList(); count(); drawStage();
       };
-      return h('section.pick-team',
-        h('label.check.pick-team-head', head,
-          h('b', TEAM_NAME[k] || k),
-          h('span.small.muted', ` — ${AR(n)} من ${AR(list.length)}`)),
-        h('div.pick-team-body', list.map(m => {
-          const cb = h('input', { type: 'checkbox', checked: picked.has(m.id) ? true : null });
-          cb.onchange = () => {
-            cb.checked ? picked.add(m.id) : picked.delete(m.id);
-            drawList(); count(); drawStage();
-          };
-          return h('label.check', cb, h('span', m.full_name,
-            h('span.small.muted', ` — ${roleLabel(m)}`),
-            !photoOf[m.id] && h('span.badge.warn', 'بلا صورة'),
-            issuedOf[m.id] && h('span.badge.ok', 'بطاقته معتمَدة')));
-        })));
+      const shut = !openTeam.has(k);
+      const arrow = h('button.fold-btn', { type: 'button',
+        'aria-expanded': shut ? 'false' : 'true',
+        title: shut ? 'افتحِ الأسماء' : 'اطوِ الأسماء' }, shut ? '▾' : '▴');
+      arrow.onclick = () => {
+        if (shut) openTeam.add(k); else openTeam.delete(k);
+        drawList();
+      };
+      const search = h('input', { type: 'search', value: teamQ[k] || '',
+        placeholder: 'ابحثْ بالاسم…', 'aria-label': `بحث في ${TEAM_NAME[k] || k}` });
+      search.oninput = () => { teamQ[k] = search.value; drawList(); search.focus(); };
+      const key = (teamQ[k] || '').trim();
+      const shown = key ? list.filter(m => (m.full_name || '').includes(key)) : list;
+
+      return h('section.pick-team' + (shut ? '.shut' : ''),
+        h('div.pick-team-head',
+          h('label.check', head,
+            h('b', TEAM_NAME[k] || k),
+            h('span.small.muted', ` ${AR(n)} من ${AR(list.length)}`)),
+          arrow),
+        shut ? null : h('div.pick-team-body',
+          h('label.field.pick-search', search),
+          ...(shown.length ? shown.map(m => {
+            const cb = h('input', { type: 'checkbox', checked: picked.has(m.id) ? true : null });
+            cb.onchange = () => {
+              cb.checked ? picked.add(m.id) : picked.delete(m.id);
+              drawList(); count(); drawStage();
+            };
+            const card = issuedOf[m.id];
+            return h('label.check', cb, h('span', m.full_name,
+              h('span.small.muted', ` — ${roleLabel(m)}`),
+              !photoOf[m.id] && h('span.badge.warn', 'بلا صورة'),
+              card && card.hidden
+                ? h('span.badge.warn', 'مخفيّة')
+                : card ? h('span.badge.ok', 'ظاهرةٌ له') : null,
+              card && card.valid_until
+                ? h('span.small.muted', ` حتى ${fmtDate(card.valid_until)}`) : null));
+          }) : [h('p.small.muted', 'لا اسمَ يطابق البحث.')])));
     }));
   };
+
   allBox.onchange = () => { picked.clear(); if (allBox.checked) pool.forEach(m => picked.add(m.id)); drawList(); count(); drawStage(); };
   const onlyTranslators = h('button.btn.sm.ghost', { type: 'button' }, 'المترجمون فقط');
   onlyTranslators.onclick = () => {
@@ -774,17 +807,88 @@ export async function render(ctx) {
   };
 
   // اعتماد البطاقة يجعلها تظهر في حساب المترجم (ملاحظة ٨٧)
+  // ـــ مدةُ الإصدار: ثلاثةُ أشهرٍ أو ستةٌ أو أجلٌ يُحدَّد (ملاحظة ٤٠٢)
   const issueBtn = h('button.btn', { type: 'button' }, 'اعتماد البطاقة للمحددين');
   issueBtn.onclick = () => busy(issueBtn, async () => {
     const ids = [...picked];
     if (!ids.length) return toast('اختر عضوًا واحدًا على الأقل.', 'bad');
+    const span = h('select', { 'aria-label': 'مدة الإصدار' },
+      h('option', { value: '3' }, 'ثلاثةُ أشهر'),
+      h('option', { value: '6', selected: true }, 'ستةُ أشهر'),
+      h('option', { value: 'date' }, 'أجلٌ يُحدَّد'),
+      h('option', { value: '' }, 'بلا أجل'));
+    const until = h('input', { type: 'date', 'aria-label': 'تاريخ الانتهاء' });
+    const untilRow = h('label.field', 'سارية حتى', until);
+    const sync = () => { untilRow.hidden = span.value !== 'date'; };
+    span.onchange = sync; sync();
+    const res = await dialog({
+      title: `اعتمادُ ${AR(ids.length)} بطاقة`,
+      body: h('div.stack',
+        h('p.small.muted', 'يُطبَع أجلُ البطاقة عليها، وتظهر لصاحبها حتى ينقضي.'),
+        h('label.field', 'مدةُ الإصدار', span),
+        untilRow),
+      buttons: [
+        { label: 'اعتمِدْ', kind: 'primary',
+          validate: () => (span.value === 'date' && !until.value ? 'حدِّدِ الأجل' : true),
+          value: () => ({ months: span.value === 'date' || !span.value ? null : Number(span.value),
+            until: span.value === 'date' ? until.value : null }) },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
     try {
-      const n = await db.rpc('issue_member_cards', { p_members: ids, p_issued: true });
+      const n = await db.rpc('issue_member_cards_until',
+        { p_members: ids, p_months: res.months, p_until: res.until });
       const count = Number(Array.isArray(n) ? n[0] : n) || ids.length;
-      ids.forEach(id => { issuedOf[id] = { member_id: id, issued_at: new Date().toISOString() }; });
+      const end = res.until
+        || (res.months ? new Date(Date.now() + res.months * 30.44 * 86400000)
+            .toISOString().slice(0, 10) : null);
+      ids.forEach(id => {
+        issuedOf[id] = { member_id: id, issued_at: new Date().toISOString(),
+          valid_until: end, hidden: false };
+      });
       drawList();
-      toast(`اعتُمدت ${count} بطاقة — تظهر الآن في حساب أصحابها.`, 'ok');
+      toast(`اعتُمدت ${AR(count)} بطاقة${end ? ` حتى ${fmtDate(end)}` : ''}.`, 'ok');
     } catch (e) { toast(e.message, 'bad'); }
+  });
+
+  // ـــ إظهارُ البطاقة لشخصٍ أو إخفاؤها، وبيانُ من تظهر له (ملاحظة ٤٠٢)
+  const hideBtn = h('button.btn.sm.ghost', { type: 'button' }, 'إخفاءُ المحدَّد');
+  hideBtn.onclick = () => busy(hideBtn, () => setHidden(true));
+  const showBtn = h('button.btn.sm.ghost', { type: 'button' }, 'إظهارُ المحدَّد');
+  showBtn.onclick = () => busy(showBtn, () => setHidden(false));
+  async function setHidden(on) {
+    const ids = [...picked].filter(id => issuedOf[id]);
+    if (!ids.length) return toast('اختَرْ من بطاقتُه معتمَدةٌ أولًا.', 'bad');
+    try {
+      for (const id of ids) await db.rpc('hide_member_card', { p_member: id, p_hidden: on });
+      ids.forEach(id => { issuedOf[id] = { ...issuedOf[id], hidden: on }; });
+      drawList();
+      toast(on ? `أُخفيت ${AR(ids.length)} بطاقة عن أصحابها.`
+        : `ظهرت ${AR(ids.length)} بطاقة لأصحابها.`, 'ok');
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  const whoBtn = h('button.btn.sm.ghost', { type: 'button' }, 'من تظهر له البطاقة؟');
+  whoBtn.onclick = () => busy(whoBtn, async () => {
+    let rows = [];
+    try { rows = await db.rpc('card_visibility') || []; } catch (e) { return toast(e.message, 'bad'); }
+    if (!rows.length) return toast('لا بطاقةَ معتمَدةٌ بعد.', '');
+    const shows = rows.filter(r => r.shows);
+    const not = rows.filter(r => !r.shows);
+    const line = r => h('li', r.full_name,
+      r.hidden ? h('span.badge.warn', 'مخفيّة') : null,
+      r.expired ? h('span.badge.bad', 'منتهية') : null,
+      r.valid_until ? h('span.small.muted', ` حتى ${fmtDate(r.valid_until)}`) : null);
+    await dialog({
+      title: 'ظهورُ البطاقات',
+      body: h('div.stack',
+        h('b', `تظهر لـ${AR(shows.length)}`),
+        shows.length ? h('ul.plain', ...shows.map(line)) : h('p.small.muted', 'لا أحد.'),
+        h('b', `لا تظهر لـ${AR(not.length)}`),
+        not.length ? h('ul.plain', ...not.map(line)) : h('p.small.muted', 'لا أحد.')),
+      buttons: [{ label: 'إغلاق', value: null }]
+    });
   });
 
   const revokeBtn = h('button.btn.sm.ghost', { type: 'button' }, 'سحب الاعتماد');
@@ -830,7 +934,9 @@ export async function render(ctx) {
       } catch { /* تُطبع البطاقة بلا خلفية خيرٌ من توقف الطباعة */ }
     }
     const ok = printCards(chosen.map(m => ({
-      member: m, photo: photos[m.id] || null,
+      member: { ...m,
+        valid_until_text: issuedOf[m.id]?.valid_until ? fmtDate(issuedOf[m.id].valid_until) : '' },
+      photo: photos[m.id] || null,
       langsText: (langsOf[m.id] || []).map(c => langName(c)).join(' · ')
     })), cfg(), layout, logoData, customData);
     if (!ok) toast('اسمح بالنوافذ المنبثقة لإتمام الطباعة.', 'bad');
@@ -841,73 +947,58 @@ export async function render(ctx) {
 
   // شريطُ أيقونات: كلُّ أيقونةٍ تفتح خياراتها وحدها، فلا تزدحم الشاشة
   // بكل الخيارات معًا (ملاحظة ١٩٩)
-  function sideTools() {
-    const TABS = [
-      ['data',  '▤', 'بيانات البطاقة', 'العنوان والمسؤول والصلاحية',
-        () => h('div.stack',
-          h('label.field', 'عنوان البطاقة', f.title),
-          h('label.field', 'السطر تحته', f.subtitle),
-          h('label.field', 'اسم المسؤول', f.official_name),
-          h('label.field', 'منصب المسؤول', f.official_title),
-          h('label.field', 'صلاحية البطاقة حتى', f.valid_until))],
-      ['preset', '▦', 'القوالب', 'تصاميم جاهزة',
-        () => h('div.stack',
-          h('p.small.muted', 'اختر أقربها إلى ما تريد ثم عدّل عليه.'),
-          h('label.field', 'قالب جاهز', h('div.row.tight', presetSel, applyPreset)))],
-      ['font',  '🎨', 'الألوان والخط', 'خط البطاقة وألوانها', () => fontBox],
-      ['logo',  '🖼', 'الصور والشعار', 'الشعار وخياراته', () => logoBox],
-      ['sign',  '✒', 'توقيع المسؤول', 'يُرفع صورةً ويوضع حيث شئت', () => signBox],
-      ['band',  '▭', 'الشريط والفواصل', 'الشريط والفواصل وخلفية البطاقة', () => bandBox],
-      // أدواتٌ جديدة: خلفيةٌ كاملةٌ وأشكالٌ وعلامةٌ مائيةٌ وطبقات (ملاحظة ٣٩٥)
-      ['bg',    '🏞', 'خلفيةُ البطاقة', 'تصميمٌ خارجيٌّ يملأ البطاقة',
-        () => { drawBg(); return bgBox; }],
-      ['shape', '◇', 'الأشكال', 'مستطيلٌ ودائرةٌ وخطٌّ وإطار',
-        () => { drawShapes(); return shapeBox; }],
-      ['wm',    '💧', 'العلامة المائية', 'نصٌّ أو صورةٌ خفيفةٌ تحت البيانات',
-        () => { drawWm(); return wmBox; }],
-      ['layer', '🗂', 'الطبقات', 'كلُّ ما على البطاقة في قائمة',
-        () => { drawLayers(); return layerBox; }],
-      ['save',  '💾', 'حفظ التصميم', 'يُحفظ للفريق كلِّه',
-        () => h('div.stack',
-          h('p.small.muted', 'زرُّ الحفظ تحت لوحة التصميم: يُحفظ فيصير قالبَ '
-            + 'بطاقات الفريق كلِّه، ويُطبع منه ما يُطبع.'))]
-    ];
-    const body = h('div.stack.cd-tabbody');
-    const btns = TABS.map(([key, icon, label, hint, make]) => {
-      const b = h('button.cd-tool', { type: 'button', 'aria-label': label, title: hint },
-        h('i.cd-tool-icon', { 'aria-hidden': 'true' }, icon),
-        h('b', label), h('span.small.muted', hint));
-      b.onclick = () => {
-        btns.forEach(x => x.classList.remove('on'));
-        b.classList.add('on');
-        body.replaceChildren(h('h3', label), make());
-      };
-      return b;
-    });
-    setTimeout(() => btns[0].click(), 0);
-    return h('div.stack.cd-side', h('div.cd-tools', btns), body);
-  }
+  // ـــ القوائمُ كلُّها في إطارٍ واحدٍ ثابتِ الأبعاد (ملاحظتا ٤٠٠ و٤٠١)
+  const TABS = [
+    { key: 'item',  icon: '✥', label: 'خصائصُ العنصر', hint: 'ما اخترتَه على البطاقة',
+      make: () => { drawPanel(); return panel; } },
+    { key: 'data',  icon: '▤', label: 'البيانات', hint: 'العنوان والمسؤول والصلاحية',
+      make: () => h('div.uni-grid',
+        h('label.field', 'عنوان البطاقة', f.title),
+        h('label.field', 'السطر تحته', f.subtitle),
+        h('label.field', 'اسم المسؤول', f.official_name),
+        h('label.field', 'منصب المسؤول', f.official_title),
+        h('label.field', 'صلاحية البطاقة حتى', f.valid_until)) },
+    { key: 'preset', icon: '▦', label: 'القوالب', hint: 'تصاميمُ جاهزةٌ يُبنى عليها',
+      make: () => h('div.stack',
+        h('p.small.muted', 'اختر أقربها إلى ما تريد ثم عدّل عليه.'),
+        h('label.field', 'قالب جاهز', h('div.row.tight', presetSel, applyPreset))) },
+    { key: 'font',  icon: '🎨', label: 'الألوان', hint: 'خطُّ البطاقة وألوانُها',
+      make: () => fontBox },
+    { key: 'logo',  icon: '🖼', label: 'الشعار', hint: 'الشعارُ وخياراته', make: () => logoBox },
+    { key: 'sign',  icon: '✒', label: 'التوقيع', hint: 'توقيعُ المسؤول', make: () => signBox },
+    { key: 'band',  icon: '▭', label: 'الشريط', hint: 'الشريطُ والفواصل', make: () => bandBox },
+    { key: 'bg',    icon: '🏞', label: 'الخلفية', hint: 'تصميمٌ خارجيٌّ يملأ البطاقة',
+      make: () => { drawBg(); return bgBox; } },
+    { key: 'shape', icon: '◇', label: 'الأشكال', hint: 'مستطيلٌ ودائرةٌ وخطٌّ وإطار',
+      make: () => { drawShapes(); return shapeBox; } },
+    { key: 'wm',    icon: '💧', label: 'العلامة', hint: 'علامةٌ مائيةٌ تحت البيانات',
+      make: () => { drawWm(); return wmBox; } },
+    { key: 'layer', icon: '🗂', label: 'الطبقات', hint: 'كلُّ ما على البطاقة في قائمة',
+      make: () => { drawLayers(); return layerBox; } }
+  ];
+
+  const uni = unifiedPanel({ stage: stageWrap, measure: stage, tabs: TABS });
+  // الضغطُ على عنصرٍ في اللوحة ينقل إلى قائمته (ملاحظة ٤٠١)
+  jumpTo = key => {
+    const to = key.startsWith('c:') ? 'item'
+      : key.startsWith('s:') ? 'shape'
+      : key === 'logo' ? 'logo'
+      : key === 'official' ? 'sign'
+      : 'item';
+    if (to === 'item') { uni.show('item'); } else uni.show(to);
+  };
 
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'بطاقات العمل'),
-      h('p.muted', 'بطاقة بمقاس الهوية الوطنية 85٫6×54 مم. اسحب أي عنصر إلى مكانه، وغيّر حجم خطه ولونه، ثم اطبع.'))),
-    // بطاقةٌ كبيرةٌ وإلى جانبها خياراتُها كلُّها (ملاحظة ٣٩٥)
-    h('div.card.cd-board',
-      h('div.cd-wrap',
-        h('div.stack.cd-stage',
-          h('h3', 'لوحة التصميم'),
-          h('div.card-stage-wrap', stage),
-          h('p.small.muted', 'اسحب العنصر بالفأرة، أو اخترَه ثم حرّكه بالأسهم (مع Shift خطوة أكبر).'),
-          h('div.row', resetBtn, saveBtn)),
-        h('div.stack.cd-opts',
-          sideTools(),
-          h('div.stack.cd-props', h('h3', 'خصائص العنصر'), panel)))),
+      h('p.muted', 'بطاقة بمقاس الهوية الوطنية 85٫6×54 مم. اضغطْ عنصرًا لتفتح خياراته، '
+        + 'أو اسحبْه إلى مكانه.'))),
+    h('div.card.cd-board', uni.el, h('div.row.wrap.cd-actions', resetBtn, saveBtn)),
     h('div.card.stack',
       h('div.row.between', h('h3', 'من تُطبع بطاقته'), h('div.row', onlyTranslators, counter)),
       h('label.check', allBox, h('b', 'تحديد الكل')),
       listBox,
       h('p.small.muted', 'الاعتماد يُظهر البطاقة في حساب صاحبها ضمن «بياناتي» ليبرزها عند الحاجة.'),
-      h('div.row', printBtn, issueBtn, revokeBtn)));
+      h('div.row.wrap', printBtn, issueBtn, revokeBtn, hideBtn, showBtn, whoBtn)));
 }
 
 // بطاقة واحدة — من شاشة «بياناتي»

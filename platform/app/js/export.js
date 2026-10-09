@@ -3,7 +3,8 @@
 import { h, fmtHijri } from './ui.js';
 import { sanitize } from './sanitize.js';
 import { langDir } from './store.js';
-import { PAGE, LETTERHEAD, cardColumns, cardRowsTr, fileName, docVerifyUrl } from './page.js';
+import { PAGE, LETTERHEAD, cardColumns, cardRowsTr, fileName, docVerifyUrl,
+  DOC_STAMP_CSS, docStampNode } from './page.js';
 import { qrPngDataUrl, qrPngBytes } from './qr.js';
 
 let docxLoading = null;
@@ -196,13 +197,15 @@ export function printTranslation(one, opts = {}) { return printTranslations([one
 
 // وعدّةُ خطبٍ في نافذةٍ واحدة: لكلِّ واحدةٍ بطاقتُها وختمُها وصفحاتُها،
 // وتبدأ كلُّ خطبةٍ صفحةً جديدة (ملاحظة ٣٧١)
-export function printTranslations(items, { autoPrint = true, name = null } = {}) {
+// lh: كليشةٌ مختارةٌ بدل كليشة الهيئة — صورةٌ تملأ الصفحة، وهوامشُها
+//   معها. فالكليشةُ عندنا صورةٌ وهوامشُ لا غير (ملاحظتا ٤٠٩ و٤١١)
+export function printTranslations(items, { autoPrint = true, name = null, lh = null } = {}) {
   if (!items || !items.length) return false;
   const first = items[0];
   const dir = langDir(first.track.language_code);
   const w = window.open('', '_blank');
   if (!w) return false;
-  const P = PAGE;
+  const P = lh && lh.page ? { ...PAGE, ...lh.page } : PAGE;
   const BOX_H = P.h - P.top - P.bottom;      // ارتفاع صندوق الكتابة بالمليمتر
   const BOX_W = P.w - P.side * 2;
   const NUM_H = 8;                          // شريط رقم الصفحة أسفل صندوق الكتابة
@@ -224,12 +227,7 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 .print-body .data-card { font-size: 11pt; }
 .data-card tr.tr-row td { font-size: 9.5pt; color: #5a6a78; unicode-bidi: plaintext; }
 #measure { position: absolute; visibility: hidden; top: -10000mm; inset-inline-start: 0; width: ${BOX_W}mm; }
-.doc-stamp { position: absolute; top: 9mm; left: ${P.side}mm; display: flex; align-items: center;
-  gap: 3mm; font-size: 8pt; color: #3b3630; text-align: start; }
-.doc-stamp img.qr { width: 17mm; height: 17mm; }
-.doc-stamp .lbl { font-size: 7.5pt; color: #6b6257; }
-.doc-stamp .no { font-size: 11pt; font-weight: 700; letter-spacing: .6px; direction: ltr; margin: .4mm 0; }
-.doc-stamp .dt { font-size: 7.5pt; color: #3b3630; }
+${DOC_STAMP_CSS(P.side)}
 @media screen { body { background: #d9d9d9 !important; } .sheet { margin: 16px auto; box-shadow: 0 2px 12px #0003; } }
 @media print { .sheet { margin: 0; box-shadow: none; height: ${P.h - 0.5}mm; } }
 </style></head><body><div id="pages"></div><div id="measure"><div class="print-body flow"><div class="card-slot"></div><div class="t"></div></div></div></body></html>`);
@@ -266,26 +264,9 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
   };
 
   // ختم التوثيق: أعلى الصفحة الأولى يسارًا، مقابل شعار الهيئة (ملاحظة ١٤٥)
-  const docStamp = track => {
-    if (!track.doc_no) return null;
-    const stamp = d.createElement('div');
-    stamp.className = 'doc-stamp'; stamp.dir = 'rtl'; stamp.lang = 'ar';
-    let src = '';
-    try { src = qrPngDataUrl(docVerifyUrl(track.doc_no), { scale: 6 }); } catch { src = ''; }
-    if (src) {
-      const img = d.createElement('img');
-      img.className = 'qr'; img.alt = `رمز التحقق من ${track.doc_no}`; img.src = src;
-      stamp.append(img);
-    }
-    const box = d.createElement('div');
-    const lbl = d.createElement('div'); lbl.className = 'lbl'; lbl.textContent = 'رقم التوثيق';
-    const no = d.createElement('div'); no.className = 'no'; no.dir = 'ltr'; no.textContent = track.doc_no;
-    const dt = d.createElement('div'); dt.className = 'dt';
-    dt.textContent = `تاريخ الترجمة: ${fmtHijri(track.doc_no_at || track.completed_at)}`;
-    box.append(lbl, no, dt);
-    stamp.append(box);
-    return stamp;
-  };
+  // الختمُ واحدٌ في كلِّ المخرجات (ملاحظة ٤١٤)
+  const docStamp = track =>
+    docStampNode(d, track, url => qrPngDataUrl(url, { scale: 6 }));
 
   // مواضع نهايات الأسطر: لا نقطع سطرًا بين صفحتين
   function lineBottoms(flow) {
@@ -335,7 +316,7 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
     }
 
     const pages = d.getElementById('pages');
-    const lhUrl = new URL(LETTERHEAD, location.origin).href;
+    const lhUrl = lh && lh.src ? lh.src : new URL(LETTERHEAD, location.origin).href;
     pages.append(...starts.map((start, i) => {
       const img = d.createElement('img'); img.className = 'lh'; img.alt = ''; img.src = lhUrl;
       const clone = flow.cloneNode(true);

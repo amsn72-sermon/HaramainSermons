@@ -7,6 +7,7 @@ import { state, isManager, ROLE_LABEL, STATUS_LABEL, roleName,
 import { POLICY_KEY, POLICY_VERSION } from '../policy.js';
 import { TEAM_FIELDS, teamRows, exportExcel, exportWord, exportPdf } from '../teamexport.js';
 import { nationalitySelect } from '../nationalities.js';
+import { icon } from '../icons.js';
 
 // الفرق مستقلّة: الترجمة التخصصية، والإرشاد المكاني، وإجابة السائلين (ملاحظتا ٩٩ و١٨٦)
 export { TRACK_LABEL, trackOf };
@@ -921,6 +922,38 @@ export async function render(ctx, opts = {}) {
     } catch (err) { toast(err.message, 'bad'); }
   }
 
+  // التعطيلُ يسبقه تنبيهٌ ويُسجَّل سببُه (ملاحظة ٤٠٣)
+  async function disableDialog(btn, m) {
+    const why = h('input', { 'aria-label': 'سبب التعطيل',
+      placeholder: 'انتهاءُ التكليف، أو انقطاعٌ عن العمل…' });
+    const res = await dialog({
+      title: `تعطيلُ حساب ${m.full_name}`,
+      body: h('div.stack',
+        h('div.form-errors', { role: 'alert' },
+          h('b', 'لن يدخلَ المنصةَ بعد التعطيل.'),
+          h('p.small', 'سجلُّه محفوظٌ، ويُعاد تفعيلُه متى شئت.')),
+        h('label.field', 'سببُ التعطيل', why)),
+      buttons: [
+        { label: 'عطِّلْ', kind: 'danger',
+          validate: () => (why.value.trim().length >= 3 ? true : 'اكتبْ سببَ التعطيل'),
+          value: () => why.value.trim() },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
+    return setDisabled(btn, m, true, res);
+  }
+
+  async function setDisabled(btn, m, off, why = null) {
+    await busy(btn, async () => {
+      try {
+        await db.rpc('set_member_disabled', { p_member: m.id, p_off: off, p_why: why });
+        toast(off ? `عُطّل حساب ${m.full_name}.` : `فُعّل حساب ${m.full_name}.`, 'ok');
+        reload();
+      } catch (err) { toast(err.message, 'bad'); }
+    });
+  }
+
   async function setStatus(btn, m, status) {
     await busy(btn, async () => {
       try {
@@ -993,11 +1026,15 @@ export async function render(ctx, opts = {}) {
     if (!idOk(m) && !bankOk(m)) return null;
     const what = [idOk(m) ? 'الهوية' : null, bankOk(m) ? 'الحساب المصرفي' : null]
       .filter(Boolean).join(' و');
-    const b = h('button.btn.sm.ghost', { type: 'button',
-      title: `${what} — معتمَدٌ ومحفوظ` }, `🪪 ${what}`);
-    b.onclick = () => busy(b, () => approvedDialog(m));
-    return b;
+    return actIcon('idcard', what, b => busy(b, () => approvedDialog(m)), '',
+      `${what} — معتمَدٌ ومحفوظ`);
   };
+
+  // أيقوناتٌ معبِّرةٌ بدل الأزرار، توفيرًا للمساحة (ملاحظة ٤٠٣)
+  const actIcon = (name, label, run, cls = '', title = '') =>
+    h('button.icon-btn.row-act' + (cls ? '.' + cls : ''),
+      { type: 'button', title: title || label, 'aria-label': label,
+        onclick: ev => run(ev.currentTarget) }, icon(name, { size: 18 }));
 
   async function approvedDialog(m) {
     const p = privOf[m.id] || {};
@@ -1071,7 +1108,7 @@ export async function render(ctx, opts = {}) {
       .filter(m => !filterStatus.value || m.status === filterStatus.value)
       .filter(m => !q.value.trim() || m.full_name.includes(q.value.trim()) || m.email.includes(q.value.trim()));
     table.replaceChildren(list.length ? h('div.table-wrap', h('table.responsive',
-      h('thead', h('tr', ['الاسم', 'الدور', 'اللغات', showPerf ? 'التقييم' : 'رقم العضوية', 'السرية', 'الحالة', ''].map(t => h('th', t)))),
+      h('thead', h('tr', ['الاسم', 'الدور', 'اللغات', showPerf ? 'التقييم' : 'رقم العضوية', 'السرية', 'الوسوم', ''].map(t => h('th', t)))),
       h('tbody', list.map(m => h('tr',
         // الاسمُ نفسُه يفتح الملفَّ: لا يُبحَث عن زرٍّ في طرف الصفّ (ملاحظة ٣٠١)
         h('td', { 'data-label': 'الاسم' },
@@ -1093,8 +1130,8 @@ export async function render(ctx, opts = {}) {
         h('td', { 'data-label': 'السرية' }, signOf[m.id]
           ? h('span.badge.ok', { title: fmtDateTime(signOf[m.id].accepted_at) }, 'موقّعة')
           : h('span.badge.warn', 'لم توقّع')),
-        h('td', { 'data-label': 'الحالة' },
-          h('span.badge', { class: m.status === 'active' ? 'ok' : 'bad' }, STATUS_LABEL[m.status]),
+        // عمودُ «الحالة» حُذف؛ أيقونةُ التعطيل تُنبئ عنه بلونها (ملاحظة ٤٠٣)
+        h('td', { 'data-label': 'الوسوم' },
           // «يترجم» تُعلَّم على غير فريق الترجمة لأنها فيهم استثناء،
           // وغيابُها عن المترجم المتخصص يُعلَّم لأنه فيه خروجٌ عن الأصل
           m.may_translate && trackOf(m) !== 'translation'
@@ -1106,19 +1143,22 @@ export async function render(ctx, opts = {}) {
             ? h('span.badge.warn', { title: 'بعض الصلاحيات مغلقة' },
                 `${Object.values(m.perms).filter(v => v === false).length} مغلقة`) : null,
           dataBadge(m)),
-        h('td', canManage(m) && m.id !== state.profile.id && h('div.row',
+        h('td', canManage(m) && m.id !== state.profile.id && h('div.row.row-acts',
           fileBtn(m),
           (privOf[m.id] || {}).data_status === 'submitted'
-            ? h('button.btn.sm.primary', { type: 'button',
-                onclick: () => reviewData(m) }, 'تدقيق البيانات') : null,
-          showPerf && h('button.btn.sm', { type: 'button', onclick: () => performance(m) }, 'الأداء والتقييم'),
-          h('button.btn.sm', { type: 'button', onclick: () => edit(m) }, 'الملف والتعديل'),
+            ? actIcon('clipboard', 'تدقيق البيانات', () => reviewData(m), 'warn') : null,
+          showPerf ? actIcon('gauge', 'الأداء والتقييم', () => performance(m)) : null,
+          actIcon('pen', 'الملف والتعديل', () => edit(m)),
+          // خطٌّ يفصل أيقوناتِ العمل عن التعطيل والحذف (ملاحظة ٤٠٣)
+          h('span.row-sep', { 'aria-hidden': 'true' }),
           m.status === 'active'
-            ? h('button.btn.sm.danger', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'disabled') }, 'تعطيل')
-            : h('button.btn.sm', { type: 'button', onclick: e => setStatus(e.currentTarget, m, 'active') }, 'تفعيل'),
+            ? actIcon('power', 'تعطيل', b => disableDialog(b, m), 'on',
+                'الحسابُ مفعَّل — اضغطْ لتعطيله')
+            : actIcon('power', 'تفعيل', b => setDisabled(b, m, false), 'off',
+                m.disabled_reason ? `معطَّل: ${m.disabled_reason}` : 'الحسابُ معطَّل'),
           can('delete_member')
-            ? h('button.btn.sm.ghost', { type: 'button', title: 'حذفٌ لا يُستدرك',
-                onclick: () => removeMember(m) }, 'حذف') : null)))))))
+            ? actIcon('trash', 'حذف', () => removeMember(m), 'danger',
+                'حذفٌ لا يُستدرك') : null)))))))
       : emptyState('لا أعضاء مطابقون', 'غيّر عوامل التصفية.'));
   }
   [filterLang, filterStatus, q].forEach(el => el.addEventListener('input', draw));
