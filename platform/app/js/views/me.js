@@ -475,6 +475,11 @@ async function cardSection(me, priv, langs, issued, settings) {
   await Promise.all((layout.custom || []).filter(c => c.type === 'image' && c.path).map(async c => {
     try { customUrls[c.id] = await storage.signedUrl('brand', c.path, 600); } catch { /* تُتجاوز */ }
   }));
+  // خلفيةُ البطاقة وعلامتُها المائية (ملاحظة ٣٩٥)
+  await Promise.all([['__bg', layout.bg?.path], ['__wm', layout.wm?.path]]
+    .filter(([, p]) => p).map(async ([key, p]) => {
+      try { customUrls[key] = await storage.signedUrl('brand', p, 600); } catch { /* تُتجاوز */ }
+    }));
 
   const build = scale => staticCard(h, { layout, member: me, cfg, roleLabel: myRoleLabel, langsText, logoSrc, photoUrl, customUrls, scale });
 

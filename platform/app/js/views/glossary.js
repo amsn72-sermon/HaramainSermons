@@ -396,8 +396,7 @@ export async function contribCard({ own = false } = {}) {
 
   return h('section.card.stack',
     h('h3', own || !isAdmin() ? 'مشاركتي في الدليل المصطلحي' : 'المشاركة في الدليل المصطلحي'),
-    h('p.small.muted', 'سجلُّ مشاركةٍ معدودٌ لا تقييم: فالتقييمُ يأتي من مشرفي الهيئة '
-      + 'ونحن نسجّله، ولا تولّده المنصةُ من أرقامها. ولا يدخل هذا في التقرير الشهري للعقد.'),
+    h('p.small.muted', 'عددُ المشاركة لا تقييم.'),
     mine.length ? h('div.table-wrap', h('table.responsive',
       h('thead', h('tr', ['العضو', 'قدّم', 'اعتُمد', 'رُدَّ', 'معانٍ', 'ترجمات', 'نسبة الاعتماد', 'أثر المصطلح']
         .map(t => h('th', t)))),
@@ -616,6 +615,9 @@ async function importFile(file, reload) {
 // ---------------------------------------------------------------------
 export async function render(ctx) {
   const admin = isAdmin();
+  // المترجمُ يُطالع الدليلَ معجمًا بلغته ويبحث فيه، ولا يُصدِّر ولا
+  //   يُعدِّل ولا يرفع. وإن لم يكن للغته دليلٌ لم يُعرَض شيء (ملاحظة ٣٩٨)
+  const reader = !admin;
   const guide = await db.rpc('platform_guidance').catch(() => null);
 
   let langRows = [];
@@ -635,6 +637,7 @@ export async function render(ctx) {
   // اللغةُ تُؤخذ من المسار: الضغطُ على بطاقتها يدخل صفحتَها (ملاحظة ٢٩٥)
   const routed = (ctx?.params?.lang || '').trim();
   let lang = routed && langRows.some(r => r.code === routed) ? routed : (routed ? '' : firstLang());
+  if (reader) lang = langRows.some(r => r.code === lang) ? lang : firstLang();
   let showEmpty = false;
   let rows = [];                   // صفوفُ المعجم المعروضة
   let terms = [];                  // الصفوفُ الكاملةُ لعرض «كل اللغات»
@@ -709,6 +712,12 @@ export async function render(ctx) {
       lang = ok; showEmpty = true; drawCards(); draw();
     };
 
+    if (reader) {
+      // لغةٌ واحدةٌ: لا بطاقاتٍ ولا أزرار، وأكثرُ من لغةٍ: بطاقاتٌ للتنقّل
+      cardsBar.replaceChildren(lang ? h('span.small.muted', `معجمُ ${langName(lang)}`) : null);
+      cards.replaceChildren(...(langRows.length > 1 ? langRows.map(mkCard) : []));
+      return;
+    }
     cardsBar.replaceChildren(
       h('span.small.muted', lang ? `معجمُ ${langName(lang)}` : 'المعجمُ بكلِّ اللغات المتاحة لك'),
       h('div.row', all, toggle, add));
@@ -745,7 +754,7 @@ export async function render(ctx) {
   //   بغلافه وحقوقه وفهرس حروفه (ملاحظة ٢٩٥)
   const drawLangBar = () => {
     const r = langRows.find(x => x.code === lang);
-    if (!r) { langBar.replaceChildren(); return; }
+    if (!r || reader) { langBar.replaceChildren(); return; }
     const issue = h('button.btn.sm.primary', { type: 'button' }, `⤓ إصدارُ قاموس ${r.name_ar}`);
     issue.onclick = () => busy(issue, () => issueLangDict(r));
     langBar.replaceChildren(h('div.card.row.between.wrap.gl-langbar',
@@ -779,7 +788,13 @@ export async function render(ctx) {
   async function draw() {
     drawLangBar();
     table.replaceChildren(h('p.muted', 'يُحمَّل…'));
-    if (!lang) return drawAll();
+    if (!lang) {
+      if (!reader) return drawAll();
+      count.textContent = '';
+      letters.replaceChildren();
+      table.replaceChildren(h('p.muted', 'لا دليلَ بلغتك بعد.'));
+      return;
+    }
     try {
       rows = await db.rpc('glossary_dict', { p_lang: lang, p_q: q.value.trim() || null,
         p_category: cat.value || null, p_only_missing: !!onlyMissing.checked }) || [];
@@ -827,7 +842,7 @@ export async function render(ctx) {
   // نافذةُ المدخل: الشرحُ والتنقيحُ وسجلُّه (ملاحظتا ٢٥٦ و٢٦١)
   // -------------------------------------------------------------
   async function entryDialog(r) {
-    const mayWrite = !!lang && langRows.some(x => x.code === lang && (x.mine || admin));
+    const mayWrite = !reader && !!lang && langRows.some(x => x.code === lang && (x.mine || admin));
     const value = h('input', { value: r.term_tr || '', dir: 'auto', 'aria-label': 'المقابل' });
     const why = h('input', { 'aria-label': 'سببُ التنقيح', placeholder: 'معنًى أدقّ… (اختياري)' });
     const hist = h('div.stack.gl-hist');
@@ -851,7 +866,7 @@ export async function render(ctx) {
               h('label.field', `المقابل في ${langName(lang)}`, value),
               h('label.field', 'سببُ التنقيح', why),
               h('p.small.muted', guide || GUIDANCE))
-          : h('p.small.muted', 'لا تُكتب الترجمةُ إلا في لغةٍ سجّلتها ضمن إتقانك.'),
+          : h('p.small.muted', reader ? '' : 'لا تُكتب الترجمةُ إلا في لغةٍ سجّلتها ضمن إتقانك.'),
         hist),
       buttons: [
         mayWrite ? { label: 'حفظ', kind: 'primary',
@@ -1212,12 +1227,13 @@ export async function render(ctx) {
 
   return h('div',
     h('div.page-head',
-      h('div.row.wrap', { style: { marginInlineStart: 'auto', order: 2 } },
+      reader ? null : h('div.row.wrap', { style: { marginInlineStart: 'auto', order: 2 } },
         expBtn, tmplBtn, impBtn, fileIn, askBtn, askFile, addBtn),
       h('div.grow', h('div.eyebrow', 'المرجع'), h('h1', 'الدليل الإرشادي للمصطلحات'),
-        h('p.muted', 'مصطلحٌ واحد ومقابلٌ واحد في كل لغة، فلا يختلف المترجمون في لفظٍ شرعي. '
-          + 'والرجوع إليه إلزامي عند لبس المصطلح.'))),
-    h('div.tabs',
+        h('p.muted', reader
+          ? 'مقابلُ المصطلح في لغتك. ابحثْ فيه عند لبس اللفظ.'
+          : 'مصطلحٌ واحد ومقابلٌ واحد في كل لغة. والرجوع إليه إلزامي عند لبس المصطلح.'))),
+    reader ? null : h('div.tabs',
       h('button.tab', { type: 'button', 'aria-selected': 'true' }, 'الدليل'),
       h('a.tab', { href: '/app/glossary/watch', 'aria-selected': 'false' }, 'مرصد المصطلحات')),
     cardsBar,
@@ -1227,16 +1243,15 @@ export async function render(ctx) {
     h('div.card.stack',
       h('div.row.between', h('b', 'المصطلحات'), count),
       q,
-      h('div.grid-2',
+      reader ? null : h('div.grid-2',
         h('label.field', 'التصنيف', cat),
         h('label.check', onlyMissing, h('span', 'ما لا مقابلَ له في هذه اللغة'))),
       letters,
       table),
-    h('div.card.stack.gl-open',
+    reader ? null : h('div.card.stack.gl-open',
       h('b', 'الدليل يُبنى بالفريق كله'),
-      h('p.small.muted', 'لكل عضو أن يضيف مصطلحًا، ولكلِّ مترجمٍ أن يكتب المقابلَ في لغته '
-        + 'ويُنقّح ما ظهر له فيه معنًى أدقّ — وما يُنقَّح محفوظُ الأثر. '
-        + 'وما رُفع بملفٍّ بلغتين يدخل معتمدًا، فالأصلُ فيه أنه مترجَمٌ مراجَع.')));
+      h('p.small.muted', 'لكل عضو أن يضيف مصطلحًا، ولكلِّ مترجمٍ أن يكتب المقابلَ في لغته. '
+        + 'وما رُفع بملفٍّ بلغتين يدخل معتمدًا.')));
 }
 
 // مرصد المصطلحات وسجلُّ المشاركة في تبويبٍ مستقل (ملاحظة ٢٥٦)

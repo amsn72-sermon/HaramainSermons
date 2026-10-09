@@ -6,7 +6,7 @@
 //   الناقصُ بالنظر لا بالبحث.
 //
 //   والمجمَّعُ السنويُّ يُولَّد من هذه الخطب لا يُرفَع جاهزًا (ملاحظة ٣٠٩).
-import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDate, fmtHijri } from '../ui.js';
+import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDate, fmtHijri, hijriDay } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { MOSQUE, SERMON_TYPES, langName, trLangs, isManager, can } from '../store.js';
 import { typeIcon } from '../icons.js';
@@ -121,6 +121,15 @@ export async function render(ctx) {
               title: 'الغلافُ وصفحاتُ العناوين والكليشةُ والترقيم' },
               '🖌 قوالبُ المجمَّع السنوي')
           : null,
+        // تصديرُ الأرشيف للتخزين مشجَّرًا (ملاحظتا ٣٨٣ و٣٨٥)
+        mayExport()
+          ? h('button.btn.sm', { type: 'button',
+              title: 'مضغوطٌ مشجَّر: عامٌ ← شهرٌ ← لغةٌ ← ملفاتُ الخطب',
+              onclick: ev => busy(ev.currentTarget, async () => {
+                const m = await import('../archstore.js');
+                await m.storeDialog();
+              }) }, '🗄 تصديرٌ للتخزين')
+          : null,
         mayUpload()
           ? h('button.btn.sm.primary', { type: 'button', onclick: addYear }, '＋ عام')
           : null),
@@ -144,6 +153,10 @@ export async function render(ctx) {
 const H_MONTHS = ['محرَّم', 'صفر', 'ربيع الأول', 'ربيع الآخر', 'جمادى الأولى',
   'جمادى الآخرة', 'رجب', 'شعبان', 'رمضان', 'شوّال', 'ذو القعدة', 'ذو الحجة'];
 const monthName = m => H_MONTHS[(Number(m) || 1) - 1] || `الشهر ${AR(m)}`;
+// ترتيبُ الشهر بالكلمات: «الشهرُ الأول — ٤ محرَّم» (ملاحظة ٣٧٨)
+const H_ORDER = ['الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس',
+  'السابع', 'الثامن', 'التاسع', 'العاشر', 'الحادي عشر', 'الثاني عشر'];
+const monthOrder = m => H_ORDER[(Number(m) || 1) - 1] || AR(m);
 
 async function yearPage(ctx, year) {
   let sections = [];
@@ -324,11 +337,17 @@ async function yearPage(ctx, year) {
       ? rows.map(m => {
           const pct = m.fridays ? Math.round((m.covered / m.fridays) * 100) : 0;
           const on = month === Number(m.h_month);
+          // اسمُ البطاقة أولُ جُمَعِ الشهر لا عددُها (ملاحظة ٣٧٨)
+          const firstOn = `${AR(m.first_day || hijriDay(m.first_friday) || 1)} ${monthName(m.h_month)}`;
           const b = h('button.month-tile' + (on ? '.on' : ''), { type: 'button',
             'aria-pressed': on ? 'true' : 'false',
-            title: `${monthName(m.h_month)} — ${AR(m.fridays)} جمعة` },
-            h('b.m-name', monthName(m.h_month)),
-            h('span.small.muted', `${AR(m.fridays)} جمعة`),
+            title: `الشهرُ ${monthOrder(m.h_month)} — ${firstOn}`
+                 + ` · ${AR(m.fridays)} جُمَع` },
+            h('div.m-top',
+              h('span.m-ord', `الشهرُ ${monthOrder(m.h_month)}`),
+              h('span.m-pct', { class: pct >= 90 ? 'ok' : pct >= 50 ? 'warn' : 'bad' },
+                `${AR(pct)}٪`)),
+            h('b.m-name', firstOn),
             h('div.year-bar',
               h('span', { style: { width: `${Math.max(2, pct)}%` },
                 class: pct >= 90 ? 'ok' : pct >= 50 ? 'warn' : 'bad' })),
@@ -369,30 +388,39 @@ async function yearPage(ctx, year) {
   //   والصفوفُ الخاليةُ تُرسَم هنا ولا تُخزَّن في قاعدة البيانات: ما
   //   لم يُرفَع فيه شيءٌ لا يُكتب، فيبقى الإحصاءُ صادقًا.
   // -------------------------------------------------------------------
+  // ـــ أيقوناتُ الصفِّ كاملةٌ في كلِّ لغة، وما لا يصلح منها يُقال
+  //   سببُه عند الضغط ولا يُخفى (ملاحظة ٣٨٨)
   const langRow = (s, mosque, friday, code, v) => {
     const on = !!v;
     const name = code === 'ar' ? 'العربية (الأصل)' : (langName(code) || code);
+    const need = (ok, why) => (ok ? true : (toast(why, 'warn'), false));
     const acts = on
       ? [
           act('open', 'استعراضُ النص', () => openSermon(s.id, code)),
           mayRefine() ? h('a.icon-btn', { href: `/app/sermon-edit/${s.id}?lang=${code}`,
             title: 'افتحْها على الكليشة لتُنسَّق وتُحفَظ',
             'aria-label': 'تنقيحٌ على الكليشة' }, ico('pen')) : null,
-          mayExport() && v.has_text ? act('word', 'تنزيلُ Word على كليشة الهيئة', btn =>
+          mayExport() ? act('word', 'تنزيلُ Word على كليشة الهيئة', btn => {
+            if (!need(v.has_text, 'لا نصَّ محفوظٌ لهذه النسخة — الملفُّ وحدَه.')) return;
             dl(async () => {
               const m = await import('../sermondl.js');
               await m.downloadSermonWord(s.id, code);
-            }, btn)) : null,
-          mayExport() && v.has_text ? act('pdf', 'تنزيلُ PDF على كليشة الهيئة', btn =>
+            }, btn);
+          }, v.has_text ? '' : 'dim') : null,
+          mayExport() ? act('pdf', 'تنزيلُ PDF على كليشة الهيئة', btn => {
+            if (!need(v.has_text, 'لا نصَّ محفوظٌ لهذه النسخة — الملفُّ وحدَه.')) return;
             dl(async () => {
               const m = await import('../sermondl.js');
               await m.downloadSermonPdf(s.id, code);
-            }, btn)) : null,
-          mayExport() && v.has_file ? act('file', 'الملفُّ المرفوعُ كما هو', btn =>
+            }, btn);
+          }, v.has_text ? '' : 'dim') : null,
+          mayExport() ? act('file', 'الملفُّ المرفوعُ كما هو', btn => {
+            if (!need(v.has_file, 'لا ملفَّ مرفوعٌ لهذه النسخة — النصُّ وحدَه.')) return;
             dl(async () => {
               const m = await import('../sermondl.js');
               await m.openSermonFile(s.id, code);
-            }, btn)) : null,
+            }, btn);
+          }, v.has_file ? '' : 'dim') : null,
           mayUpload() ? act('up', 'استبدلْ ملفَّها أو نصَّها', () => addVersion(s.id, code)) : null,
           mayEdit() ? act('trash', 'حذفُ هذه النسخة', () => removeVersion(s, code), 'danger') : null
         ]
@@ -401,8 +429,12 @@ async function yearPage(ctx, year) {
           mayEdit() && code !== 'ar'
             ? act('hide', 'احذفْ صفَّ هذه اللغة من الخطبة', () => hideLang(s, code)) : null
         ];
+    // «خطبةُ الجمعة ٣ محرَّم» ثمَّ العنوانُ ثمَّ المسجدُ ثمَّ اللغة (ملاحظة ٣٨١)
+    const when = s.hijri_text || (s.sermon_date ? fmtHijri(s.sermon_date) : '');
     return h('div.lang-row' + (on ? '.has' : '.empty'),
-      h('span.lr-title', { title: s.title || '' }, s.title || '—'),
+      h('span.lr-title', { title: `${s.sermon_type || 'خطبة'} ${when} — ${s.title || ''}` },
+        h('span.lr-when', when ? `${s.sermon_type || 'خطبة'} ${when}` : (s.sermon_type || 'خطبة')),
+        h('b.lr-name', s.title || '—')),
       h('span.lr-mosque', { title: mosque ? MOSQUE[mosque] : 'بلا مسجد' },
         mosque ? MOSQUE_ICON[mosque] : '⚠',
         h('span.lr-mq-name', mosque ? ` ${MOSQUE[mosque]}` : ' بلا مسجد')),
@@ -571,7 +603,7 @@ async function yearPage(ctx, year) {
         : null,
       month
         ? h('div.row.between.wrap.month-head',
-            h('b', `${monthName(month)} ${ARY(year)}هـ`),
+            h('b', `الشهرُ ${monthOrder(month)} — ${monthName(month)} ${ARY(year)}هـ`),
             h('button.btn.xs.ghost', { type: 'button',
               onclick: () => { setMonth(0); drawMonths(); paintWeeks(); } }, 'كلُّ الأشهر'))
         : null,

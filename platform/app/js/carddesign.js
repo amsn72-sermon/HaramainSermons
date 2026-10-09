@@ -151,7 +151,83 @@ export const PRESET_LAYOUT = {
   })
 };
 
-export const DEFAULT_LAYOUT = () => PRESET_LAYOUT.classic();
+// القالبُ الافتراضيّ، ومعه الخلفيةُ والأشكالُ والعلامةُ المائية فارغةً —
+//   فلا يُطلَب منها مفتاحٌ غيرُ موجود (ملاحظة ٣٩٥)
+export const DEFAULT_LAYOUT = () => withExtras(PRESET_LAYOUT.classic());
+export const withExtras = l => Object.assign(l, {
+  bg: l.bg || BG_DEFAULT(), wm: l.wm || WM_DEFAULT(),
+  shapes: Array.isArray(l.shapes) ? l.shapes : []
+});
+
+// ---------------------------------------------------------------------
+// خلفيةٌ تملأ البطاقة، وأشكالٌ تُرسم عليها، وعلامةٌ مائية (ملاحظة ٣٩٥)
+//
+//   يُدرَج تصميمٌ خارجيٌّ صورةً فيملأ البطاقة، وتُرسم فوقه الأشكالُ
+//   والنصوص. والعلامةُ المائية تحت العناصر لا فوقها، فلا تحجب البيانات.
+// ---------------------------------------------------------------------
+export const BG_DEFAULT = () => ({ path: null, fit: 'cover', fade: 0, show: true });
+export const WM_DEFAULT = () => ({
+  show: false, text: '', path: null, x: 22, y: 16, w: 42,
+  size: 16, color: '#bc9661', fade: 0.14, rot: -20
+});
+
+export const SHAPE_KINDS = [
+  ['rect',   'مستطيل'], ['circle', 'دائرة'],
+  ['line',   'خط'],     ['frame',  'إطار']
+];
+export const shapeLabel = (s, i) =>
+  `${(SHAPE_KINDS.find(k => k[0] === s.kind) || SHAPE_KINDS[0])[1]} ${i + 1}`;
+
+export const newShape = (kind, i) => ({
+  id: `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`,
+  kind: SHAPE_KINDS.some(k => k[0] === kind) ? kind : 'rect',
+  x: 6, y: 14 + (i % 4) * 5, w: kind === 'line' ? 40 : 22, h: kind === 'line' ? 0.6 : 12,
+  color: '#bc9661', stroke: 0.5, fill: kind !== 'frame' && kind !== 'line',
+  radius: 1.2, fade: 1, show: true
+});
+
+const normShape = s => ({
+  id: String(s.id || ''),
+  kind: SHAPE_KINDS.some(k => k[0] === s.kind) ? s.kind : 'rect',
+  x: Number(s.x) || 0, y: Number(s.y) || 0,
+  w: Number(s.w) || 10, h: Number(s.h) || 6,
+  color: typeof s.color === 'string' ? s.color : '#bc9661',
+  stroke: Number(s.stroke) || 0.5, fill: s.fill === true,
+  radius: Number(s.radius) || 0, fade: Number(s.fade) >= 0 ? Number(s.fade) : 1,
+  show: s.show !== false
+});
+
+// أنماطُ الشكل بالمليمتر — تصلح للشاشة وللطباعة معًا
+export function shapeStyle(s) {
+  const st = {
+    position: 'absolute', left: `${s.x}mm`, top: `${s.y}mm`,
+    width: `${s.w}mm`, height: `${s.kind === 'line' ? Math.max(0.2, s.stroke) : s.h}mm`,
+    opacity: String(s.fade ?? 1), boxSizing: 'border-box'
+  };
+  if (s.kind === 'line') { st.background = s.color; return st; }
+  if (s.kind === 'circle') st.borderRadius = '50%';
+  else if (s.radius) st.borderRadius = `${s.radius}mm`;
+  if (s.fill) st.background = s.color;
+  else st.border = `${Math.max(0.1, s.stroke)}mm solid ${s.color}`;
+  return st;
+}
+
+export const bgStyle = bg => (bg && bg.show && bg.path ? {
+  position: 'absolute', left: '0', top: '0', width: '100%', height: '100%',
+  objectFit: bg.fit === 'contain' ? 'contain' : 'cover',
+  opacity: String(1 - (Number(bg.fade) || 0))
+} : null);
+
+export function wmStyle(wm) {
+  if (!wm || !wm.show) return null;
+  return {
+    position: 'absolute', left: `${wm.x}mm`, top: `${wm.y}mm`, width: `${wm.w}mm`,
+    opacity: String(wm.fade ?? 0.14), color: wm.color || '#bc9661',
+    fontSize: `${wm.size}pt`, fontWeight: '700', textAlign: 'center',
+    transform: `rotate(${wm.rot || 0}deg)`, transformOrigin: 'center',
+    whiteSpace: 'pre-line', pointerEvents: 'none'
+  };
+}
 
 // عنصر مضاف من المصمِّم: نص أو صورة (والشعار صورة) — (ملاحظة ٩٥)
 export const newCustom = (type, i) => ({
@@ -192,6 +268,10 @@ export function normalizeLayout(saved) {
       bottom: { ...base.rules.bottom, ...((saved.rules || {}).bottom || {}) }
     },
     custom: Array.isArray(saved.custom) ? saved.custom.filter(c => c && c.id).map(normCustom).slice(0, 12) : [],
+    // خلفيةٌ وأشكالٌ وعلامةٌ مائية (ملاحظة ٣٩٥)
+    bg: { ...BG_DEFAULT(), ...(saved.bg || {}) },
+    wm: { ...WM_DEFAULT(), ...(saved.wm || {}) },
+    shapes: Array.isArray(saved.shapes) ? saved.shapes.filter(s => s && s.id).map(normShape).slice(0, 16) : [],
     items: {}
   };
   for (const key of ITEM_ORDER) out.items[key] = { ...base.items[key], ...((saved.items || {})[key] || {}) };
@@ -205,6 +285,26 @@ const num = (v, min, max, dflt) => {
 
 export function clampLayout(l) {
   const d = DEFAULT_LAYOUT();
+  if (!l.bg) l.bg = BG_DEFAULT();
+  if (!l.wm) l.wm = WM_DEFAULT();
+  if (!Array.isArray(l.shapes)) l.shapes = [];
+  l.bg.fade = num(l.bg.fade, 0, 0.95, 0);
+  if (l.bg.fit !== 'contain') l.bg.fit = 'cover';
+  l.wm.x = num(l.wm.x, -2, CARD.w - 2, 22);
+  l.wm.y = num(l.wm.y, -2, CARD.h - 2, 16);
+  l.wm.w = num(l.wm.w, 6, CARD.w, 42);
+  l.wm.size = num(l.wm.size, 4, 40, 16);
+  l.wm.fade = num(l.wm.fade, 0.02, 1, 0.14);
+  l.wm.rot = num(l.wm.rot, -90, 90, -20);
+  for (const s of l.shapes) {
+    s.w = num(s.w, 0.3, CARD.w, 20);
+    s.h = num(s.h, 0.2, CARD.h, 10);
+    s.x = num(s.x, -2, CARD.w - 2, 6);
+    s.y = num(s.y, -2, CARD.h - 2, 14);
+    s.stroke = num(s.stroke, 0.1, 4, 0.5);
+    s.radius = num(s.radius, 0, 12, 1.2);
+    s.fade = num(s.fade, 0.05, 1, 1);
+  }
   for (const c of (l.custom || [])) {
     c.w = num(c.w, 3, CARD.w, 20);
     c.x = num(c.x, -2, CARD.w - 2, 8);
@@ -319,11 +419,27 @@ export { scaleStyle };
 export function staticCard(h, { layout, member, cfg, roleLabel, langsText, logoSrc, photoUrl, customUrls, scale = 6 }) {
   const px = mm => `${mm * scale}px`;
   const kids = [];
+  // الخلفيةُ أولًا فتكون تحت الجميع (ملاحظة ٣٩٥)
+  const bgSrc = (customUrls || {}).__bg;
+  const bgs = scaleStyle(bgStyle(layout.bg), scale);
+  if (bgs && bgSrc) kids.push(h('img', { src: bgSrc, alt: '', style: bgs }));
   const bs = scaleStyle(bandStyle(layout.band), scale);
   if (bs) kids.push(h('div', { style: bs }));
   for (const k of ['top', 'bottom']) {
     const rs = scaleStyle(ruleStyle(layout.rules[k]), scale);
     if (rs) kids.push(h('div', { style: rs }));
+  }
+  for (const s of (layout.shapes || [])) {
+    if (!s.show) continue;
+    kids.push(h('div', { style: scaleStyle(shapeStyle(s), scale) }));
+  }
+  const wms = scaleStyle(wmStyle(layout.wm), scale);
+  if (wms) {
+    const wmSrc = (customUrls || {}).__wm;
+    if (wms.fontSize) wms.fontSize = `${layout.wm.size * scale * 25.4 / 72}px`;
+    if (wmSrc) kids.push(h('div', { style: wms },
+      h('img', { src: wmSrc, alt: '', style: { width: '100%', height: 'auto', display: 'block' } })));
+    else if (layout.wm.text) kids.push(h('div', { style: wms }, layout.wm.text));
   }
   for (const key of ITEM_ORDER) {
     const it = layout.items[key];

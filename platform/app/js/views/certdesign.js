@@ -568,9 +568,7 @@ export async function render(ctx) {
   const blocksBox = () => {
     const list = blocksOf();
     return h('div.stack',
-      h('p.small.muted', 'النصوصُ بترتيبها في الشهادة من أعلى إلى أسفل. '
-        + 'ارفعِ العلامةَ ليَظهر النصُّ، واخفضْها ليُحجَب — وما بعده يرتفع مكانَه. '
-        + 'وكلُّ نصٍّ يُحرَّر من هنا أو بالنقر عليه في الشهادة.'),
+      h('p.small.muted', 'النصوصُ بترتيبها في الشهادة من أعلى إلى أسفل. ارفعِ العلامةَ ليَظهر النصُّ واخفضْها ليُحجَب، ويُحرَّر كلُّ نصٍّ من هنا أو بالنقر عليه.'),
       ...list.map((b, i) => {
         const on = h('input', { type: 'checkbox', checked: b.on !== false ? true : null,
           'aria-label': `أظهِرْ ${b.label}` });

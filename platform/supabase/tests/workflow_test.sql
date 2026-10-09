@@ -2019,11 +2019,18 @@ begin
   if v_n <> 2 then raise exception 'FAIL: تعديل الوردية لم ينقص عضوها (%)', v_n; end if;
   raise notice 'PASS: تعديل الوردية يعيد بناء أعضائها';
 
-  -- المرشحون: المرشدون أولًا
-  if (select count(*) from public.shift_candidates()) < 3 then
+  -- المرشحون: المرشدون المكانيّون وحدَهم، فلا يُخلَطون بالتخصصيّين
+  --   (ملاحظة ٣٩٦) — ومن وُسِم بدوامٍ ثابتٍ يُستثنى (٣٩٧، ويُختبَر في ٨٩)
+  update public.profiles set track = 'field', status = 'active'
+   where id = '00000000-0000-0000-0000-00000000000d';
+  if (select count(*) from public.shift_candidates()) < 1 then
     raise exception 'FAIL: قائمة مرشحي الورديات ناقصة';
   end if;
-  raise notice 'PASS: قائمة الورديات تعرض الفريق كله والمرشدون أولهم';
+  if exists (select 1 from public.shift_candidates()
+              where not is_field and not fixed_shift) then
+    raise exception 'FAIL: دخل غيرُ المرشد المكانيِّ قائمةَ الورديات';
+  end if;
+  raise notice 'PASS: قائمة الورديات للمرشدين المكانيّين وحدَهم';
 
   -- الحذف يشمل أعضاء الوردية
   v_n := public.delete_shift_crew(v_crew);
@@ -7222,7 +7229,7 @@ end $$;
 -- =====================================================================
 do $$
 declare v_open text[]; v_want text[] := array[
-  'can_see_track', 'can_view_reports', 'count_pages', 'hijri_month', 'hijri_year',
+  'can_see_track', 'can_view_reports', 'count_pages', 'hijri_day', 'hijri_month', 'hijri_year',
   'hijri_year_calc', 'is_admin', 'is_manager', 'is_supervisor', 'is_viewer',
   'my_role', 'open_page', 'page_needs_code', 'plain_text', 'public_translations',
   'registration_open', 'registration_state', 'verify_card', 'verify_certificate',
@@ -8062,4 +8069,120 @@ begin
 
   delete from public.cert_templates where id = v_id;
   raise notice 'PASS: نصوصُ الشهادة تُحفَظ بترتيبها، والمحجوبُ محجوب، والمعدَّلُ معدَّل';
+end $$;
+
+-- =====================================================================
+-- ٨٧) لغاتُ العام اثنتا عشرة: العربيةُ وإحدى عشرة ثابتة (ملاحظة ٣٨١)
+--     — ولغتا المبادرة لا تدخلان الأرشيفَ تلقائيًّا
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_n int; v_first text; v_ini int;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  delete from public.arch_years where h_year = 1399;
+  perform public.add_arch_year(1399, null);
+
+  select count(*) into v_n from public.arch_year_langs(1399);
+  if v_n <> 12 then
+    raise exception 'FAIL: لغاتُ العام % لا اثنتا عشرة', v_n;
+  end if;
+
+  select code into v_first from public.arch_year_langs(1399) limit 1;
+  if v_first <> 'ar' then
+    raise exception 'FAIL: العربيةُ ليست أولَ الصفوف: %', v_first;
+  end if;
+
+  select count(*) into v_ini
+    from public.arch_year_langs(1399) y
+    join public.languages l on l.code = y.code
+   where l.is_initiative;
+  if v_ini <> 0 then
+    raise exception 'FAIL: دخلت لغاتُ المبادرة الأرشيفَ: %', v_ini;
+  end if;
+
+  -- وإن حُفظت للعام لغاتُه فهي المقدَّمة على الافتراضي (ملاحظة ٣٦٨)
+  perform public.set_arch_year_langs(1399, array['ar', 'en', 'fr']);
+  select count(*) into v_n from public.arch_year_langs(1399);
+  if v_n <> 3 then
+    raise exception 'FAIL: لم تُقدَّمْ لغاتُ العام المحفوظة: %', v_n;
+  end if;
+
+  delete from public.arch_years where h_year = 1399;
+  raise notice 'PASS: لغاتُ العام اثنتا عشرة، والعربيةُ أولًا، والمحفوظُ مقدَّم';
+end $$;
+
+-- =====================================================================
+-- ٨٨) بطاقةُ الشهر تحمل يومَ أولِ جُمَعِه، وصفوفُ التصدير شهرَها
+--     (ملاحظتا ٣٧٨ و٣٨٣)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_day int; v_mon int; v_first date;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+
+  select first_friday, first_day into v_first, v_day
+    from public.arch_month_tiles(1445) order by h_month limit 1;
+  if v_first is null then
+    raise exception 'FAIL: لا بطاقاتِ أشهرٍ للعام ١٤٤٥';
+  end if;
+  if v_day is null or v_day < 1 or v_day > 30 then
+    raise exception 'FAIL: يومُ أولِ الجُمَع خارجَ الشهر: %', v_day;
+  end if;
+  if v_day <> public.hijri_day(v_first) then
+    raise exception 'FAIL: يومُ البطاقة لا يوافق أولَ جُمَعِها';
+  end if;
+  -- أولُ جمعةٍ في الشهر لا تقع بعد اليوم السابع
+  if v_day > 7 then
+    raise exception 'FAIL: أولُ جمعةٍ بعد اليوم السابع: %', v_day;
+  end if;
+
+  select h_month into v_mon
+    from public.arch_book(1445, 'ar') limit 1;
+  if v_mon is not null and (v_mon < 1 or v_mon > 12) then
+    raise exception 'FAIL: شهرُ صفِّ التصدير خارجَ السنة: %', v_mon;
+  end if;
+
+  raise notice 'PASS: بطاقةُ الشهر تحمل يومَ أولِ جُمَعِه، والتصديرُ يحمل شهرَه';
+end $$;
+
+-- =====================================================================
+-- ٨٩) الورديات: المرشدُ المكانيُّ وحدَه، إلا من وُسِم بدوامٍ ثابت
+--     (ملاحظتا ٣٩٦ و٣٩٧)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_spec uuid; v_n int;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+
+  select id into v_spec from public.profiles
+   where coalesce(track, 'translation') <> 'field' and status = 'active'
+     and id <> v_mgr limit 1;
+  if v_spec is null then raise notice 'PASS: لا مترجمَ تخصصيًّا في القاعدة'; return; end if;
+
+  update public.profiles set fixed_shift = false where id = v_spec;
+  select count(*) into v_n from public.shift_candidates() where member_id = v_spec;
+  if v_n <> 0 then
+    raise exception 'FAIL: دخل المترجمُ التخصصيُّ جدولَ الورديات بلا وسم';
+  end if;
+
+  perform public.set_fixed_shift(v_spec, true);
+  select count(*) into v_n from public.shift_candidates() where member_id = v_spec;
+  if v_n <> 1 then
+    raise exception 'FAIL: لم يدخلِ الموسومُ بدوامٍ ثابتٍ جدولَ الورديات';
+  end if;
+  select count(*) into v_n from public.shift_people() where id = v_spec;
+  if v_n <> 1 then
+    raise exception 'FAIL: الموسومُ لا يظهر في أهل الورديات';
+  end if;
+
+  perform public.set_fixed_shift(v_spec, false);
+  select count(*) into v_n from public.shift_candidates() where member_id = v_spec;
+  if v_n <> 0 then
+    raise exception 'FAIL: بقي الوسمُ بعد رفعه';
+  end if;
+
+  raise notice 'PASS: الورديةُ للمرشد المكانيِّ، ولا يدخلها التخصصيُّ إلا بوسمٍ يُرفَع';
 end $$;

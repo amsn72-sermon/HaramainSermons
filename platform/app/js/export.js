@@ -156,6 +156,14 @@ export async function downloadDocx(one) {
 // عدّةُ خطبٍ في ملفِ Word واحد: لكلِّ واحدةٍ قسمُها وكليشتُها، فتبدأ
 // كلُّ خطبةٍ صفحةً جديدة (ملاحظة ٣٧١)
 export async function downloadDocxBundle(items, { name = 'خطب' } = {}) {
+  const blob = await docxBlob(items, { name });
+  const a = h('a', { href: URL.createObjectURL(blob), download: `${name}.docx` });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+// والملفُّ نفسُه بلا تنزيل — يُحزَم في مضغوطٍ مشجَّر (ملاحظة ٣٨٣)
+export async function docxBlob(items, { name = 'خطب' } = {}) {
   if (!items || !items.length) throw new Error('لا خطبَ للتصدير');
   const docx = await loadDocx();
   const { Document, Packer, Paragraph, ImageRun, Header, HorizontalPositionRelativeFrom, VerticalPositionRelativeFrom } = docx;
@@ -178,10 +186,7 @@ export async function downloadDocxBundle(items, { name = 'خطب' } = {}) {
     });
   }
   const doc = new Document({ creator: 'منصة ترجمة خطب الحرمين الشريفين', title: name, sections });
-  const blob = await Packer.toBlob(doc);
-  const a = h('a', { href: URL.createObjectURL(blob), download: `${name}.docx` });
-  document.body.append(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  return await Packer.toBlob(doc);
 }
 
 // الطباعة / الحفظ PDF: نقسّم النص إلى صفحات A4 بأنفسنا، ولكل صفحة كليشتها.

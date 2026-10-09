@@ -159,8 +159,7 @@ function registrationCard(ctx0) {
     fill(card, 
       h('div.row.between', h('h3', 'باب التسجيل في المنصة'),
         h('span.badge', { class: open ? 'ok' : 'bad' }, open ? 'مفتوح' : 'مغلق')),
-      h('p.small.muted', 'العدد معروف وقليل، فالأصل إغلاقه. افتحه مدةً معلومة حتى يُسجّل من دُعي، '
-        + 'ثم يُغلق بنفسه — فلا يدخل غريبٌ لو انتشر الرابط. والمنع في قاعدة البيانات لا في الشاشة وحدها.'),
+      h('p.small.muted', 'الأصلُ إغلاقُ التسجيل. افتحْه مدةً معلومةً حتى يُسجِّل من دُعي، ثم يُغلَق بنفسه.'),
       open && leftText
         ? h('p.small', 'يُغلق تلقائيًّا بعد ', h('b', leftText), ' — في ', fmtDateTime(st.closes_at), '.')
         : open ? h('p.small.warn', 'مفتوح بلا مدة — يبقى حتى تغلقه بنفسك.') : null,
@@ -213,11 +212,16 @@ const ID_TYPE_LABEL = { national: 'هوية وطنية أو إقامة', passpor
 async function identitySection(group = 'translators') {
   const box = h('div.stack');
   const summary = h('p.small.muted');
+  // ما اعتُمد يخرج من التدقيق إلى أيقونته الدائمة أمام العضو، ولا
+  //   يبقى هنا إلا ما يَرِد ليُدقَّق (ملاحظة ٣٩٣)
   const filter = h('select', { 'aria-label': 'التصفية' },
+    h('option', { value: 'review', selected: true }, 'ما يَرِد للتدقيق'),
     h('option', { value: 'pending' }, 'ما ينتظر التدقيق'),
+    h('option', { value: 'rejected' }, 'ما أُعيد للعضو'),
     h('option', { value: 'expiring' }, 'ما انتهى أو قارب'),
     h('option', { value: 'none' }, 'من لم يرفعْ هويته'),
-    h('option', { value: 'all', selected: true }, 'الكل'));
+    h('option', { value: 'approved' }, 'المعتمَدة'),
+    h('option', { value: 'all' }, 'الكل'));
 
   let rows = [], denied = false;
   const load = async () => {
@@ -373,9 +377,12 @@ async function identitySection(group = 'translators') {
           r.iqama_at ? h('span.small.muted', fmtDateTime(r.iqama_at)) : null,
           h('div.row.wrap', { style: { gap: '6px' } },
             h('button.btn.xs', { type: 'button', onclick: () => editData(r) }, 'بياناتُ الهوية'),
-            st !== 'approved' && r.iqama_path
+            st === 'pending' && r.iqama_path
               ? h('button.btn.xs.primary', { type: 'button',
                   onclick: () => decide(r, 'approved') }, 'اعتماد') : null,
+            // المعادةُ لا تُعتمَد حتى يُعيد صاحبُها إرسالَها (ملاحظة ٣٨٩)
+            st === 'rejected'
+              ? h('span.small.warn', 'يُنتظَر إعادةُ إرسالها') : null,
             st !== 'rejected' && r.iqama_path
               ? h('button.btn.xs.danger', { type: 'button',
                   onclick: () => decide(r, 'rejected') }, 'إعادةٌ للعضو') : null,
@@ -388,15 +395,20 @@ async function identitySection(group = 'translators') {
     const want = filter.value;
     const stOf = r => (r.iqama_path ? (r.iqama_status || 'pending') : 'none');
     const list = rows.filter(r => want === 'all'
+      || (want === 'review' && ['pending', 'rejected', 'none'].includes(stOf(r)))
       || (want === 'pending' && stOf(r) === 'pending')
+      || (want === 'rejected' && stOf(r) === 'rejected')
+      || (want === 'approved' && stOf(r) === 'approved')
       || (want === 'none' && stOf(r) === 'none')
       || (want === 'expiring' && r.id_expiry != null && Number(r.days_left) <= 90));
     const pending = rows.filter(r => stOf(r) === 'pending').length;
     const none = rows.filter(r => stOf(r) === 'none').length;
     const expiring = rows.filter(r => r.id_expiry != null && Number(r.days_left) <= 90).length;
     const noDate = rows.filter(r => r.id_expiry == null).length;
+    const approved = rows.filter(r => stOf(r) === 'approved').length;
     summary.textContent = `${rows.length} عضوًا · لم يرفعْ: ${none} · ينتظر التدقيق: ${pending}`
-      + ` · انتهت أو قاربت: ${expiring} · بلا تاريخ: ${noDate}`;
+      + ` · معتمَدة: ${approved} · انتهت أو قاربت: ${expiring} · بلا تاريخ: ${noDate}`
+      + ' — والمعتمَدةُ تُفتَح من أيقونتها أمام العضو في قائمة الفريق.';
     box.replaceChildren(list.length ? h('div.id-wrap', list.map(card))
       : h('p.muted', 'لا هوياتٍ في هذه التصفية.'));
   }

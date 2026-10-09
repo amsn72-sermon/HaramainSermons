@@ -101,6 +101,9 @@ export const slotOf = (tpl, key) => {
   const s = tpl[key] = tpl[key] || {};
   if (!Array.isArray(s.marks)) s.marks = [];
   if (!Array.isArray(s.texts)) s.texts = [];
+  if (!Array.isArray(s.shapes)) s.shapes = [];
+  if (!s.band || typeof s.band !== 'object') s.band = { on: false, h: 10, color: '#174a38' };
+  if (!s.wm || typeof s.wm !== 'object') s.wm = { src: null, size: 50, opacity: 8 };
   return s;
 };
 
@@ -208,9 +211,60 @@ function mergeTpl(base, saved) {
   return out;
 }
 
-// صورٌ ونصوصٌ حرّةٌ تُنثر على صفحةٍ بإحداثياتها (ملاحظة ٣٥٥)
+// صورٌ ونصوصٌ وأشكالٌ تُنثر على صفحةٍ بإحداثياتها، وخلفيةٌ تملؤها
+// (ملاحظات ٣٥٥ و٣٩٠ و٣٩١)
 export function decorate(el, img, sheetEl, slot) {
-  for (const m of (slot?.marks || [])) {
+  if (!slot) return;
+  // ـــ خلفيةٌ مصمَّمةٌ خارجًا تملأ الصفحة: صورةٌ أو صفحةُ PDF مرسومةٌ
+  //   بدقّة الطباعة (ملاحظة ٣٩٠)
+  if (slot.bg) {
+    const bg = img(slot.bg, 'deco-bg');
+    bg.style.objectFit = slot.bgFit === 'contain' ? 'contain' : 'cover';
+    if (slot.bgFade != null) {
+      bg.style.opacity = String(Math.max(0, Math.min(100, slot.bgFade)) / 100);
+    }
+    sheetEl.append(bg);
+  }
+  // ـــ أشكالٌ هندسيةٌ وخطوطٌ وإطارات
+  for (const sh of (slot.shapes || [])) {
+    if (!sh) continue;
+    const d = el('div', `deco-sh sh-${sh.kind || 'rect'}`);
+    d.style.insetInlineStart = `${sh.x ?? 10}%`;
+    d.style.top = `${sh.y ?? 10}%`;
+    d.style.width = `${sh.w ?? 30}%`;
+    d.style.height = `${sh.h ?? 6}%`;
+    d.style.opacity = String(Math.max(0, Math.min(100, sh.opacity ?? 100)) / 100);
+    if (sh.kind === 'line') {
+      d.style.height = `${Math.max(0.2, sh.thick ?? 0.6)}mm`;
+      d.style.background = sh.color || '#b9975b';
+    } else if (sh.kind === 'frame') {
+      d.style.border = `${Math.max(0.2, sh.thick ?? 0.6)}mm solid ${sh.color || '#b9975b'}`;
+    } else {
+      d.style.background = sh.color || '#b9975b';
+      if (sh.kind === 'circle') d.style.borderRadius = '50%';
+      else if (sh.radius) d.style.borderRadius = `${sh.radius}mm`;
+    }
+    sheetEl.append(d);
+  }
+  // ـــ شريطٌ سفليٌّ على عرض الصفحة
+  if (slot.band && slot.band.on) {
+    const b = el('div', 'deco-band');
+    b.style.height = `${slot.band.h ?? 10}mm`;
+    b.style.background = slot.band.color || '#174a38';
+    b.style.opacity = String(Math.max(0, Math.min(100, slot.band.opacity ?? 100)) / 100);
+    if (slot.band.top) { b.style.top = '0'; b.style.bottom = 'auto'; }
+    sheetEl.append(b);
+  }
+  // ـــ علامةٌ مائيةٌ في الوسط
+  if (slot.wm && slot.wm.src) {
+    const w = el('div', 'deco-wm');
+    const im = img(slot.wm.src, 'wm-img');
+    im.style.width = `${Math.max(10, Math.min(100, slot.wm.size ?? 50))}%`;
+    im.style.opacity = String(Math.max(1, Math.min(60, slot.wm.opacity ?? 8)) / 100);
+    w.append(im);
+    sheetEl.append(w);
+  }
+  for (const m of (slot.marks || [])) {
     if (!m || !m.src) continue;
     const im = img(m.src, 'deco-mk');
     im.style.insetInlineStart = `${m.x}%`;
@@ -219,7 +273,7 @@ export function decorate(el, img, sheetEl, slot) {
     if (m.opacity != null) im.style.opacity = String(Math.max(0, Math.min(100, m.opacity)) / 100);
     sheetEl.append(im);
   }
-  for (const x of (slot?.texts || [])) {
+  for (const x of (slot.texts || [])) {
     if (!x || !String(x.text || '').trim()) continue;
     const tx = el('div', 'deco-tx', escapeHtml(String(x.text)).replace(/\n/g, '<br>'));
     tx.style.insetInlineStart = `${x.x ?? 10}%`;
@@ -818,6 +872,14 @@ function bookCss(S, M, winW, winH, F, tpl) {
     display: flex; flex-direction: column; gap: 1.5mm; text-align: center;
     font-size: 8.5pt; color: ${tpl.back?.ink || green}; opacity: .78; }
   .back-foot .isbn { font-size: 9pt; letter-spacing: .4mm; opacity: .9; }
+
+  /* خلفيةٌ وأشكالٌ وشريطٌ وعلامةٌ مائية (ملاحظات ٣٥٥ و٣٩٠ و٣٩١) */
+  .deco-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
+  .deco-sh { position: absolute; z-index: 2; }
+  .deco-band { position: absolute; inset-inline: 0; bottom: 0; z-index: 2; }
+  .deco-wm { position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; z-index: 1; pointer-events: none; }
+  .deco-wm .wm-img { height: auto; }
 
   /* صورٌ ونصوصٌ حرّةٌ تُنثر على الصفحات (ملاحظة ٣٥٥) */
   .deco-mk { position: absolute; width: auto; z-index: 3; }

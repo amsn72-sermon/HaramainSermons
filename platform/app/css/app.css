@@ -569,22 +569,20 @@ dialog:has(.circular-doc) .dlg-body { max-height: 82vh; }
 .cd-board h3 { margin-top: 0; }
 .cd-board .cd-tabbody { padding: 12px; border: 1px solid var(--border); border-radius: 10px;
   background: var(--bg); }
-.cd-wrap { display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px; gap: 0; align-items: stretch; }
-@media (max-width: 1280px) {
-  .cd-wrap { grid-template-columns: 300px minmax(0, 1fr); }
-  .cd-wrap .cd-side { grid-column: 1 / -1; display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .cd-board .cd-wrap > .cd-side { border-inline-start: 0; border-top: 1px solid var(--border); }
-}
-@media (max-width: 860px) {
+/* البطاقةُ كبيرةٌ في عمودٍ واسع، وخياراتُها كلُّها إلى جانبها (ملاحظة ٣٩٥) */
+.cd-wrap { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 0.62fr);
+  gap: 0; align-items: start; }
+.cd-opts { position: sticky; top: 8px; max-height: calc(100vh - 24px); overflow: auto; }
+@media (max-width: 1100px) {
   .cd-wrap { grid-template-columns: 1fr; }
-  .cd-wrap .cd-side { grid-template-columns: 1fr; }
+  .cd-opts { position: static; max-height: none; }
   .cd-board .cd-wrap > * + * { border-inline-start: 0; border-top: 1px solid var(--border); }
 }
-.card-stage-wrap { display: flex; justify-content: center; padding: 14px 0;
+.card-stage-wrap { display: flex; justify-content: center; padding: 14px 0; overflow: auto;
   background: repeating-conic-gradient(rgba(127,127,127,.10) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
   border-radius: 10px; }
 .card-stage { position: relative; overflow: hidden; border: 1px solid #d8cfbd; border-radius: 10px;
+  flex: none;   /* البطاقةُ بمقاسها لا تُضغَط، واللوحةُ تَجري بها (ملاحظة ٣٩٥) */
   box-shadow: 0 4px 18px rgba(0,0,0,.28); direction: ltr; }
 .card-stage:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
 .cd-item { position: absolute; direction: rtl; }
@@ -595,6 +593,12 @@ dialog:has(.circular-doc) .dlg-body { max-height: 82vh; }
   display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .cd-item.cd-photo img, .cd-photo-img { width: 100%; height: 100%; object-fit: cover; }
 .cd-photo-ph { font-size: .6rem; color: #a79c8c; }
+/* خلفيةٌ تملأ البطاقة، وأشكالٌ، وعلامةٌ مائية (ملاحظة ٣٩٥) */
+.cd-bg { position: absolute; inset: 0; pointer-events: none; }
+.cd-item.cd-shape { direction: ltr; }
+.cd-wm { position: absolute; direction: rtl; pointer-events: none; }
+.cd-layer { align-items: center; }
+.cd-layer .btn.grow { flex: 1 1 auto; text-align: start; justify-content: flex-start; }
 .cd-panel { display: flex; flex-direction: column; gap: 12px; }
 .cd-panel input[type="range"] { width: 100%; }
 .row.tight { display: flex; align-items: center; gap: 6px; }
@@ -1841,7 +1845,7 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 /* لوحةُ الشهادة تحفظ نسبتها ولو طال عمودُ الأدوات بجوارها */
 .cert-stage-wrap { align-items: flex-start; }
 .cert-stage { align-self: flex-start; }
-.cd-wrap > .cd-props, .cd-wrap > .cd-stage { align-content: start; }
+.cd-wrap > .cd-opts, .cd-wrap > .cd-stage { align-content: start; }
 
 /* الصفُّ الذي منع الاعتماد: يُظلَّل ويُقفَز إليه (ملاحظة ٣١٦) */
 .imp-tbl tr.bad-row { background: color-mix(in srgb, var(--bad, #8a3b3b) 22%, transparent);
@@ -1927,9 +1931,14 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
   padding: 6px 0; border-bottom: 1px solid var(--border); gap: 8px; }
 
 /* ـــ مصمِّمُ قوالب المجمَّع (ملاحظتا ٣٣٩ و٣٥٠) */
-.bd-wrap { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(300px, .9fr);
+.bd-wrap { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(320px, .62fr);
   gap: 16px; align-items: start; align-content: start; }
-@media (max-width: 1000px) { .bd-wrap { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .bd-wrap { grid-template-columns: 1fr; } }
+/* لوحةُ الأدوات تمشي مع الصفحة، فلا يُفقَد الزرُّ عند التمرير */
+@media (min-width: 1101px) {
+  .bd-props { position: sticky; top: 8px; max-height: calc(100vh - 24px);
+    overflow: auto; }
+}
 .bd-bar { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 14px;
   padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px;
   background: var(--surface); }
@@ -1940,7 +1949,7 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .bd-row { display: grid; gap: 4px; }
 .bd-row-label { padding-inline-start: 2px; }
 .bd-spread { display: grid; gap: 10px; justify-content: center;
-  grid-template-columns: minmax(0, 320px); }
+  grid-template-columns: minmax(0, 520px); }
 .bd-spread.two { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px;
   justify-content: stretch; }
 /* الصفحتان المفتوحتان يلتقيان عند الخيط، فيُقرَّبان ويُظلَّل ما بينهما */
@@ -2044,9 +2053,17 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 
 /* ـــ اثنتا عشرة بطاقةً على أشهر العام (ملاحظة ٣٦٩) */
 .month-grid { display: grid; gap: 8px; margin-bottom: 12px;
-  grid-template-columns: repeat(4, minmax(0, 1fr)); }
-@media (max-width: 1100px) { .month-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 760px)  { .month-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 1400px) { .month-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 1000px) { .month-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 700px)  { .month-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.month-tile .m-top { display: flex; align-items: center; justify-content: space-between;
+  width: 100%; gap: 6px; }
+.month-tile .m-ord { font-size: .72rem; color: var(--muted); }
+.month-tile .m-pct { font-size: .72rem; font-weight: 700; }
+.month-tile .m-pct.ok { color: var(--ok, #6fbf96); }
+.month-tile .m-pct.warn { color: var(--gold); }
+.month-tile .m-pct.bad { color: var(--bad, #c06c6c); }
 .month-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
   padding: 9px 12px; border: 1px solid var(--border); border-radius: 12px;
   background: var(--card); cursor: pointer; font: inherit; color: inherit;
@@ -2064,9 +2081,17 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 /* ـــ صفٌّ لكلِّ لغة: عنوانٌ ومسجدٌ ولغةٌ ورمزُ توثيقٍ وأيقونات
       (ملاحظات ٣٦٥ و٣٦٦ و٣٧٠) */
 .lang-rows { display: grid; gap: 1px; }
-.lang-row { display: grid; align-items: center; gap: 6px; padding: 2px 4px;
+.lang-row { display: grid; align-items: center; gap: 6px; padding: 3px 4px;
   border-radius: 6px; font-size: .82rem; line-height: 1.5; min-width: 0;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, .9fr) minmax(0, .8fr) auto auto; }
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, .9fr) minmax(0, .8fr) auto minmax(0, auto); }
+.lang-row .lr-title { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.lang-row .lr-when { font-size: .68rem; color: var(--muted); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.lang-row .lr-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* الأيقوناتُ صفٌّ واحدٌ لا يُكسَر، فلا تنزل سطرًا تحت الصفّ (إصلاح ٣٨٨) */
+.lang-row .lr-acts { flex-wrap: nowrap; white-space: nowrap; }
+.lang-row .icon-btn.dim { opacity: .38; }
+.lang-row .icon-btn.dim:hover { opacity: .75; }
 .lang-row + .lang-row { border-top: 1px dashed var(--border); }
 .lang-row.empty { opacity: .62; }
 .lang-row.has { background: color-mix(in srgb, var(--ok, #2f6b52) 7%, transparent); }
@@ -2126,3 +2151,29 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 /* ـــ بطاقةُ الخطة: العمودُ يمتدُّ فلا يتكوَّم النصُّ في الوسط (٣٦٠) */
 .plan-head .row > .grow { flex: 1 1 auto; min-width: 0; }
 .plan-head .row.wrap > .grow { min-width: 220px; }
+
+/* ـــ لائحةُ طباعة البطاقات مقسَّمةٌ بالفرق (ملاحظة ٣٩٤) */
+.pick-team + .pick-team { margin-top: 8px; border-top: 1px solid var(--border);
+  padding-top: 8px; }
+.pick-team-head { font-size: .9rem; padding: 2px 0; }
+.pick-team-body { display: grid; gap: 2px; padding-inline-start: 18px; }
+
+
+/* ـــ محطّاتُ المصمِّم: تُقلَّب كما يُقلَّب الكتاب (ملاحظتا ٣٧٧ و٣٩٢) */
+.bd-steps { display: flex; gap: 6px; justify-content: center; margin-bottom: 6px; }
+.bd-step { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--border);
+  background: var(--surface); color: var(--muted); font: inherit; font-size: .82rem;
+  cursor: pointer; }
+.bd-step.on { background: var(--gold); border-color: var(--gold); color: var(--ink);
+  font-weight: 700; }
+.bd-nav { margin-bottom: 8px; gap: 8px; }
+.bd-station { font-size: 1rem; color: var(--accent-text); }
+.bd-savebar { margin-top: 10px; gap: 8px; }
+
+/* خلفيةٌ وأشكالٌ وشريطٌ وعلامةٌ مائيةٌ في المعاينة (ملاحظتا ٣٩٠ و٣٩١) */
+.bd-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
+.bd-sh { position: absolute; z-index: 2; }
+.bd-band { position: absolute; inset-inline: 0; z-index: 2; }
+.bd-wm { position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; z-index: 1; pointer-events: none; }
+.bd-wm img { height: auto; }

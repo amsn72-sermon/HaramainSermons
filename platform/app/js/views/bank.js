@@ -223,7 +223,16 @@ export async function adminList(ctx, opts = {}) {
       state: a.verified_at ? 'verified' : (a.doc_path ? 'review' : 'no_doc') }));
   }
   // كل فريق وحساباته على حدة (ملاحظة ٩٩)
-  const accounts = opts.only ? all.filter(a => opts.only.has(a.member_id)) : all;
+  const mine = opts.only ? all.filter(a => opts.only.has(a.member_id)) : all;
+  // والمعتمَدُ يخرج من التدقيق إلى أيقونته الدائمة أمام العضو (ملاحظة ٣٩٣)
+  const filter = h('select', { 'aria-label': 'التصفية' },
+    h('option', { value: 'review', selected: true }, 'ما يَرِد للتدقيق'),
+    h('option', { value: 'verified' }, 'المعتمَدة'),
+    h('option', { value: 'all' }, 'الكل'));
+  const pick = () => (filter.value === 'all' ? mine
+    : filter.value === 'verified' ? mine.filter(a => a.state === 'verified')
+    : mine.filter(a => a.state !== 'verified'));
+  let accounts = pick();
   const reload = () => ctx.navigate(opts.reloadPath || '/app/bank-accounts', { replace: true });
 
   // ـــ طلبُ المستند، وتصحيحُ الرقم، والإعادةُ للتصحيح (ملاحظة ٣٧٣)
@@ -277,9 +286,7 @@ export async function adminList(ctx, opts = {}) {
     const res = await dialog({
       title: `تصحيحُ رقم حساب ${a.full_name || 'العضو'}`,
       body: h('div.stack',
-        h('p.small.muted', 'إذا خالف المستندُ الرسميُّ الرقمَ المكتوب صُحِّح من هنا. '
-          + 'ويُقيَّد مَن صحَّحه ومتى، ويبقى الرقمُ الأصلُ في السجل. '
-          + 'والتصحيحُ يُلغي التوثيقَ السابقَ فيُراجَع الجديد.'),
+        h('p.small.muted', 'إذا خالف المستندُ الرقمَ المكتوب فصحِّحْه هنا. يُقيَّد التصحيحُ في السجل، ويُلغى التوثيقُ السابقُ فيُراجَع الرقمُ الجديد.'),
         h('label.field', 'الآيبان (IBAN)', iban),
         local ? null : h('div.grid-2',
           h('label.field', 'رقم الحساب', acc),
@@ -359,24 +366,37 @@ export async function adminList(ctx, opts = {}) {
           : null)));
   };
 
-  const body = accounts.length ? h('div.table-wrap', h('table.responsive',
-    h('thead', h('tr', ['العضو', 'البنك', 'الآيبان / رقم الحساب', 'الحال', ''].map(t => h('th', t)))),
-    h('tbody', accounts.map(rowEl))))
-    : h('p.muted', mayAnyBank()
-        ? 'لم يسجّل أحد حسابه البنكي بعد.'
-        : 'هذا خارجَ نطاقِ عملك الحالي.');
+  const body = h('div');
+  const draw = () => {
+    accounts = pick();
+    body.replaceChildren(accounts.length
+      ? h('div.table-wrap', h('table.responsive',
+          h('thead', h('tr', ['العضو', 'البنك', 'الآيبان / رقم الحساب', 'الحال', '']
+            .map(t => h('th', t)))),
+          h('tbody', accounts.map(rowEl))))
+      : h('p.muted', !mayAnyBank() ? 'هذا خارجَ نطاقِ عملك الحالي.'
+          : filter.value === 'review'
+            ? 'لا حساباتٍ تنتظر التدقيق — والمعتمَدةُ تُفتَح من أيقونتها أمام العضو.'
+            : 'لم يسجّل أحد حسابه البنكي بعد.'));
+  };
+  filter.onchange = draw;
+  draw();
+  const head = h('div.row.between.wrap',
+    h('span.badge', `${mine.filter(a => a.state !== 'verified').length} تحت التدقيق`),
+    h('label.field.sm', 'التصفية', filter));
 
   // جزء داخل شاشة «شؤون الفريق» الموحّدة (ملاحظة ٩٨)
   if (opts.parts) {
     return h('div.card.stack',
-      h('div.row.between', h('h3', 'الحسابات البنكية'),
-        h('span.badge', `${accounts.filter(a => !a.verified_at).length} تحت المراجعة`)),
-      h('p.small.muted', 'يسجّل كل عضو حسابه بنفسه، ويعتمده مدير المشروع بعد مطابقته بخطاب البنك المرفق.'),
+      h('div.row.between', h('h3', 'الحسابات البنكية'), head),
+      h('p.small.muted', 'يسجّل كل عضو حسابه بنفسه، ويعتمده مدير المشروع بعد مطابقته بخطاب البنك المرفق. '
+        + 'والمعتمَدُ يخرج من هنا إلى أيقونته الدائمة أمام العضو.'),
       body);
   }
 
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'الحسابات البنكية'),
       h('p.muted', 'يسجّل كل عضو حسابه بنفسه، ويوثّقه مدير المشروع بعد مطابقته بخطاب البنك.'))),
+    head,
     body);
 }

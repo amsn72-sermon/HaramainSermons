@@ -351,9 +351,7 @@ export async function importDialog({ sectionId, year, onDone }) {
   const res = await dialog({
     title: `رفعُ خطب ${ARY(year)}هـ من ملفات Word`,
     body: h('div.col.gap',
-      h('p.small.muted', 'ارفع مجمَّعَ العام كما هو عندك — ملفًا لكلِّ لغةٍ أو عدّةَ ملفاتٍ معًا. '
-        + 'يُقرأ في متصفحك، ويُشقُّ عند ترويسة كلِّ خطبة، ويُستخرج منها المسجدُ والعنوانُ '
-        + 'والتاريخُ والخطيب، ثم تُراجعها قبل أن تُكتب.'),
+      h('p.small.muted', 'ارفعْ مجمَّعَ العام: ملفًّا لكلِّ لغةٍ أو ملفاتٍ معًا. تُشَقُّ الخطبُ وتُستخرج بياناتُها، ثم تُراجعها قبل الحفظ.'),
       h('label.field', h('span', 'ملفاتُ Word (.docx)'), pick),
       h('div.row.gap.wrap',
         h('label.field', h('span', 'اللغة'), fileLang),

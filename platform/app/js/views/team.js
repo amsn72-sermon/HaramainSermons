@@ -148,9 +148,7 @@ export async function render(ctx, opts = {}) {
     const kindWhy = h('small.muted');
     const leadCard = isManager() ? h('fieldset.stack',
       h('legend', 'القيادة والإشراف'),
-      h('p.small.muted', 'قائدُ الفريق الميداني يقود المرشدين وإجابةَ السائلين ممن أُسنِدوا إليه '
-        + 'بأسمائهم. ومشرفُ فريق الترجمة يُعيَّن من المترجمين الخبراء ويبقى مترجمًا على حاله. '
-        + 'ويتعدّد القادةُ، ولكلِّ عضوٍ قائدٌ واحد.'),
+      h('p.small.muted', 'قائدُ الفريق الميدانيِّ يقود من أُسنِد إليه من المرشدين وإجابةِ السائلين. ومشرفُ فريق الترجمة من المترجمين الخبراء ويبقى مترجمًا. ولكلِّ عضوٍ قائدٌ واحد.'),
       h('label.field', 'صفة القيادة', kindSel, kindWhy)) : null;
     const syncLead = () => {
       if (!leadCard) return;
@@ -187,12 +185,22 @@ export async function render(ctx, opts = {}) {
     // بالوقت والمكان المحدَّدَين له (ملاحظة ٢٦٤ ز)
     const flexBox = h('input', { type: 'checkbox', checked: m.flex_hours ? true : null,
       disabled: !can('sh_flex') || null, 'aria-label': 'دوام مرن' });
-    const flexCard = (isManager() || can('sh_flex'))
+    // ودوامٌ ثابتٌ لمترجمٍ تخصصيّ: استثناءٌ نادرٌ، فالأصلُ أنَّ التخصصيَّ
+    //   عن بُعدٍ والمكانيَّ حضوريّ، ولا يُخلَطان في الورديات (ملاحظة ٣٩٧)
+    const fixedBox = h('input', { type: 'checkbox', checked: m.fixed_shift ? true : null,
+      disabled: !(isManager() || can('sh_view')) || null, 'aria-label': 'دوام ثابت' });
+    const flexCard = (isManager() || can('sh_flex') || can('sh_view'))
       ? h('fieldset.stack',
           h('legend', 'الدوام'),
           h('label.check', flexBox, h('span', 'دوامٌ مرن')),
           h('p.small.muted', 'الأصلُ أن يلتزم بالوردية والموقع المحدَّدَين له، فيُحتسب تأخيرُه '
-            + 'وانصرافُه المبكر. والدوامُ المرن يُطالبه بإتمام الساعات لا بالساعة المعيَّنة.'))
+            + 'وانصرافُه المبكر. والدوامُ المرن يُطالبه بإتمام الساعات لا بالساعة المعيَّنة.'),
+          trackOf(m) === 'field' ? null
+            : h('div.stack', { style: { gap: '4px' } },
+                h('label.check', fixedBox, h('span', 'دوامٌ ثابتٌ استثناءً')),
+                h('p.small.muted', 'المترجمُ التخصصيُّ عن بُعد، والمرشدُ المكانيُّ حضوريّ. '
+                  + 'وهذا الوسمُ يُدخِل هذا العضوَ وحدَه جدولَ الورديات، ولا يفتح البابَ '
+                  + 'لفريقه كلِّه.')))
       : null;
 
     // المنصبُ — عبارةٌ تُكتَب لكلِّ حسابٍ لا لحساب المتابعة وحدَه
@@ -343,8 +351,7 @@ export async function render(ctx, opts = {}) {
     const permCard = !isManager() ? null
       : h('fieldset.stack', { style: { display: PERMED.includes(m.role) ? '' : 'none' } },
       h('legend', 'صلاحيات الحساب'),
-      h('p.small.muted', 'لكلِّ صلاحيةٍ أصلُها: مفتوحةٌ ابتداءً أو مغلقةٌ لا تُنال إلا بمنحك. '
-        + 'وما تُغيّره هنا يُحكَم به في قاعدة البيانات لا في الشاشة وحدَها، ولا يرى العضوُ هذه اللوحة.'),
+      h('p.small.muted', 'لكلِّ صلاحيةٍ أصلُها: مفتوحةٌ ابتداءً أو مغلقةٌ لا تُنال إلا بمنحِك. ولا يرى العضوُ هذه اللوحة.'),
       permBody,
       h('label.field', 'أجلُ ما تمنحه الآن (اختياري)', permUntil,
         h('small', 'يسقط المنحُ عند هذا التاريخ من نفسه، فلا يُنسى مفتوحًا')));
@@ -646,6 +653,10 @@ export async function render(ctx, opts = {}) {
         await db.rpc('set_flex_hours', { p_member: m.id, p_on: flexBox.checked })
           .catch(e => toast(e.message, 'bad'));
       }
+      if (flexCard && !!fixedBox.checked !== !!m.fixed_shift) {
+        await db.rpc('set_fixed_shift', { p_member: m.id, p_on: fixedBox.checked })
+          .catch(e => toast(e.message, 'bad'));
+      }
       if (jobCard && jobTitle.value.trim() !== (m.job_title || '')) {
         await db.rpc('set_job_title', { p_member: m.id, p_title: jobTitle.value.trim() || null })
           .catch(e => toast(e.message, 'bad'));
@@ -929,9 +940,7 @@ export async function render(ctx, opts = {}) {
       body: h('div.stack',
         h('div.form-errors', { role: 'alert' },
           h('b', 'الحذف لا يُستدرك.'),
-          h('p.small', 'يُمحى الحساب وبياناته الشخصية ولغاتُه وحسابه البنكي. '
-            + 'وإن كان له سجلُّ عملٍ في المنصة — ترجمةٌ أو توقيعٌ أو مناوبةٌ أو تقييم — '
-            + 'رُدّ الحذفُ، فالوجهُ حينئذٍ تعطيلُ الحساب لا محوه.')),
+          h('p.small', 'يُمحى الحسابُ وبياناتُه الشخصيةُ ولغاتُه وحسابُه البنكيّ. ومن كان له سجلُّ عملٍ في المنصة رُدَّ حذفُه، ويُعطَّل حسابُه.')),
         h('label.field', 'اكتب اسم العضو كما هو مسجَّل', h('small', m.full_name), name),
         h('label.field', 'سبب الحذف (يُقيَّد في سجلّ المحذوفين)', why)),
       buttons: [
@@ -973,6 +982,86 @@ export async function render(ctx, opts = {}) {
       };
       return b;
     }));
+  }
+
+
+  // ـــ الهويةُ المعتمَدةُ والحسابُ المعتمَد: أيقونةٌ دائمةٌ أمام العضو،
+  //   فما خرج من التدقيق لا يضيع بل يُفتَح من هنا متى شئت (ملاحظة ٣٩٣)
+  const idOk   = m => (privOf[m.id] || {}).iqama_status === 'approved';
+  const bankOk = m => !!(bankOf[m.id] || {}).verified_at;
+  const fileBtn = m => {
+    if (!idOk(m) && !bankOk(m)) return null;
+    const what = [idOk(m) ? 'الهوية' : null, bankOk(m) ? 'الحساب المصرفي' : null]
+      .filter(Boolean).join(' و');
+    const b = h('button.btn.sm.ghost', { type: 'button',
+      title: `${what} — معتمَدٌ ومحفوظ` }, `🪪 ${what}`);
+    b.onclick = () => busy(b, () => approvedDialog(m));
+    return b;
+  };
+
+  async function approvedDialog(m) {
+    const p = privOf[m.id] || {};
+    const acc = bankOf[m.id] || null;
+    const view = h('div.id-view');
+    if (p.iqama_path) {
+      const img = h('img.id-shot', { alt: `صورةُ هوية ${m.full_name}` });
+      storage.signedUrl('private-docs', p.iqama_path, 600)
+        .then(u => { img.src = u; })
+        .catch(() => view.replaceChildren(h('span.small.muted', 'تعذّر عرضُ الصورة')));
+      const open = h('button.btn.xs.ghost', { type: 'button' }, 'افتحْها كبيرة');
+      open.onclick = () => busy(open, async () => {
+        try {
+          window.open(await storage.signedUrl('private-docs', p.iqama_path, 600),
+            '_blank', 'noopener');
+        } catch (e) { toast(e.message, 'bad'); }
+      });
+      view.replaceChildren(img, open);
+    } else view.replaceChildren(h('div.id-shot.empty', h('span', 'لا صورة')));
+
+    const letter = h('div.row');
+    if (acc && acc.doc_path) {
+      const b = h('button.btn.xs', { type: 'button' }, 'خطابُ البنك');
+      b.onclick = () => busy(b, async () => {
+        try {
+          window.open(await storage.signedUrl('bank-docs', acc.doc_path, 600),
+            '_blank', 'noopener');
+        } catch (e) { toast(e.message, 'bad'); }
+      });
+      letter.append(b);
+    }
+
+    await dialog({
+      title: `${m.full_name} — المعتمَد`,
+      body: h('div.stack',
+        idOk(m)
+          ? h('section.card.stack',
+              h('div.row.between', h('b', 'الهويةُ الشخصية'),
+                h('span.badge.ok', 'معتمَدة')),
+              h('div.id-grid', view,
+                h('div.id-facts',
+                  h('span', h('small', 'النوع'),
+                    h('b', p.id_type === 'passport' ? 'جواز سفر' : 'هوية وطنية أو إقامة')),
+                  h('span', h('small', 'الرقم'), h('b', { dir: 'ltr' }, p.national_id || '—')),
+                  h('span', h('small', 'الجنسية'), h('b', p.nationality || '—')),
+                  h('span', h('small', 'الانتهاء'),
+                    h('b', p.id_expiry ? fmtDate(p.id_expiry) : 'بلا تاريخ')))))
+          : null,
+        bankOk(m)
+          ? h('section.card.stack',
+              h('div.row.between', h('b', 'الحسابُ المصرفي'),
+                h('span.badge.ok', 'معتمَد')),
+              h('div.id-facts',
+                h('span', h('small', 'البنك'), h('b', acc.bank_name || '—')),
+                h('span', h('small', 'صاحبُ الحساب'), h('b', acc.account_holder || '—')),
+                h('span', h('small', 'الآيبان'),
+                  h('b', { dir: 'ltr' }, acc.iban || acc.account_number || '—')),
+                h('span', h('small', 'المكان'),
+                  h('b', acc.scope === 'local' ? 'داخل المملكة'
+                    : `خارج المملكة — ${acc.country || ''}`))),
+              letter)
+          : null),
+      buttons: [{ label: 'إغلاق', value: null }]
+    });
   }
 
   function draw() {
@@ -1018,6 +1107,7 @@ export async function render(ctx, opts = {}) {
                 `${Object.values(m.perms).filter(v => v === false).length} مغلقة`) : null,
           dataBadge(m)),
         h('td', canManage(m) && m.id !== state.profile.id && h('div.row',
+          fileBtn(m),
           (privOf[m.id] || {}).data_status === 'submitted'
             ? h('button.btn.sm.primary', { type: 'button',
                 onclick: () => reviewData(m) }, 'تدقيق البيانات') : null,

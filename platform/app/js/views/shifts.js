@@ -20,8 +20,10 @@ export async function render(ctx) {
     members = (Array.isArray(rows) ? rows : []).map(r => ({ ...r, id: r.member_id }));
   } catch {
     members = (await db.select('profiles', {
-      select: 'id,full_name,member_no,track,status', status: 'eq.active', order: 'full_name.asc'
-    })).map(m => ({ ...m, member_id: m.id, is_field: m.track === 'field' }));
+      select: 'id,full_name,member_no,track,status,fixed_shift', status: 'eq.active',
+      order: 'full_name.asc'
+    })).filter(m => m.track === 'field' || m.fixed_shift)
+      .map(m => ({ ...m, member_id: m.id, is_field: m.track === 'field' }));
   }
   const fieldOnly = members.filter(m => m.is_field);
 
@@ -206,9 +208,10 @@ async function substitute(s, reload) {
     const rows = await db.rpc('shift_candidates');
     list = (Array.isArray(rows) ? rows : []).map(r => ({ ...r, id: r.member_id }));
   } catch {
-    list = (await db.select('profiles', {
-      select: 'id,full_name,track,status', status: 'eq.active', order: 'full_name.asc'
-    }).catch(() => [])) || [];
+    list = ((await db.select('profiles', {
+      select: 'id,full_name,track,status,fixed_shift', status: 'eq.active',
+      order: 'full_name.asc'
+    }).catch(() => [])) || []).filter(m => m.track === 'field' || m.fixed_shift);
   }
   list = list.filter(m => m.id !== s.member_id);
 
@@ -255,7 +258,9 @@ async function edit(s, members, reload) {
       const rows = await db.rpc('shift_candidates');
       list = (Array.isArray(rows) ? rows : []).map(r => ({ ...r, id: r.member_id }));
     } catch {
-      list = (await db.select('profiles', { select: 'id,full_name,track,status', status: 'eq.active', order: 'full_name.asc' }))
+      list = (await db.select('profiles', { select: 'id,full_name,track,status,fixed_shift',
+        status: 'eq.active', order: 'full_name.asc' }))
+        .filter(m => m.track === 'field' || m.fixed_shift)
         .map(m => ({ ...m, is_field: m.track === 'field' }));
     }
   }
@@ -271,7 +276,9 @@ async function edit(s, members, reload) {
   const leadId = (crew.find(c => c.is_lead) || {}).member_id || s.member_id || (list[0] && list[0].id);
   const picked = new Set(crew.filter(c => !c.is_lead).map(c => c.member_id));
 
-  const label = m => `${m.full_name}${m.is_field ? '' : ' — من خارج الإرشاد'}`;
+  // الميدانُ وحدَه في الجدول، ومن وُسِم بدوامٍ ثابتٍ يُبيَّن أنَّه استثناء
+  //   (ملاحظتا ٣٩٦ و٣٩٧)
+  const label = m => `${m.full_name}${m.is_field ? '' : ' — دوامٌ ثابتٌ استثناءً'}`;
   const who = h('select', { 'aria-label': 'مسؤول الوردية' }, list.map(m => h('option', { value: m.id }, label(m))));
   who.value = leadId || '';
 
@@ -298,7 +305,7 @@ async function edit(s, members, reload) {
     title: s.id || s.crew_id ? 'تعديل وردية' : 'وردية جديدة',
     body: h('div.stack',
       h('label.field', 'مسؤول الوردية', who,
-        h('small', 'المرشدون المكانيون أولًا، ويجوز أن يكون المسؤول من خارجهم.')),
+        h('small', 'المرشدون المكانيون وحدَهم في الجدول، ولا يدخله المترجمُ التخصصيُّ إلا إن وُسِم بدوامٍ ثابتٍ استثناءً.')),
       h('div.row.wrap', h('label.field', 'التاريخ', date), h('label.field', 'من', start), h('label.field', 'إلى', end)),
       h('label.field', 'الموقع', spot,
         h('datalist#hs-spots', SPOTS.map(v => h('option', { value: v })))),

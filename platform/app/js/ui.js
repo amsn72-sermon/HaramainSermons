@@ -104,6 +104,12 @@ export const fmtDateTime = v => v ? dtFmt.format(new Date(v)) : '—';
 export const fmtDate = v => v ? dFmt.format(new Date(v)) : '—';
 // تاريخ هجري وحده — يُطبع في ختم التوثيق (ملاحظة ١٤٥)
 export const fmtHijri = v => (v ? hijriFmt.format(new Date(String(v).length > 10 ? v : v + 'T12:00:00')) : '—');
+// يومُ الشهر الهجريِّ وحدَه — تُسمَّى به بطاقةُ الشهر (ملاحظة ٣٧٨)
+const hijriDayFmt = new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura-nu-latn', { day: 'numeric' });
+export const hijriDay = v => (v
+  ? Number(hijriDayFmt.format(new Date(String(v).length > 10 ? v : v + 'T12:00:00')).replace(/\D+/g, ''))
+  : 0);
+
 export function fmtSermonDate(v) {
   if (!v) return '—';
   const d = new Date(v + 'T12:00:00');

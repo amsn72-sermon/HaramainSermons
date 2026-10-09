@@ -39,8 +39,13 @@ const PAGE_LABEL = {
   colophon: 'صفحةُ الحقوق',
   divider:  'صفحةُ عنوان الخطبة',
   inner:    'الصفحةُ الداخلية',
+  inner2:   'الصفحةُ المقابلة',
   back:     'ظهرُ الكتاب'
 };
+
+// صفحتا المتن وجهانِ لتصميمٍ واحد: ما يُضبَط في إحداهما يسري على
+//   أختها، فالكتابُ لا يُصمَّم صفحتين مختلفتين في متنه (ملاحظة ٣٩٢)
+const SLOT_OF = k => (k === 'inner2' ? 'inner' : k);
 
 export async function render(ctx) {
   if (!may()) return h('p.muted', 'تصميمُ قوالب المجمَّع بإذن مدير المشروع.');
@@ -70,6 +75,41 @@ export async function render(ctx) {
     const S = SH();
     const s = slotOf(t, key);
     const out = [];
+    if (s.bg) {
+      out.push(h('img.bd-bg', { src: s.bg, alt: '', style: {
+        objectFit: s.bgFit === 'contain' ? 'contain' : 'cover',
+        opacity: s.bgFade != null ? String(Math.max(0, Math.min(100, s.bgFade)) / 100) : null } }));
+    }
+    for (const sh of s.shapes) {
+      if (!sh) continue;
+      const st = {
+        insetInlineStart: `${sh.x ?? 10}%`, top: `${sh.y ?? 10}%`,
+        width: `${sh.w ?? 30}%`, height: `${sh.h ?? 6}%`,
+        opacity: String(Math.max(0, Math.min(100, sh.opacity ?? 100)) / 100)
+      };
+      if (sh.kind === 'line') {
+        st.height = `${((Math.max(0.2, sh.thick ?? 0.6)) / S.h) * 100}%`;
+        st.background = sh.color || '#b9975b';
+      } else if (sh.kind === 'frame') {
+        st.border = `1px solid ${sh.color || '#b9975b'}`;
+      } else {
+        st.background = sh.color || '#b9975b';
+        if (sh.kind === 'circle') st.borderRadius = '50%';
+      }
+      out.push(h('div.bd-sh', { style: st }));
+    }
+    if (s.band && s.band.on) {
+      out.push(h('div.bd-band', { style: {
+        height: `${((s.band.h ?? 10) / S.h) * 100}%`,
+        background: s.band.color || '#174a38',
+        opacity: String(Math.max(0, Math.min(100, s.band.opacity ?? 100)) / 100),
+        top: s.band.top ? '0' : 'auto', bottom: s.band.top ? 'auto' : '0' } }));
+    }
+    if (s.wm && s.wm.src) {
+      out.push(h('div.bd-wm', h('img', { src: s.wm.src, alt: '', style: {
+        width: `${Math.max(10, Math.min(100, s.wm.size ?? 50))}%`,
+        opacity: String(Math.max(1, Math.min(60, s.wm.opacity ?? 8)) / 100) } })));
+    }
     for (const m of s.marks) {
       if (!m || !m.src) continue;
       out.push(h('img.bd-mk', { src: m.src, alt: '', style: {
@@ -225,33 +265,78 @@ export async function render(ctx) {
   }
 
   const MAKE = { cover: miniCover, front: miniBasmala, colophon: miniColophon,
-                 divider: miniDivider, inner: miniInner, back: miniBack };
+                 divider: miniDivider, inner: miniInner, inner2: miniInner,
+                 back: miniBack };
 
-  // صفوفُ العرض: واحدةٌ، ثم اثنتان مفتوحتان، ثم اثنتان، ثم ظهرُ الكتاب
-  const ROWS = [
+  // ـــ المحطّاتُ الخمس: تُقلَّب كما يُقلَّب الكتابُ، صفحةً صفحةً
+  //   كبيرةً تُحرَّر، لا مصغَّراتٍ لا تُبصَر (ملاحظتا ٣٧٧ و٣٩٢)
+  //
+  //   والكتابُ عربيٌّ يُفتَح من اليمين: الصفحةُ اليمنى أوّلُ الورقة،
+  //   واليسرى التي بعدها.
+  const STATIONS = [
     { label: 'الغلاف', pages: ['cover'] },
-    // الكتابُ عربيٌّ يُفتَح من اليمين: الصفحةُ اليمنى أوّلُ الورقة،
-    //   واليسرى التي بعدها — فالبسملةُ يمينًا والحقوقُ يسارًا، وصفحةُ
-    //   العنوان يمينًا ومتنُها يسارًا كما يُقلَّب (ملاحظة ٣٥٥)
     { label: 'ما بعد الغلاف — صفحتان مفتوحتان', pages: ['front', 'colophon'] },
-    { label: 'عنوانُ الخطبة ومتنُها — صفحتان مفتوحتان', pages: ['divider', 'inner'] },
+    { label: 'صفحةُ عنوان الخطبة', pages: ['divider'] },
+    { label: 'صفحتان من داخل الكتاب', pages: ['inner', 'inner2'] },
     { label: 'ظهرُ الكتاب', pages: ['back'] }
   ];
+  let station = 0;
+  const stationOf = k => Math.max(0, STATIONS.findIndex(x => x.pages.includes(k)));
+
+  function goStation(i) {
+    station = Math.max(0, Math.min(STATIONS.length - 1, i));
+    const pages = STATIONS[station].pages;
+    if (!pages.includes(page)) page = pages[0];
+    drawAll();
+  }
 
   function drawStage() {
     const S = SH();
-    fill(stage, ...ROWS.map(r =>
-      h('div.bd-row',
-        h('div.bd-row-label.small.muted', r.label),
-        h('div.bd-spread' + (r.pages.length > 1 ? '.two' : ''),
-          ...r.pages.map(k => {
-            const box = h('div.bd-sheet' + (page === k ? '.on' : ''),
-              { style: { aspectRatio: `${S.w} / ${S.h}` } }, MAKE[k]());
-            return h('button.bd-sheet-wrap', { type: 'button',
-              title: `اعرِضْ أدواتِ ${PAGE_LABEL[k]}`,
-              onclick: () => { page = k; drawAll(); } },
-              box, h('span.small.muted', PAGE_LABEL[k]));
-          })))));
+    const st = STATIONS[station];
+    fill(stage,
+      // شريطُ المحطّات: يُرى الموضعُ ويُقفَز إليه
+      h('div.bd-steps',
+        ...STATIONS.map((x, i) => {
+          const b = h('button.bd-step' + (i === station ? '.on' : ''), { type: 'button',
+            'aria-current': i === station ? 'step' : null,
+            title: x.label }, `${AR(i + 1)}`);
+          b.onclick = () => goStation(i);
+          return b;
+        })),
+      h('div.row.between.wrap.bd-nav',
+        h('button.btn.sm.ghost', { type: 'button', disabled: station === 0 || null,
+          onclick: () => goStation(station - 1) }, '→ السابقة'),
+        h('b.bd-station', st.label),
+        h('button.btn.sm.ghost', { type: 'button',
+          disabled: station === STATIONS.length - 1 || null,
+          onclick: () => goStation(station + 1) }, 'التالية ←')),
+      h('div.bd-spread' + (st.pages.length > 1 ? '.two' : ''),
+        ...st.pages.map(k => {
+          const box = h('div.bd-sheet' + (page === k ? '.on' : ''),
+            { style: { aspectRatio: `${S.w} / ${S.h}` } }, MAKE[k]());
+          return h('button.bd-sheet-wrap', { type: 'button',
+            title: `اعمَلْ على ${PAGE_LABEL[k]}`,
+            onclick: () => { page = k; drawAll(); } },
+            box, h('span.small.muted', PAGE_LABEL[k]));
+        })),
+      h('div.row.between.wrap.bd-savebar',
+        h('span.small.muted', 'اضغطْ صفحةً لتعمل عليها، وأدواتُها إلى جانبها.'),
+        h('button.btn.sm.primary', { type: 'button',
+          onclick: ev => busy(ev.currentTarget, saveTpl) }, '💾 احفظْ هذه الصفحة')));
+  }
+
+  // ـــ الحفظُ: من ذيل كلِّ محطةٍ ومن الشريط الأعلى سواء (ملاحظة ٣٧٧)
+  async function saveTpl() {
+    if (String(name).trim().length < 2) { toast('اكتبْ اسمَ القالب', 'bad'); return; }
+    try {
+      const id = await db.rpc('save_book_template_by_id', {
+        p_id: cur?.id || null, p_name: name.trim(), p_tpl: t,
+        p_year: forYear, p_default: isDefault });
+      rows = await db.rpc('book_templates_list') || [];
+      cur = rows.find(r => r.id === id) || cur;
+      toast('حُفظ القالب.', 'ok');
+      drawAll();
+    } catch (e) { toast(e.message, 'bad'); }
   }
 
   // -------------------------------------------------------------------
@@ -325,6 +410,113 @@ export async function render(ctx) {
     [arr[i], arr[j]] = [arr[j], arr[i]];
     drawAll();
   };
+
+  // ـــ خلفيةٌ تملأ الصفحة: صورةٌ أو صفحةُ PDF مصمَّمةٌ خارجًا (٣٩٠)
+  const pageFile = h('input', { type: 'file', accept: 'image/*,application/pdf', hidden: true,
+    'aria-label': 'خلفيةُ الصفحة' });
+  let pageTarget = null;
+  pageFile.onchange = async () => {
+    const f = pageFile.files?.[0]; if (!f || !pageTarget) return;
+    try {
+      const { bgImage } = await import('../pdfview.js');
+      const S = SH();
+      const out = await bgImage(f, { page: 1, mmWide: S.w, dpi: 300 });
+      pageTarget.bg = out.url;
+      pageTarget.bgName = f.name;
+      drawAll();
+    } catch (e) { toast(e.message, 'bad'); }
+    pageFile.value = '';
+  };
+
+  const wmFile = h('input', { type: 'file', accept: 'image/*', hidden: true,
+    'aria-label': 'العلامةُ المائية' });
+  let wmTarget = null;
+  wmFile.onchange = async () => {
+    const f = wmFile.files?.[0]; if (!f || !wmTarget) return;
+    try {
+      const { prepareMark } = await import('../photo.js');
+      wmTarget.wm = { ...(wmTarget.wm || {}), src: await prepareMark(f, 1200) };
+      drawAll();
+    } catch (e) { toast(e.message, 'bad'); }
+    wmFile.value = '';
+  };
+
+  function pagePanel(key) {
+    const s2 = slotOf(t, key);
+    return h('div.stack',
+      h('fieldset.stack', h('legend', 'خلفيةٌ تملأ الصفحة'),
+        h('p.small.muted', 'ارفعْ تصميمًا خارجيًّا — صورةً أو ملفَّ PDF — فيُرسَم بدقّة '
+          + 'الطباعة أرضيةً للصفحة، وما فوقه من نصوصٍ وشعاراتٍ يبقى.'),
+        h('div.row.wrap', { style: { gap: '6px' } },
+          h('button.btn.xs', { type: 'button',
+            onclick: () => { pageTarget = s2; pageFile.click(); } }, '⤒ ارفعْ خلفية'),
+          h('button.btn.xs.ghost', { type: 'button',
+            onclick: () => { s2.bg = null; s2.bgName = null; drawAll(); } }, 'بلا خلفية')),
+        s2.bg ? h('p.small.muted', `الحالية: ${s2.bgName || 'صورة'}`) : null,
+        s2.bg ? h('label.field', 'ملءُ الصفحة',
+          pick(s2.bgFit || 'cover', [['cover', 'تملأ ولو قُصَّت'], ['contain', 'تظهر كاملةً']],
+            v => { s2.bgFit = v; })) : null,
+        s2.bg ? h('label.field', 'شدّةُ ظهورها',
+          rangeIn(s2.bgFade ?? 100, 5, 100, v => { s2.bgFade = v; }, '٪')) : null),
+
+      h('fieldset.stack', h('legend', 'الشريط'),
+        check(s2.band?.on, 'شريطٌ على عرض الصفحة', v => { slotOf(t, key).band.on = v; }),
+        h('div.row.wrap', { style: { gap: '6px', alignItems: 'end' } },
+          num(s2.band, 'h', 'ارتفاعُه مم', 1, 60),
+          h('label.field.sm', 'لونُه', colorIn(s2.band?.color, v => { s2.band.color = v; })),
+          num(s2.band, 'opacity', 'ظهورُه ٪', 5, 100, 5)),
+        check(s2.band?.top, 'في الرأس لا في الذيل', v => { slotOf(t, key).band.top = v; })),
+
+      h('fieldset.stack', h('legend', 'العلامةُ المائية'),
+        h('div.row.wrap', { style: { gap: '6px' } },
+          h('button.btn.xs', { type: 'button',
+            onclick: () => { wmTarget = s2; wmFile.click(); } }, '⤒ ارفعْ علامة'),
+          h('button.btn.xs.ghost', { type: 'button',
+            onclick: () => { s2.wm = { src: null, size: 50, opacity: 8 }; drawAll(); } },
+            'بلا علامة')),
+        s2.wm?.src ? h('div.row.wrap', { style: { gap: '6px', alignItems: 'end' } },
+          num(s2.wm, 'size', 'قياسُها ٪', 10, 100),
+          num(s2.wm, 'opacity', 'ظهورُها ٪', 1, 60)) : null));
+  }
+
+  function shapesPanel(key) {
+    const s2 = slotOf(t, key);
+    const add2 = kind => {
+      s2.shapes.push({ kind, x: 20, y: 40, w: 60, h: kind === 'line' ? 1 : 10,
+        color: t.cover.gold, opacity: 100, thick: 0.6 });
+      drawAll();
+    };
+    return h('div.stack',
+      h('div.row.wrap', { style: { gap: '6px' } },
+        h('button.btn.xs', { type: 'button', onclick: () => add2('rect') }, '▭ مستطيل'),
+        h('button.btn.xs', { type: 'button', onclick: () => add2('circle') }, '◯ دائرة'),
+        h('button.btn.xs', { type: 'button', onclick: () => add2('line') }, '— خطّ'),
+        h('button.btn.xs', { type: 'button', onclick: () => add2('frame') }, '▢ إطار')),
+      ...(s2.shapes.length ? s2.shapes.map((sh, i) =>
+        h('div.stack.tx-row',
+          h('div.row.wrap', { style: { gap: '6px' } },
+            h('b.small', { style: { minWidth: '52px' } },
+              ({ rect: 'مستطيل', circle: 'دائرة', line: 'خطّ', frame: 'إطار' })[sh.kind] || 'شكل'),
+            num(sh, 'x', 'من اليمين ٪', 0, 98),
+            num(sh, 'y', 'من الأعلى ٪', 0, 98),
+            num(sh, 'w', 'العرض ٪', 1, 100),
+            sh.kind === 'line' ? num(sh, 'thick', 'السُّمك مم', 0.2, 10, 0.1)
+              : num(sh, 'h', 'الارتفاع ٪', 1, 100),
+            num(sh, 'opacity', 'الظهور ٪', 5, 100, 5),
+            h('label.field.sm', 'اللون', colorIn(sh.color, v => { sh.color = v; }))),
+          h('div.row.between.wrap',
+            h('span.small.muted', 'الطبقةُ تُرفَع وتُخفَض بالسهمين'),
+            h('div.row', { style: { gap: '4px' } },
+              h('button.btn.xs.ghost', { type: 'button', title: 'إلى الأمام',
+                onclick: () => move(s2.shapes, i, 1) }, '▲'),
+              h('button.btn.xs.ghost', { type: 'button', title: 'إلى الخلف',
+                onclick: () => move(s2.shapes, i, -1) }, '▼'),
+              h('button.btn.xs', { type: 'button', title: 'نسخةٌ منه',
+                onclick: () => { s2.shapes.splice(i + 1, 0, { ...sh, y: (sh.y ?? 0) + 4 }); drawAll(); } }, '⧉'),
+              h('button.btn.xs.danger', { type: 'button',
+                onclick: () => { s2.shapes.splice(i, 1); drawAll(); } }, 'احذفْه')))))
+        : [h('p.small.muted', 'لا أشكالَ على هذه الصفحة.')]));
+  }
 
   function imagesPanel(key) {
     const s = slotOf(t, key);
@@ -493,10 +685,10 @@ export async function render(ctx) {
     const m = t.margins || (t.margins = { top: 22, bottom: 18, inner: 22, outer: 16 });
     fill(props,
       // ـــ الصفحةُ المحدَّدة: شريطٌ يوازي ما في اللوحة
-      h('div.bd-pages', ...TPL_SLOTS.map(k => {
+      h('div.bd-pages', ...[...TPL_SLOTS, 'inner2'].map(k => {
         const b = h('button.tab', { type: 'button',
           'aria-selected': page === k ? 'true' : 'false' }, PAGE_LABEL[k]);
-        b.onclick = () => { page = k; drawAll(); };
+        b.onclick = () => { page = k; station = stationOf(k); drawAll(); };
         return b;
       })),
 
@@ -526,12 +718,17 @@ export async function render(ctx) {
       // ـــ ما يخصُّ الصفحةَ المحدَّدة
       h('details.bd-sec', { open: true },
         h('summary', `خصائصُ ${PAGE_LABEL[page]}`),
-        (PAGE_PROPS[page] || PAGE_PROPS.cover)()),
+        (PAGE_PROPS[SLOT_OF(page)] || PAGE_PROPS.cover)()),
       h('details.bd-sec', { open: true },
-        h('summary', `صورُ ${PAGE_LABEL[page]}`), imagesPanel(page)),
+        h('summary', `خلفيةُ ${PAGE_LABEL[page]} وشريطُها وعلامتُها`),
+        pagePanel(SLOT_OF(page))),
       h('details.bd-sec', { open: true },
-        h('summary', `نصوصُ ${PAGE_LABEL[page]}`), textsPanel(page)),
-      imgFile, bgFile);
+        h('summary', `صورُ ${PAGE_LABEL[page]}`), imagesPanel(SLOT_OF(page))),
+      h('details.bd-sec', { open: true },
+        h('summary', `أشكالُ ${PAGE_LABEL[page]}`), shapesPanel(SLOT_OF(page))),
+      h('details.bd-sec', { open: true },
+        h('summary', `نصوصُ ${PAGE_LABEL[page]}`), textsPanel(SLOT_OF(page))),
+      imgFile, bgFile, pageFile, wmFile);
   }
 
   // -------------------------------------------------------------------
@@ -564,18 +761,7 @@ export async function render(ctx) {
     sizeIn.onchange = () => { t.size = sizeIn.value; redraw(); };
 
     const saveBtn = h('button.btn.sm.primary', { type: 'button' }, '💾 احفظِ القالب');
-    saveBtn.onclick = () => busy(saveBtn, async () => {
-      if (String(name).trim().length < 2) return toast('اكتبْ اسمَ القالب', 'bad');
-      try {
-        const id = await db.rpc('save_book_template_by_id', {
-          p_id: cur?.id || null, p_name: name.trim(), p_tpl: t,
-          p_year: forYear, p_default: isDefault });
-        rows = await db.rpc('book_templates_list') || [];
-        cur = rows.find(r => r.id === id) || cur;
-        toast('حُفظ القالب.', 'ok');
-        drawAll();
-      } catch (e) { toast(e.message, 'bad'); }
-    });
+    saveBtn.onclick = () => busy(saveBtn, saveTpl);
 
     const newBtn = h('button.btn.sm', { type: 'button' }, '＋ قالبٌ جديد');
     newBtn.onclick = () => {
@@ -628,9 +814,7 @@ export async function render(ctx) {
       h('div.grow',
         h('div.eyebrow', 'الأرشيف'),
         h('h1', 'قوالبُ مجمَّع الخطب السنوي'),
-        h('p.muted', 'الكتابُ كما يُفتَح: الغلافُ، ثم الصفحتان اللتان بعده مفتوحتين، '
-          + 'ثم صفحةُ عنوان الخطبة ومتنُها، ثم ظهرُ الكتاب. '
-          + 'ولوحةُ الأدوات واحدةٌ — اضغطْ صفحةً لتعمل عليها.'))),
+        h('p.muted', 'تُقلَّب الصفحاتُ كما يُقلَّب الكتاب: الغلافُ، فالصفحتان بعده، فصفحةُ عنوان الخطبة، فصفحتان من المتن، فظهرُ الكتاب. وتُحفَظ كلُّ محطةٍ وحدَها.'))),
     bar,
     h('div.bd-wrap', stage, props));
 }

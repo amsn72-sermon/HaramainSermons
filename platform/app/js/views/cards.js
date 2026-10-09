@@ -3,10 +3,14 @@ import { h, toast, busy, escapeHtml, fmtDate } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { langName, roleLabel } from '../store.js';
 import { urlToDataUrl } from '../photo.js';
-import { CARD, HARAMAIN_LOGO, ITEM_LABEL, ITEM_ORDER, COLORS, PRESETS, PRESET_LAYOUT, DEFAULT_LAYOUT, normalizeLayout, clampLayout, photoH, itemText, itemStyle, bandStyle, ruleStyle, scaleStyle, logoExtra, newCustom, customLabel, CARD_FONTS, fontStack, cardVerifyUrl } from '../carddesign.js';
+import { CARD, HARAMAIN_LOGO, ITEM_LABEL, ITEM_ORDER, COLORS, PRESETS, PRESET_LAYOUT, DEFAULT_LAYOUT, normalizeLayout, clampLayout, photoH, itemText, itemStyle, bandStyle, ruleStyle, scaleStyle, logoExtra, newCustom, customLabel, CARD_FONTS, fontStack, cardVerifyUrl,
+  SHAPE_KINDS, newShape, shapeLabel, shapeStyle, bgStyle, wmStyle } from '../carddesign.js';
 import { qrDataUri } from '../qr.js';
 
-const SCALE = 6;                           // بكسل لكل مليمتر على الشاشة
+const AR = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn');
+
+// بطاقةٌ كبيرةٌ على الشاشة وخياراتُها بجانبها (ملاحظة ٣٩٥)
+const SCALE = 9;                           // بكسل لكل مليمتر على الشاشة
 const px = mm => `${mm * SCALE}px`;
 const round = v => Math.round(v * 10) / 10;
 
@@ -31,7 +35,11 @@ export async function render(ctx) {
   let selected = 'name';
   const customUrls = {};                    // روابط صور العناصر المضافة
   const cus = id => (layout.custom || []).find(c => c.id === id) || null;
-  const curItem = () => (selected.startsWith('c:') ? cus(selected.slice(2)) : layout.items[selected]);
+  const shp = id => (layout.shapes || []).find(s => s.id === id) || null;
+  // مفتاحُ العنصر: اسمُ حقلٍ ثابت، أو «c:» لعنصرٍ مضاف، أو «s:» لشكل (٣٩٥)
+  const itemOf = key => (key.startsWith('c:') ? cus(key.slice(2))
+    : key.startsWith('s:') ? shp(key.slice(2)) : layout.items[key]);
+  const curItem = () => itemOf(selected);
   const loadCustomImg = async c => {
     if (!c.path || customUrls[c.id]) return;
     try { customUrls[c.id] = await storage.signedUrl('brand', c.path, 3600); } catch { /* يُعاد لاحقًا */ }
@@ -117,11 +125,30 @@ export async function render(ctx) {
     stage.style.borderColor = layout.card.border;
     stage.style.fontFamily = fontStack(layout.font);   // نوع الخط العام للبطاقة (ملاحظة ١٠٠)
     const kids = [];
+    // الخلفيةُ تحت الجميع، ثم الشريطُ والفواصل، ثم الأشكالُ والعلامة (٣٩٥)
+    const bgs = scaleStyle(bgStyle(layout.bg), SCALE);
+    if (bgs && customUrls.__bg) kids.push(h('img.cd-bg', { src: customUrls.__bg, alt: '', style: bgs }));
     const bs = scaleStyle(bandStyle(band), SCALE);
     if (bs) kids.push(h('div.cd-band', { style: bs }));
     for (const k of ['top', 'bottom']) {
       const rs = scaleStyle(ruleStyle(layout.rules[k]), SCALE);
       if (rs) kids.push(h('div.cd-rule', { style: rs }));
+    }
+    for (const s of (layout.shapes || [])) {
+      if (!s.show) continue;
+      const box = h('div.cd-item.cd-shape.editable',
+        { style: scaleStyle(shapeStyle(s), SCALE), 'data-key': `s:${s.id}` });
+      if (selected === `s:${s.id}`) box.classList.add('sel');
+      box.addEventListener('pointerdown', e => startDrag(e, `s:${s.id}`, box));
+      kids.push(box);
+    }
+    const wms = scaleStyle(wmStyle(layout.wm), SCALE);
+    if (wms) {
+      wms.fontSize = `${layout.wm.size * SCALE * 25.4 / 72}px`;
+      const inner = customUrls.__wm
+        ? h('img', { src: customUrls.__wm, alt: '', style: { width: '100%', height: 'auto', display: 'block' } })
+        : document.createTextNode(layout.wm.text || '(العلامة المائية)');
+      kids.push(h('div.cd-wm', { style: wms }, inner));
     }
     for (const key of ITEM_ORDER) {
       const el = elFor(key, member);
@@ -160,7 +187,7 @@ export async function render(ctx) {
     selected = key;
     stage.querySelectorAll('.cd-item').forEach(el => el.classList.toggle('sel', el.dataset.key === key));
     drawPanel();
-    const it = key.startsWith('c:') ? cus(key.slice(2)) : layout.items[key];
+    const it = itemOf(key);
     if (!it) return;
     const startX = e.clientX, startY = e.clientY, ox = it.x, oy = it.y;
     box.setPointerCapture?.(e.pointerId);
@@ -230,14 +257,56 @@ export async function render(ctx) {
 
   function drawPanel() {
     const isCustom = selected.startsWith('c:');
+    const isShape = selected.startsWith('s:');
     const it = curItem();
     if (!it) { selected = 'name'; return drawPanel(); }
 
     const pick = h('select', { 'aria-label': 'العنصر' },
       ITEM_ORDER.map(k => h('option', { value: k, selected: k === selected ? true : null }, ITEM_LABEL[k])),
+      (layout.shapes || []).map((s, i) =>
+        h('option', { value: `s:${s.id}`, selected: `s:${s.id}` === selected ? true : null }, shapeLabel(s, i))),
       (layout.custom || []).map((c, i) =>
         h('option', { value: `c:${c.id}`, selected: `c:${c.id}` === selected ? true : null }, customLabel(c, i))));
     pick.onchange = () => { selected = pick.value; drawStage(); };
+
+    // شكلٌ مرسوم: مقاسُه وسمكُه ولونُه وامتلاؤه (ملاحظة ٣٩٥)
+    if (isShape) {
+      const kindSel = h('select', { 'aria-label': 'نوع الشكل' },
+        SHAPE_KINDS.map(([k, label]) => h('option', { value: k, selected: k === it.kind ? true : null }, label)));
+      kindSel.onchange = () => { it.kind = kindSel.value; clampLayout(layout); drawStage(); drawShapes(); };
+      const sx = h('input', { type: 'number', step: '0.5', value: round(it.x), 'aria-label': 'البُعد الأفقي' });
+      const sy = h('input', { type: 'number', step: '0.5', value: round(it.y), 'aria-label': 'البُعد الرأسي' });
+      sx.onchange = () => { it.x = Number(sx.value); clampLayout(layout); drawStage(); };
+      sy.onchange = () => { it.y = Number(sy.value); clampLayout(layout); drawStage(); };
+      const del = h('button.btn.sm.ghost', { type: 'button' }, 'حذف الشكل');
+      del.onclick = () => {
+        layout.shapes = layout.shapes.filter(x => x.id !== it.id);
+        selected = 'name'; drawStage(); drawShapes(); drawLayers();
+      };
+      return panel.replaceChildren(
+        h('label.field', 'العنصر', pick),
+        h('label.field', 'نوعُ الشكل', kindSel),
+        h('div.row', chip(it.show ? 'الشكل ظاهر' : 'الشكل مخفي', it.show, () => { it.show = !it.show; }),
+          it.kind === 'line' ? null
+            : chip(it.fill ? 'ممتلئ' : 'مفرَّغ', it.fill, () => { it.fill = !it.fill; })),
+        h('div.grid-2',
+          h('label.field', 'من اليسار (مم)', sx),
+          h('label.field', 'من الأعلى (مم)', sy)),
+        h('label.field', `العرض (${round(it.w)} مم)`,
+          sizeRange(it.w, 0.5, CARD.w, 0.5, v => { it.w = v; })),
+        it.kind === 'line' ? null
+          : h('label.field', `الارتفاع (${round(it.h)} مم)`,
+              sizeRange(it.h, 0.5, CARD.h, 0.5, v => { it.h = v; })),
+        h('label.field', `سمكُ الخط (${round(it.stroke)} مم)`,
+          sizeRange(it.stroke, 0.1, 4, 0.1, v => { it.stroke = v; })),
+        it.kind === 'rect' || it.kind === 'frame'
+          ? h('label.field', `استدارةُ الزوايا (${round(it.radius)} مم)`,
+              sizeRange(it.radius, 0, 12, 0.2, v => { it.radius = v; })) : null,
+        h('label.field', `الشفافية (${AR(Math.round((it.fade ?? 1) * 100))}٪)`,
+          sizeRange(it.fade ?? 1, 0.05, 1, 0.05, v => { it.fade = v; })),
+        h('label.field', 'اللون', colorRow(it.color, c => { it.color = c; drawPanel(); })),
+        h('div.row', del));
+    }
 
     const posX = h('input', { type: 'number', step: '0.5', value: round(it.x), 'aria-label': 'البُعد الأفقي' });
     const posY = h('input', { type: 'number', step: '0.5', value: round(it.y), 'aria-label': 'البُعد الرأسي' });
@@ -374,9 +443,11 @@ export async function render(ctx) {
     PRESETS.map(([k, label]) => h('option', { value: k }, label)));
   const applyPreset = h('button.btn.sm', { type: 'button' }, 'تطبيق القالب');
   applyPreset.onclick = () => {
-    layout = PRESET_LAYOUT[presetSel.value]();
+    // القالبُ يبدّل المواضعَ والألوان، ويُبقي ما رفعه المستعمل بنفسه (٣٩٥)
+    const keep = { bg: layout.bg, wm: layout.wm, shapes: layout.shapes, custom: layout.custom };
+    layout = Object.assign(PRESET_LAYOUT[presetSel.value](), keep);
     clampLayout(layout);
-    drawStage(); drawBand(); drawLogo();
+    drawStage(); drawBand(); drawLogo(); drawBg(); drawShapes(); drawWm(); drawLayers();
     toast('طُبّق القالب — عدّل عليه ثم احفظ.', 'ok');
   };
 
@@ -464,8 +535,155 @@ export async function render(ctx) {
       })()));
   }
 
+  // ------------------------------------------------------------------
+  // خلفيةٌ تملأ البطاقة، وأشكالٌ، وعلامةٌ مائية، وجدولُ الطبقات (ملاحظة ٣٩٥)
+  // ------------------------------------------------------------------
+  const bgBox = h('div.stack');
+  const shapeBox = h('div.stack');
+  const wmBox = h('div.stack');
+  const layerBox = h('div.stack');
+
+  // رفعُ صورةٍ إلى مستودع الهوية، وإرجاعُ مسارِها ورابطِها
+  async function uploadBrand(file, prefix) {
+    if (file.size > 4 * 1024 * 1024) throw new Error('الحد الأقصى 4 ميغابايت.');
+    const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const path = `${prefix}-${Date.now()}.${ext}`;
+    await storage.upload('brand', path, file);
+    return { path, url: await storage.signedUrl('brand', path, 3600) };
+  }
+
+  function drawBg() {
+    const bg = layout.bg;
+    const up = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp',
+      'aria-label': 'خلفية البطاقة' });
+    up.onchange = () => busy(up, async () => {
+      const file = up.files[0]; if (!file) return;
+      try {
+        const { path, url } = await uploadBrand(file, 'card-bg');
+        bg.path = path; customUrls.__bg = url; bg.show = true;
+        toast('رُفعت الخلفية — احفظ التصميم لتثبيتها.', 'ok');
+        drawStage(); drawBg();
+      } catch (e) { toast(e.message, 'bad'); }
+    });
+    const clear = h('button.btn.sm.ghost', { type: 'button' }, 'إزالة الخلفية');
+    clear.onclick = () => { bg.path = null; delete customUrls.__bg; drawStage(); drawBg(); };
+    bgBox.replaceChildren(
+      h('p.small.muted', 'تصميمٌ جاهزٌ من خارج المنصة يملأ البطاقة، وتُرسم فوقه '
+        + 'البياناتُ والأشكال. أفضلُه بمقاس 85٫6×54 مم ودقّةِ 300 نقطة.'),
+      h('label.field', bg.path ? 'استبدال الخلفية' : 'رفع خلفية البطاقة',
+        h('small', 'PNG أو JPEG — حتى 4 ميغابايت'), up),
+      bg.path ? h('div.row',
+        chip(bg.show ? 'الخلفية ظاهرة' : 'الخلفية مخفية', bg.show, () => { bg.show = !bg.show; }),
+        chip('تملأ البطاقة', bg.fit === 'cover', () => { bg.fit = 'cover'; }),
+        chip('كاملةً داخلها', bg.fit === 'contain', () => { bg.fit = 'contain'; }),
+        clear) : null,
+      bg.path ? h('label.field', `تخفيفُ الخلفية (${AR(Math.round((bg.fade || 0) * 100))}٪)`,
+        sizeRange(bg.fade || 0, 0, 0.9, 0.05, v => { bg.fade = v; })) : null);
+  }
+
+  function drawShapes() {
+    const add = SHAPE_KINDS.map(([kind, label]) => {
+      const b = h('button.btn.sm', { type: 'button' }, `+ ${label}`);
+      b.onclick = () => {
+        if ((layout.shapes || []).length >= 16) return toast('حدُّ الأشكال ستةَ عشرَ شكلًا.', 'bad');
+        const s = newShape(kind, (layout.shapes || []).length);
+        (layout.shapes ||= []).push(s);
+        selected = `s:${s.id}`;
+        clampLayout(layout); drawStage(); drawShapes(); drawLayers();
+      };
+      return b;
+    });
+    const list = (layout.shapes || []).map((s, i) => {
+      const b = h('button.btn.sm' + (selected === `s:${s.id}` ? '.primary' : ''),
+        { type: 'button' }, shapeLabel(s, i));
+      b.onclick = () => { selected = `s:${s.id}`; drawStage(); drawShapes(); };
+      const del = h('button.btn.sm.ghost', { type: 'button', 'aria-label': 'حذف الشكل' }, '✕');
+      del.onclick = () => {
+        layout.shapes = layout.shapes.filter(x => x.id !== s.id);
+        if (selected === `s:${s.id}`) selected = 'name';
+        drawStage(); drawShapes(); drawLayers();
+      };
+      return h('div.row.tight', b, del);
+    });
+    shapeBox.replaceChildren(
+      h('p.small.muted', 'أشكالٌ تُرسم على البطاقة: شريطٌ أو إطارٌ أو دائرةٌ أو خط. '
+        + 'اسحبْها في اللوحة كما تُسحب بقيةُ العناصر.'),
+      h('div.row.wrap', ...add),
+      list.length ? h('div.stack.tight', ...list) : h('p.small.muted', 'لا أشكالَ بعد.'));
+  }
+
+  function drawWm() {
+    const wm = layout.wm;
+    const txt = h('input', { value: wm.text || '', maxlength: 60, 'aria-label': 'نص العلامة المائية' });
+    txt.oninput = () => { wm.text = txt.value; drawStage(); };
+    const up = h('input', { type: 'file', accept: 'image/png,image/webp,image/svg+xml',
+      'aria-label': 'صورة العلامة المائية' });
+    up.onchange = () => busy(up, async () => {
+      const file = up.files[0]; if (!file) return;
+      try {
+        const { path, url } = await uploadBrand(file, 'card-wm');
+        wm.path = path; customUrls.__wm = url; wm.show = true;
+        toast('رُفعت العلامة — احفظ التصميم لتثبيتها.', 'ok');
+        drawStage(); drawWm();
+      } catch (e) { toast(e.message, 'bad'); }
+    });
+    const clear = h('button.btn.sm.ghost', { type: 'button' }, 'إزالة الصورة');
+    clear.onclick = () => { wm.path = null; delete customUrls.__wm; drawStage(); drawWm(); };
+    wmBox.replaceChildren(
+      h('p.small.muted', 'علامةٌ خفيفةٌ تحت البيانات لا فوقها، فلا تحجب الاسمَ ولا الرقم.'),
+      h('div.row', chip(wm.show ? 'العلامة ظاهرة' : 'العلامة مخفية', wm.show,
+        () => { wm.show = !wm.show; })),
+      h('label.field', 'نصُّ العلامة', txt),
+      h('label.field', wm.path ? 'استبدال صورة العلامة' : 'أو ارفعْ صورةً بدل النص',
+        h('small', 'PNG شفاف أفضل'), up),
+      wm.path ? h('div.row', clear) : null,
+      h('label.field', `حجمُ النص (${round(wm.size)} نقطة)`,
+        sizeRange(wm.size, 4, 40, 0.5, v => { wm.size = v; })),
+      h('label.field', `العرض (${round(wm.w)} مم)`,
+        sizeRange(wm.w, 6, CARD.w, 0.5, v => { wm.w = v; })),
+      h('label.field', `الشفافية (${AR(Math.round((wm.fade || 0) * 100))}٪)`,
+        sizeRange(wm.fade, 0.02, 1, 0.02, v => { wm.fade = v; })),
+      h('label.field', `الميل (${AR(Math.round(wm.rot))} درجة)`,
+        sizeRange(wm.rot, -90, 90, 5, v => { wm.rot = v; })),
+      h('label.field', 'لونُ العلامة', colorRow(wm.color, c => { wm.color = c; drawWm(); })));
+  }
+
+  // جدولُ الطبقات: ما على البطاقة كلُّه في قائمةٍ واحدة — إظهارٌ وإخفاءٌ واختيار
+  function drawLayers() {
+    const rows = [];
+    const line = (key, label, on, toggle) => {
+      const pickBtn = h('button.btn.sm.grow' + (selected === key ? '.primary' : ''),
+        { type: 'button' }, label);
+      pickBtn.onclick = () => { selected = key; drawStage(); drawLayers(); };
+      const eye = h('button.btn.sm.ghost', { type: 'button',
+        title: on ? 'إخفاء' : 'إظهار', 'aria-label': on ? 'إخفاء' : 'إظهار' }, on ? '👁' : '🚫');
+      eye.onclick = () => { toggle(); drawStage(); drawLayers(); };
+      rows.push(h('div.row.tight.cd-layer', pickBtn, eye));
+    };
+    for (const key of ITEM_ORDER) {
+      const it = layout.items[key];
+      line(key, ITEM_LABEL[key], it.show, () => { it.show = !it.show; });
+    }
+    (layout.shapes || []).forEach((s, i) =>
+      line(`s:${s.id}`, shapeLabel(s, i), s.show, () => { s.show = !s.show; }));
+    (layout.custom || []).forEach((c, i) =>
+      line(`c:${c.id}`, customLabel(c, i), c.show, () => { c.show = !c.show; }));
+    layerBox.replaceChildren(
+      h('p.small.muted', 'كلُّ ما على البطاقة في قائمةٍ واحدة: اضغطْ لتختارَه، '
+        + 'والعينُ تُظهره أو تُخفيه.'),
+      h('div.stack.tight', ...rows));
+  }
+
   for (const c of (layout.custom || [])) {
     if (c.type === 'image' && c.path) loadCustomImg(c).then(() => drawStage()).catch(() => {});
+  }
+  if (layout.bg.path) {
+    storage.signedUrl('brand', layout.bg.path, 3600)
+      .then(u => { customUrls.__bg = u; drawStage(); }).catch(() => {});
+  }
+  if (layout.wm.path) {
+    storage.signedUrl('brand', layout.wm.path, 3600)
+      .then(u => { customUrls.__wm = u; drawStage(); }).catch(() => {});
   }
 
   if (logoKind === 'custom' && logoPath) {
@@ -482,16 +700,45 @@ export async function render(ctx) {
     counter.textContent = `المحدد: ${picked.size} من ${pool.length}`;
     allBox.checked = picked.size === pool.length && pool.length > 0;
   };
+  // ـــ القائمةُ تُقسَّم بالفرق، ولكلِّ فريقٍ علامةٌ واحدةٌ تُؤشِّر أعضاءه
+  //   دفعةً واحدة، ثمَّ يُرفَع عمَّن شئت (ملاحظة ٣٩٤)
+  const TEAM_OF = m => (m.track === 'field' ? 'field'
+    : m.track === 'answers' ? 'answers'
+    : ['manager', 'coordinator', 'supervisor', 'field_lead', 'viewer'].includes(m.role)
+      ? 'admins' : 'translators');
+  const TEAM_NAME = { admins: 'الإداريّون', translators: 'المترجمون التخصصيّون',
+    field: 'المرشدون المكانيّون', answers: 'إجابةُ السائلين' };
+  const TEAM_ORDER = ['admins', 'translators', 'field', 'answers'];
+
   const drawList = () => {
-    listBox.replaceChildren(...pool.map(m => {
-      const cb = h('input', { type: 'checkbox', checked: picked.has(m.id) ? true : null });
-      cb.onchange = () => { cb.checked ? picked.add(m.id) : picked.delete(m.id); count(); drawStage(); };
-      return h('label.check', cb, h('span', m.full_name,
-        h('span.small.muted', ` — ${roleLabel(m)}`),
-        m.track === 'field' && h('span.badge', 'إرشاد مكاني'),
-        m.track === 'answers' && h('span.badge', 'إجابة السائلين'),
-        !photoOf[m.id] && h('span.badge.warn', 'بلا صورة'),
-        issuedOf[m.id] && h('span.badge.ok', 'بطاقته معتمَدة')));
+    const groups = TEAM_ORDER
+      .map(k => [k, pool.filter(m => TEAM_OF(m) === k)])
+      .filter(([, list]) => list.length);
+    listBox.replaceChildren(...groups.map(([k, list]) => {
+      const n = list.filter(m => picked.has(m.id)).length;
+      const head = h('input', { type: 'checkbox',
+        checked: n === list.length ? true : null,
+        indeterminate: n > 0 && n < list.length });
+      head.onchange = () => {
+        if (head.checked) list.forEach(m => picked.add(m.id));
+        else list.forEach(m => picked.delete(m.id));
+        drawList(); count(); drawStage();
+      };
+      return h('section.pick-team',
+        h('label.check.pick-team-head', head,
+          h('b', TEAM_NAME[k] || k),
+          h('span.small.muted', ` — ${AR(n)} من ${AR(list.length)}`)),
+        h('div.pick-team-body', list.map(m => {
+          const cb = h('input', { type: 'checkbox', checked: picked.has(m.id) ? true : null });
+          cb.onchange = () => {
+            cb.checked ? picked.add(m.id) : picked.delete(m.id);
+            drawList(); count(); drawStage();
+          };
+          return h('label.check', cb, h('span', m.full_name,
+            h('span.small.muted', ` — ${roleLabel(m)}`),
+            !photoOf[m.id] && h('span.badge.warn', 'بلا صورة'),
+            issuedOf[m.id] && h('span.badge.ok', 'بطاقته معتمَدة')));
+        })));
     }));
   };
   allBox.onchange = () => { picked.clear(); if (allBox.checked) pool.forEach(m => picked.add(m.id)); drawList(); count(); drawStage(); };
@@ -519,7 +766,12 @@ export async function render(ctx) {
   });
 
   const resetBtn = h('button.btn.sm.ghost', { type: 'button' }, 'إعادة التصميم الافتراضي');
-  resetBtn.onclick = () => { layout = DEFAULT_LAYOUT(); drawStage(); drawBand(); drawLogo(); toast('أُعيد التصميم الافتراضي.', ''); };
+  resetBtn.onclick = () => {
+    layout = DEFAULT_LAYOUT();
+    selected = 'name';
+    drawStage(); drawBand(); drawLogo(); drawBg(); drawShapes(); drawWm(); drawLayers();
+    toast('أُعيد التصميم الافتراضي.', '');
+  };
 
   // اعتماد البطاقة يجعلها تظهر في حساب المترجم (ملاحظة ٨٧)
   const issueBtn = h('button.btn', { type: 'button' }, 'اعتماد البطاقة للمحددين');
@@ -569,6 +821,14 @@ export async function render(ctx) {
         customData[c.id] = await urlToDataUrl(u);
       } catch { /* عنصر بلا صورة لا يوقف الطباعة */ }
     }));
+    // الخلفيةُ الكاملةُ والعلامةُ المائية تُطبعان كما تُرى (ملاحظة ٣٩٥)
+    for (const [key, path] of [['__bg', layout.bg?.path], ['__wm', layout.wm?.path]]) {
+      if (!path) continue;
+      try {
+        const u = customUrls[key] || await storage.signedUrl('brand', path, 600);
+        customData[key] = await urlToDataUrl(u);
+      } catch { /* تُطبع البطاقة بلا خلفية خيرٌ من توقف الطباعة */ }
+    }
     const ok = printCards(chosen.map(m => ({
       member: m, photo: photos[m.id] || null,
       langsText: (langsOf[m.id] || []).map(c => langName(c)).join(' · ')
@@ -597,11 +857,20 @@ export async function render(ctx) {
       ['font',  '🎨', 'الألوان والخط', 'خط البطاقة وألوانها', () => fontBox],
       ['logo',  '🖼', 'الصور والشعار', 'الشعار وخياراته', () => logoBox],
       ['sign',  '✒', 'توقيع المسؤول', 'يُرفع صورةً ويوضع حيث شئت', () => signBox],
-      ['band',  '▭', 'الشريط والخلفية', 'الشريط والفواصل وخلفية البطاقة', () => bandBox],
+      ['band',  '▭', 'الشريط والفواصل', 'الشريط والفواصل وخلفية البطاقة', () => bandBox],
+      // أدواتٌ جديدة: خلفيةٌ كاملةٌ وأشكالٌ وعلامةٌ مائيةٌ وطبقات (ملاحظة ٣٩٥)
+      ['bg',    '🏞', 'خلفيةُ البطاقة', 'تصميمٌ خارجيٌّ يملأ البطاقة',
+        () => { drawBg(); return bgBox; }],
+      ['shape', '◇', 'الأشكال', 'مستطيلٌ ودائرةٌ وخطٌّ وإطار',
+        () => { drawShapes(); return shapeBox; }],
+      ['wm',    '💧', 'العلامة المائية', 'نصٌّ أو صورةٌ خفيفةٌ تحت البيانات',
+        () => { drawWm(); return wmBox; }],
+      ['layer', '🗂', 'الطبقات', 'كلُّ ما على البطاقة في قائمة',
+        () => { drawLayers(); return layerBox; }],
       ['save',  '💾', 'حفظ التصميم', 'يُحفظ للفريق كلِّه',
         () => h('div.stack',
-          h('p.small.muted', 'يُحفظ التصميم فيصير قالبَ بطاقات الفريق كلِّه.'),
-          h('div.row', saveBtn))]
+          h('p.small.muted', 'زرُّ الحفظ تحت لوحة التصميم: يُحفظ فيصير قالبَ '
+            + 'بطاقات الفريق كلِّه، ويُطبع منه ما يُطبع.'))]
     ];
     const body = h('div.stack.cd-tabbody');
     const btns = TABS.map(([key, icon, label, hint, make]) => {
@@ -622,16 +891,17 @@ export async function render(ctx) {
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'الإدارة'), h('h1', 'بطاقات العمل'),
       h('p.muted', 'بطاقة بمقاس الهوية الوطنية 85٫6×54 مم. اسحب أي عنصر إلى مكانه، وغيّر حجم خطه ولونه، ثم اطبع.'))),
-    // ثلاثة أعمدة تملأ الشاشة: الخصائص، ثم لوحة التصميم، ثم البيانات والشكل (ملاحظة ١٣٠)
+    // بطاقةٌ كبيرةٌ وإلى جانبها خياراتُها كلُّها (ملاحظة ٣٩٥)
     h('div.card.cd-board',
       h('div.cd-wrap',
-        h('div.stack.cd-props', h('h3', 'خصائص العنصر'), panel),
         h('div.stack.cd-stage',
           h('h3', 'لوحة التصميم'),
           h('div.card-stage-wrap', stage),
           h('p.small.muted', 'اسحب العنصر بالفأرة، أو اخترَه ثم حرّكه بالأسهم (مع Shift خطوة أكبر).'),
-          h('div.row', resetBtn)),
-        sideTools())),
+          h('div.row', resetBtn, saveBtn)),
+        h('div.stack.cd-opts',
+          sideTools(),
+          h('div.stack.cd-props', h('h3', 'خصائص العنصر'), panel)))),
     h('div.card.stack',
       h('div.row.between', h('h3', 'من تُطبع بطاقته'), h('div.row', onlyTranslators, counter)),
       h('label.check', allBox, h('b', 'تحديد الكل')),
@@ -704,7 +974,23 @@ function printCards(rows, cfg, layout, logoData, customData = {}) {
     return c.text ? `<div class="cd-item" style="${st}">${esc(c.text)}</div>` : '';
   }).join('');
 
-  const card = row => `<div class="wcard">${band}${rules}${ITEM_ORDER.map(k => itemHtml(k, row)).join('')}${customHtml}</div>`;
+  // الخلفيةُ الكاملةُ والأشكالُ والعلامةُ المائية (ملاحظة ٣٩٥)
+  const bgHtml = (bgStyle(layout.bg) && customData.__bg)
+    ? `<img src="${customData.__bg}" alt="" style="${styleStr(bgStyle(layout.bg))}">` : '';
+  const shapesHtml = (layout.shapes || [])
+    .map(s => (s.show ? `<div style="${styleStr(shapeStyle(s))}"></div>` : '')).join('');
+  const wmHtml = (() => {
+    const st = wmStyle(layout.wm);
+    if (!st) return '';
+    if (customData.__wm) {
+      return `<div style="${styleStr(st)}"><img src="${customData.__wm}" alt="" `
+        + 'style="width:100%;height:auto;display:block"></div>';
+    }
+    return layout.wm.text ? `<div style="${styleStr(st)}">${esc(layout.wm.text)}</div>` : '';
+  })();
+
+  const card = row => `<div class="wcard">${bgHtml}${band}${rules}${shapesHtml}${wmHtml}`
+    + `${ITEM_ORDER.map(k => itemHtml(k, row)).join('')}${customHtml}</div>`;
 
   // صفحةُ A4 بهوامشَ ١٠مم تتّسع لـ٢٧٧مم: أربعةُ صفوفٍ من البطاقات
   // (٤×٥٤ + ٣×٤ = ٢٢٨مم) لا خمسةٌ، فالخمسةُ ٢٨٦مم وتفيض (ملاحظة ٢٨٠ ح)
