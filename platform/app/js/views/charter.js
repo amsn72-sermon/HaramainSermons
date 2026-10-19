@@ -5,7 +5,7 @@ import { db } from '../sb.js';
 import { isAdmin, isManager, roleLabel } from '../store.js';
 import { POLICY_KEY, POLICY_VERSION, POLICY_TITLE } from '../policy.js';
 import { policyText } from './policy.js';
-import { proofFor } from '../sigproof.js';
+import { proofFor, rosterDialog } from '../sigproof.js';
 import { exportExcel, exportPdf, exportWord } from '../teamexport.js';
 
 const GROUP_NAME = { admins: 'الحسابات الإدارية', translators: 'المترجمون المتخصصون',
@@ -100,6 +100,19 @@ export async function render(ctx) {
   const title = `${POLICY_TITLE} — كشف التواقيع`;
   const note = `وقّع ${signed.length} من ${people.length} — النسخة ${POLICY_VERSION} — ${fmtDate(new Date())}`;
 
+  // كشفٌ كاملٌ على كليشة الهيئة: الميثاقُ منسَّقًا ثم جدولُ من يُختار
+  //   (ملاحظة ٤٢٩)
+  const rosterBtn = h('button.btn.sm.primary', { type: 'button' }, '🖨 طباعةُ الكشف');
+  rosterBtn.onclick = () => busy(rosterBtn, () => rosterDialog(people.map(m => {
+    const sg = signOf[m.id];
+    const old = !sg ? prevOf[m.id] : null;
+    const rec = sg || old;
+    return { id: m.id, full_name: m.full_name, member_no: m.member_no,
+      group: GROUP_NAME[groupOf(m)], signed: !!rec,
+      policy_version: rec ? rec.policy_version : '',
+      accepted_at: rec ? rec.accepted_at : null };
+  })));
+
   const wordBtn = h('button.btn.sm', { type: 'button' }, 'تصدير Word');
   wordBtn.onclick = () => busy(wordBtn, () => exportWord(sheet(), title, { note }).catch(e => toast(e.message, 'bad')));
 
@@ -115,6 +128,7 @@ export async function render(ctx) {
         h('span', 'لم يوقّعوا'), h('b', String(waiting.length)))),
 
     h('div.row.wrap', { style: { margin: '12px 0' } },
+      rosterBtn,
       h('button.btn.sm', { type: 'button', onclick: () => exportExcel(sheet(), title) }, 'تصدير Excel'),
       wordBtn,
       h('button.btn.sm', { type: 'button',

@@ -305,12 +305,136 @@ export function pageStarts(bottoms, total, boxPx) {
   let guard = 0;
   while (starts[starts.length - 1] + boxPx < total - 1 && guard++ < 2000) {
     const start = starts[starts.length - 1];
-    const limit = start + boxPx;
-    const fit = bottoms.filter(b => b > start + 1 && b <= limit + 0.5);
+    const limit = Math.round(start + boxPx);
+    // سماحةُ بكسلين: فرقُ التدوير بين قياس الشاشة وقياس الطباعة لا يُزحزح
+    //   سطرًا بين صفحتين، وفسحةُ الأمان تحتمل هذا القدر (ملاحظة ٤٣٠)
+    const fit = bottoms.filter(b => b > start + 1 && b <= limit + 2);
     // آخر سطر يكتمل داخل الصفحة، وإن لم يكتمل أي سطر قطعنا عند حد الصفحة
     starts.push(fit.length ? fit[fit.length - 1] : limit);
   }
   return starts;
+}
+
+// ـــ لا يُقاس قبل أن تستقرَّ الخطوط (ملاحظة ٤٣٠)
+//
+//   نافذةُ الطباعة تُبنى فارغةً، فإذا سُئل `fonts.ready` فيها قبل أن
+//   يُكتَب فيها نصٌّ أجاب فورًا — إذ لا خطَّ ينتظره. ثمَّ يُكتَب النصُّ
+//   فيُقاس بخطٍّ احتياطيٍّ، ثمَّ يحلُّ الخطُّ الحقيقيُّ محلَّه فتتزحزح
+//   السطور — فيخرج PDF على غير ما قيس. فيُكتَب نصٌّ مُجَسٌّ أوّلًا
+//   بالخطَّين: العاديِّ والغليظ، ثمَّ يُنتظَر استقرارُهما، ثمَّ يُقاس.
+export async function fontsSettled(d, { px = 16 } = {}) {
+  try {
+    const fams = ['"Haramain Arabic"', '"Haramain Naskh"'];
+    const probe = d.createElement('div');
+    probe.setAttribute('aria-hidden', 'true');
+    probe.style.cssText = 'position:absolute;visibility:hidden;top:-10000px;'
+      + 'inset-inline-start:0;white-space:nowrap';
+    probe.innerHTML = fams.map(f =>
+      `<span style="font-family:${f};font-size:${px}px">نصٌّ</span>`
+      + `<span style="font-family:${f};font-size:${px}px;font-weight:700">نصٌّ</span>`).join('');
+    d.body.append(probe);
+    if (d.fonts && d.fonts.load) {
+      await Promise.all(fams.flatMap(f => [
+        d.fonts.load(`${px}px ${f}`, 'نص'),
+        d.fonts.load(`700 ${px}px ${f}`, 'نص')
+      ]).map(p => p.catch(() => null)));
+    }
+    await (d.fonts?.ready ?? Promise.resolve());
+    probe.remove();
+  } catch { /* المتصفح لا يدعم fonts — يُقاس بما هو حاضر */ }
+  // إطارا رسمٍ بعد الاستقرار، ليكتمل إعادةُ التنضيد قبل القياس
+  await new Promise(r => setTimeout(r, 60));
+}
+
+// ـــ ولا يُقاس حتى يثبت الارتفاع (ملاحظة ٤٣٠)
+//
+//   `fonts.ready` قد يُجيب والخطُّ لم يُنضَّد به بعد، وقد تتأخَّر صورةٌ
+//   أو تُعاد تنضيدُ سطرٍ. فيُقاس الارتفاعُ مرّةً بعد مرّة حتى يتكرَّر
+//   مثلُه، فذلك أمارةُ استقراره — ثمَّ يُقطَع عليه.
+export async function settledHeight(flow, { tries = 12 } = {}) {
+  const win = (flow.ownerDocument && flow.ownerDocument.defaultView) || window;
+  const frame = () => new Promise(r => {
+    if (win.requestAnimationFrame) win.requestAnimationFrame(() => r());
+    else setTimeout(r, 16);
+  });
+  let last = -1;
+  for (let i = 0; i < tries; i++) {
+    const h = flow.getBoundingClientRect().height;
+    if (Math.abs(h - last) < 0.5) return h;
+    last = h;
+    await frame();
+    await frame();
+  }
+  return flow.getBoundingClientRect().height;
+}
+
+// ـــ العنوانُ لا يُترَك وحدَه في ذيل الصفحة (ملاحظة ٤٣٠)
+//
+//   «الخطبة الثانية» وأمثالُها سطرٌ قصيرٌ غليظٌ يتبعه كلامُه. فإذا وقع
+//   القطعُ بعده بقي معلَّقًا في ذيل الصفحة وبدأ كلامُه في التي تليها.
+//   ثمَّ إنَّ موضعَه على حافّة الصفحة يجعله يتأرجح بين الصفحتين لفرقٍ
+//   أقلَّ من ملّيمتر بين قياس الشاشة وقياس الطباعة، فيخالف ما وازنه
+//   المستخدمُ في المحرر. فالعلاجُ أن يُنزَّل العنوانُ إلى صفحة كلامِه
+//   في الموضعين جميعًا، فيستقيم الشكلُ ويتَّحد الحسابُ.
+const HEAD_TAG = /^(H1|H2|H3|H4)$/;
+const BLOCKS_SEL = 'p, h1, h2, h3, h4, blockquote, li';
+
+function isHeadingLike(el) {
+  if (HEAD_TAG.test(el.tagName)) return true;
+  const txt = (el.textContent || '').trim();
+  if (!txt || txt.length > 90) return false;
+  const win = el.ownerDocument && el.ownerDocument.defaultView;
+  if (win) {
+    const fw = parseInt(win.getComputedStyle(el).fontWeight, 10);
+    if (fw >= 600) return true;
+  }
+  // فقرةٌ نصُّها كلُّه غليظٌ — وهو ما يخرج به العنوانُ من ملفات Word
+  const b = el.querySelector('strong, b');
+  return !!b && (b.textContent || '').trim().length >= txt.length - 2;
+}
+
+export function avoidTrailingHeading(flow, starts) {
+  if (starts.length < 2) return starts;
+  const top0 = flow.getBoundingClientRect().top - (flow.scrollTop || 0);
+  const blocks = [...flow.querySelectorAll(BLOCKS_SEL)]
+    .filter(el => !el.querySelector(BLOCKS_SEL))          // الورقةُ الأخيرة وحدَها
+    .map(el => {
+      const r = el.getBoundingClientRect();
+      return { el, top: r.top - top0, bottom: r.bottom - top0, h: r.height };
+    })
+    .filter(b => b.h > 0)
+    .sort((a, b) => a.top - b.top);
+  if (!blocks.length) return starts;
+
+  const out = [starts[0]];
+  for (let i = 1; i < starts.length; i++) {
+    const s = starts[i];
+    let moved = s;
+    // آخرُ كتلةٍ تنتهي عند القطع أو قبله بقليل
+    for (let k = blocks.length - 1; k >= 0; k--) {
+      const b = blocks[k];
+      if (b.bottom > s + 1.5) continue;
+      if (b.bottom < s - 6) break;                        // ليس ملاصقًا للقطع
+      const after = blocks[k + 1];
+      if (after && isHeadingLike(b.el) && Math.floor(b.top) > out[out.length - 1] + 1) {
+        moved = Math.floor(b.top);
+      }
+      break;
+    }
+    out.push(moved);
+  }
+  return out;
+}
+
+// بداياتُ صفحاتِ تدفُّقٍ: القياسُ والقطعُ وحفظُ العنوان مع كلامه — دالّةٌ
+//   واحدةٌ يستعملها المحررُ والتصديرُ والمجمَّعُ والمستنداتُ، فلا يشذُّ
+//   مُخرَجٌ عن مُخرَج (ملاحظتا ٤٢٣ و٤٣٠)
+export function flowStarts(flow, { doc = null, boxPx, total = null } = {}) {
+  const bottoms = lineBottoms(flow, { doc });
+  const end = total == null
+    ? Math.max(flow.getBoundingClientRect().height, bottoms[bottoms.length - 1] || 0)
+    : total;
+  return avoidTrailingHeading(flow, pageStarts(bottoms, end, boxPx));
 }
 
 // بداياتُ صفحات صندوقِ كتابةٍ قائمٍ في الصفحة — بالحساب نفسِه الذي يُصدِّر
@@ -318,7 +442,8 @@ export function bodyStarts(body) {
   const boxPx = body.clientHeight || 1;
   const bottoms = lineBottoms(body);
   const total = Math.max(contentBottom(body), bottoms[bottoms.length - 1] || 0);
-  return { starts: pageStarts(bottoms, total, boxPx), boxPx, total };
+  const starts = avoidTrailingHeading(body, pageStarts(bottoms, total, boxPx));
+  return { starts, boxPx, total };
 }
 
 // عدد الصفحات المتوقع عند الطباعة

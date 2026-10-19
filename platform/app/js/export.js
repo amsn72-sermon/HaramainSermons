@@ -4,7 +4,7 @@ import { h, fmtHijri } from './ui.js';
 import { sanitize } from './sanitize.js';
 import { langDir } from './store.js';
 import { PAGE, BOX, LETTERHEAD, cardColumns, cardRowsTr, fileName, docVerifyUrl,
-  DOC_STAMP_CSS, docStampNode, lineBottoms, pageStarts } from './page.js';
+  DOC_STAMP_CSS, docStampNode, flowStarts, fontsSettled, settledHeight } from './page.js';
 import { qrPngDataUrl, qrPngBytes } from './qr.js';
 
 let docxLoading = null;
@@ -272,7 +272,7 @@ ${DOC_STAMP_CSS(P.side)}
   const docStamp = track =>
     docStampNode(d, track, url => qrPngDataUrl(url, { scale: 6 }));
 
-  function paginate(item) {
+  async function paginate(item) {
     const { track } = item;
     const measure = d.getElementById('measure');
     const flow = measure.querySelector('.flow');
@@ -289,10 +289,10 @@ ${DOC_STAMP_CSS(P.side)}
     const boxPx = probe.getBoundingClientRect().height;
     probe.remove();
 
-    // الحسابُ نفسُه الذي يرسم فواصلَ المحرر (ملاحظة ٤٢٣)
-    const bottoms = lineBottoms(flow, { doc: d });
-    const total = Math.max(flow.getBoundingClientRect().height, bottoms.at(-1) || 0);
-    const starts = pageStarts(bottoms, total, boxPx);
+    // الحسابُ نفسُه الذي يرسم فواصلَ المحرر، بعد ثبات الارتفاع
+    //   (ملاحظتا ٤٢٣ و٤٣٠)
+    const total = await settledHeight(flow);
+    const starts = flowStarts(flow, { doc: d, boxPx, total });
 
     const pages = d.getElementById('pages');
     const lhUrl = lh && lh.src ? lh.src : new URL(LETTERHEAD, location.origin).href;
@@ -314,9 +314,9 @@ ${DOC_STAMP_CSS(P.side)}
   }
 
   const ready = async () => {
-    try { await d.fonts?.ready; } catch { /* المتصفح لا يدعم fonts.ready */ }
-    await new Promise(r => setTimeout(r, 120));
-    for (const item of items) paginate(item);
+    // لا يُقاس قبل أن يحلَّ الخطُّ الحقيقيُّ محلَّ الاحتياطيّ (ملاحظة ٤٣٠)
+    await fontsSettled(d);
+    for (const item of items) await paginate(item);
     d.getElementById('measure')?.remove();
     if (autoPrint) setTimeout(() => w.print(), 400);
   };

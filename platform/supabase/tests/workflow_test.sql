@@ -7233,6 +7233,8 @@ declare v_open text[]; v_want text[] := array[
   'hijri_year_calc', 'is_admin', 'is_manager', 'is_supervisor', 'is_viewer',
   'my_role', 'open_page', 'page_needs_code', 'plain_text', 'public_translations',
   'registration_open', 'registration_state', 'verify_card', 'verify_certificate',
+  -- التحقُّقُ من وثيقة إثبات التوقيع برمزها المطبوع (ملاحظة ٤٢٨)
+  'verify_signature',
   'verify_doc'];
   v_extra text[]; v_gone text[]; v_x text;
 begin
@@ -8478,4 +8480,58 @@ begin
   end;
 
   raise notice 'PASS: توقيعُ الشهادة يُكتَب عند المنح، وما سُكت عنه يرجع إلى القالب';
+end $$;
+
+-- =====================================================================
+-- ٩٧) التحقُّقُ العامُّ برمز الوثيقة، ورمزٌ لكلِّ توقيعٍ سابق
+--     (ملاحظة ٤٢٨)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_m uuid; v_code text; v_n int; v_j jsonb;
+begin
+  -- توقيعٌ قديمٌ بلا رمز، كما كانت التواقيعُ قبل الاستحداث
+  select id into v_m from public.profiles where status = 'active' limit 1;
+  insert into public.policy_acceptances (member_id, policy_key, policy_version, signed_name)
+  values (v_m, 'confidentiality', '0.9', 'توقيعٌ قديم')
+  on conflict do nothing;
+  update public.policy_acceptances set proof_code = null
+   where member_id = v_m and policy_version = '0.9';
+
+  -- يُولَّد له رمزٌ بإعادة تشغيل الترحيل (ونحاكيه هنا بالمنطق نفسِه)
+  update public.policy_acceptances
+     set proof_code = 'SG-' || upper(substr(encode(sha256(convert_to(
+           id::text || ':0', 'UTF8')), 'hex'), 1, 10))
+   where proof_code is null;
+
+  select count(*)::int into v_n from public.policy_acceptances where proof_code is null;
+  if v_n <> 0 then raise exception 'FAIL: بقي % توقيعًا بلا رمز', v_n; end if;
+
+  select proof_code into v_code from public.policy_acceptances
+   where member_id = v_m and policy_version = '0.9';
+
+  -- والتحقُّقُ يعمل بلا حساب: الزائرُ لا دورَ له
+  perform set_config('request.jwt.claim.sub', '', true);
+  v_j := public.verify_signature(v_code);
+  if not (v_j ->> 'found')::boolean then raise exception 'FAIL: لم يُتحقَّقْ بالرمز'; end if;
+  if (v_j ->> 'version') <> '0.9' then raise exception 'FAIL: نسخةٌ خاطئة: %', v_j ->> 'version'; end if;
+  if (v_j ->> 'signed_name') <> 'توقيعٌ قديم' then raise exception 'FAIL: اسمٌ خاطئ'; end if;
+  -- ولا يُفشى عنوانُ الشبكة ولا الجهاز
+  if v_j ? 'sign_ip' or v_j ? 'sign_agent' then
+    raise exception 'FAIL: أُفشي عنوانُ الشبكة أو الجهاز في الصفحة العامة';
+  end if;
+
+  -- ورمزٌ لا وجودَ له لا يفتح شيئًا، والفارغُ كذلك
+  if (public.verify_signature('SG-0000000000') ->> 'found')::boolean then
+    raise exception 'FAIL: فُتح رمزٌ لا وجودَ له';
+  end if;
+  if (public.verify_signature('') ->> 'found')::boolean then
+    raise exception 'FAIL: فُتح رمزٌ فارغ';
+  end if;
+  if (public.verify_signature(null) ->> 'found')::boolean then
+    raise exception 'FAIL: فُتح رمزٌ معدوم';
+  end if;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  raise notice 'PASS: الوثائقُ كلُّها تحمل رمزًا، والتحقُّقُ به عامٌّ بلا حساب ولا يُفشي الشبكةَ والجهاز';
 end $$;

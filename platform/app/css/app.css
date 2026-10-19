@@ -234,6 +234,15 @@ td .sub { display: block; color: var(--muted); font-size: .82rem; }
   border-top: 1px dashed rgb(188 150 97 / 45%); }
 .lh-num span { font-size: calc(var(--pt) * 7); color: rgb(107 98 87 / 75%); letter-spacing: .3px; }
 .lh-body .area { min-height: 100%; outline: none; padding-bottom: 1em; }
+/* أساسُ متن الطباعة: ١٢ نقطةً بتباعد ١٫٨ — تستعمله نوافذُ الطباعة
+   ويستعمله المحررُ في قياسه الخفيِّ، فيتَّحد المقياسان (ملاحظة ٤٣٠) */
+.print-body { --pt: 1pt; font-size: 12pt; line-height: 1.8; }
+/* صندوقُ قياسٍ بمقاس الطباعة الحقيقيِّ خارجَ الشاشة: به تُحسَب فواصلُ
+   صفحات المحرر كما تقع في PDF بالضبط، لا بمقاس العرض */
+.lh-measure { position: absolute; visibility: hidden; pointer-events: none;
+  top: -10000mm; inset-inline-start: 0; width: 170mm; z-index: -1; }
+.lh-measure .area { min-height: 0; padding-bottom: 0; }
+.lh-measure .lh-guides, .lh-measure .lh-num { display: none; }
 .lh-body p, .print-body p { margin: 0 0 .6em; }
 .lh-body h2, .print-body h2 { font-size: 1.35em; margin: .4em 0; } .lh-body h3, .print-body h3 { font-size: 1.15em; margin: .4em 0; }
 .lh-body blockquote, .print-body blockquote { margin: .4em 2em; }
@@ -1672,6 +1681,14 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .verify-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 8px 0 0; }
 .verify-grid dt { color: var(--muted); font-size: .85rem; }
 .verify-grid dd { margin: 0; }
+/* بصمةُ النصِّ طويلةٌ لاتينية، فتُكسَر ولا تمدُّ الصفحة (ملاحظة ٤٢٨) */
+.verify-grid dd.mono { font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: .78rem; word-break: break-all; }
+.policy-clause { border-inline-start: 3px solid var(--gold); padding: 2px 10px;
+  margin: 10px 0 0; }
+.policy-clause b { display: block; color: var(--gold); margin-bottom: 2px; }
+.policy-clause p { margin: 0; line-height: 1.9; }
+.field.grow { flex: 1; min-width: 200px; }
 .verify-ok { border-color: #2e9e6b; }
 .verify-bad { border-color: #c0564a; }
 .gl-task input { width: 100%; }

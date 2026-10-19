@@ -15,6 +15,8 @@ const routes = [
   ['/verify-cert', () => import('./views/certverify.js'), false],
   // التحقّقُ من بطاقة العمل بالباركود المطبوع عليها (ملاحظة ٣١٣)
   ['/verify-card', () => import('./views/cardverify.js'), false],
+  // التحقّقُ من وثيقة إثبات التوقيع على الميثاق بباركودها (ملاحظة ٤٢٨)
+  ['/verify-sign', () => import('./views/signverify.js'), false],
   ['/initiative', () => import('./views/about.js').then(m => ({ render: m.initiative })), false],
   ['/policy', () => import('./views/policy.js'), true],
   ['/mfa', () => import('./views/mfa.js'), true],

@@ -1,7 +1,7 @@
 // تصدير مجمَّع على هيئة كتاب: غلافٌ وفهرسٌ وخطبٌ مرقَّمة على كليشة الهيئة (ملاحظة ١٥٢)
 //   يُبنى في نافذة مستقلة كما تُبنى ورقة الطباعة، ثم يُطبع أو يُحفظ PDF.
 import { PAGE, LETTERHEAD, cardColumns, heading, docVerifyUrl,
-  DOC_STAMP_CSS, docStampNode, BOX, lineBottoms, pageStarts } from './page.js';
+  DOC_STAMP_CSS, docStampNode, BOX, flowStarts, fontsSettled, settledHeight } from './page.js';
 import { sanitize } from './sanitize.js';
 import { langDir, langName, MOSQUE_ANY } from './store.js';
 import { fmtHijri } from './ui.js';
@@ -121,14 +121,13 @@ ${DOC_STAMP_CSS(P.side)}
     return docStampNode(d, track, url => qrPngDataUrl(url, { scale: 6 }));
   }
 
-  // القطعُ بحساب page.js وحدَه، فلا يشذُّ المجمَّعُ عن المحرر (ملاحظة ٤٢٣)
-  function startsOf(flow, boxPx) {
-    const bottoms = lineBottoms(flow, { doc: d });
-    const total = Math.max(flow.getBoundingClientRect().height, bottoms.at(-1) || 0);
-    return { starts: pageStarts(bottoms, total, boxPx), total };
+  // القطعُ بحساب page.js وحدَه، فلا يشذُّ المجمَّعُ عن المحرر (ملاحظتا ٤٢٣ و٤٣٠)
+  async function startsOf(flow, boxPx) {
+    const total = await settledHeight(flow);
+    return { starts: flowStarts(flow, { doc: d, boxPx, total }), total };
   }
 
-  function build() {
+  async function build() {
     const measure = d.getElementById('measure');
     const probe = el('div');
     probe.style.cssText = `height:${WIN_H}mm;width:1px;position:absolute;visibility:hidden`;
@@ -152,7 +151,7 @@ ${DOC_STAMP_CSS(P.side)}
       measure.append(flow);
       return { it, flow };
     });
-    for (const wk of works) Object.assign(wk, startsOf(wk.flow, boxPx));
+    for (const wk of works) Object.assign(wk, await startsOf(wk.flow, boxPx));
 
     // ٢) الفهرس: عدد صفحاته يُعرف من عدد الأعمال، فتُحسب أرقام الصفحات قبل رسمه
     const idxPages = Math.max(1, Math.ceil(items.length / INDEX_ROWS));
@@ -282,9 +281,9 @@ ${DOC_STAMP_CSS(P.side)}
   }
 
   const ready = async () => {
-    try { await d.fonts?.ready; } catch { /* المتصفح لا يدعم fonts.ready */ }
-    await new Promise(r => setTimeout(r, 150));
-    build();
+    // لا يُقاس قبل أن يحلَّ الخطُّ الحقيقيُّ محلَّ الاحتياطيّ (ملاحظة ٤٣٠)
+    await fontsSettled(d);
+    await build();
     if (autoPrint) setTimeout(() => w.print(), 500);
   };
   if (d.readyState === 'complete') ready(); else w.addEventListener('load', ready);

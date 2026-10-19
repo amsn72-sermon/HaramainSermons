@@ -1,11 +1,14 @@
 // محرر الترجمة: ورقة A4 على كليشة الهيئة بمساحة كتابة ثابتة، مع أدوات تنسيق متقدمة وتنقية لما يُلصق.
 import { h } from './ui.js';
 import { sanitize } from './sanitize.js';
-import { letterheadPage, bodyStarts } from './page.js';
+import { letterheadPage, PAGE, BOX, flowStarts, fontsSettled } from './page.js';
 
 const PT_SIZES = [9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28];
 const LINE_HEIGHTS = [['1', 'مفرد'], ['1.15', '1.15'], ['1.5', '1.5'], ['1.8', '1.8'], ['2', 'مزدوج'], ['2.5', '2.5']];
 const BLOCKS = 'P,H2,H3,BLOCKQUOTE,LI,DIV,TD,TH';
+
+// تُنتظَر خطوطُ الصفحة مرّةً واحدةً لكلِّ الجلسة (ملاحظة ٤٣٠)
+let FONTS_READY = null;
 
 // ـــ الخطوط (ملاحظة ٤٢٤)
 //
@@ -53,15 +56,49 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
       h('span.lh-brk-t', `نهاية الصفحة ${i + 1}`),
       h('span.lh-brk-t.next', `بداية الصفحة ${i + 2}`))));
   }
+  // ـــ القياسُ بمقاس الطباعة لا بمقاس العرض (ملاحظة ٤٣٠)
+  //
+  //   الورقةُ على الشاشة أصغرُ من الورقة المطبوعة، فتُدوَّر أطوالُ السطور
+  //   تدويرًا مختلفًا، فيتأرجح السطرُ الواقعُ على حافّة الصفحة بين
+  //   الصفحتين. فيُنسَخ المحتوى في صندوقٍ خفيٍّ عرضُه عرضُ صندوق الكتابة
+  //   بالملّيمتر وخطُّه ١٢ نقطةً — أي بمقاس PDF بعينه — فيُقاس فيه،
+  //   ثمَّ تُردُّ المواضعُ إلى مقاس الشاشة بنسبةِ العرضَين.
+  const measure = plain ? null : h('div.print-body.lh-measure', { 'aria-hidden': 'true' });
+
+  function printStarts() {
+    if (!measure) return { starts: [0], ratio: 1 };
+    if (!measure.isConnected) document.body.append(measure);
+    measure.dir = body.dir || dir;
+    measure.innerHTML = body.innerHTML;
+    measure.querySelectorAll('.lh-guides, .lh-num').forEach(x => x.remove());
+    const probe = h('div', { style: {
+      height: `${PAGE.h - PAGE.top - PAGE.bottom - BOX.numH - BOX.safeH}mm`,
+      width: '1px', position: 'absolute', visibility: 'hidden' } });
+    document.body.append(probe);
+    const boxPx = probe.getBoundingClientRect().height || 1;
+    probe.remove();
+    const starts = flowStarts(measure, { boxPx });
+    const mw = measure.getBoundingClientRect().width || 1;
+    const bw = body.getBoundingClientRect().width || mw;
+    return { starts, ratio: bw / mw };
+  }
+
+  let pending = null;
   function updatePages() {
     if (plain) return;
-    requestAnimationFrame(() => {
-      const { starts } = bodyStarts(body);
+    if (pending) clearTimeout(pending);
+    pending = setTimeout(async () => {
+      pending = null;
+      // ولا يُقاس قبل أن تستقرَّ خطوطُ الصفحة (ملاحظة ٤٣٠)
+      FONTS_READY = FONTS_READY || fontsSettled(document);
+      await FONTS_READY;
+      if (!body.isConnected) { measure?.remove(); return; }
+      const { starts, ratio } = printStarts();
       const n = Math.max(1, starts.length);
       pages.textContent = `≈ ${n} صفحة عند الطباعة`;
       if (num) num.dataset.n = String(n);
-      drawGuides(starts);
-    });
+      drawGuides(starts.map(s => s * ratio));
+    }, 180);
   }
 
   // آخر تحديد داخل الورقة: القوائم المنسدلة تأخذ التركيز، فنعيد التحديد قبل التنفيذ
