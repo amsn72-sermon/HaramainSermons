@@ -3,7 +3,7 @@
 // فتكون متطابقةً في كلِّ مرة. والأرشيفُ أرشيفُ سجلّاتٍ لا ملفّات.
 // (ملاحظة ٢٦٧ ح)
 import { fmtHijri, fmtDate } from './ui.js';
-import { PUBLIC_SITE } from './page.js';
+import { PUBLIC_SITE, FONT_FACE_CSS, NASKH_STACK } from './page.js';
 import { qrDataUri } from './qr.js';
 
 export const certVerifyUrl = c =>
@@ -93,10 +93,22 @@ export function normalizeBlocks(saved, kind) {
     if (!def || seen.has(b.key)) continue;
     seen.add(b.key);
     out.push({ ...def, on: b.on !== false,
-      text: b.text != null && String(b.text).length ? String(b.text) : def.text });
+      text: b.text != null && String(b.text).length ? String(b.text) : def.text,
+      // قيمةُ البيان تُكتَب مستقلّةً عن عنوانه، والفارغُ يرجع إلى بيانات
+      //   الشهادة (ملاحظة ٤١٨)
+      val: b.val != null && String(b.val).length ? String(b.val) : '' });
   }
   for (const def of base) if (!seen.has(def.key)) out.push({ ...def });
   return out;
+}
+
+// قيمةُ البيان: ما كُتب في القالب أولًا، فإن لم يُكتبْ فمن بيانات الشهادة
+//   (ملاحظة ٤١٨)
+export function factValue(b, c) {
+  const own = b && b.val != null ? String(b.val).trim() : '';
+  if (own) return own;
+  const fn = FACT_VALUE[b && b.key];
+  return fn ? String(fn(c || {}) ?? '') : '';
 }
 
 // قيمةُ كلِّ بيانٍ من بيانات الشهادة
@@ -160,11 +172,12 @@ export function certHtml(c, memberName) {
   return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
 <title>${esc(c.serial_no || 'شهادة')}</title>
 <style>
+  ${FONT_FACE_CSS()}
   @page { size: A4 ${land ? 'landscape' : 'portrait'}; margin: 0; }
   :root { --ink: ${th.ink}; --gold: ${th.gold}; }
   * { box-sizing: border-box; }
   body { margin: 0; background: #fff; color: var(--ink);
-         font-family: "Noto Naskh Arabic", "Amiri", Garamond, serif; }
+         font-family: ${NASKH_STACK}; }
   .sheet { position: relative; width: ${land ? '297mm' : '210mm'}; height: ${land ? '210mm' : '297mm'};
            background: #fff; overflow: hidden; display: flex; flex-direction: column;
            padding: 18mm 24mm 16mm 24mm; }
@@ -213,6 +226,8 @@ export function certHtml(c, memberName) {
   .stamp { text-align: center; font-size: 8.5pt; color: #6b6257; }
   .stamp img { width: 22mm; height: 22mm; display: block; margin: 0 auto 1.5mm; }
   .no { font-size: 9.5pt; color: #6b6257; letter-spacing: .04em; direction: ltr; }
+  /* المحجوبُ يُمسِك موضعَه ولا يُطبَع حرفُه (ملاحظة ٤١٧) */
+  .hidden-block { visibility: hidden; }
   .revoked { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
              font-size: 60pt; color: rgba(180, 40, 40, .12); transform: rotate(-20deg); font-weight: 700; }
   @media print { .sheet { page-break-after: always; } }
@@ -245,11 +260,12 @@ ${bodyHtml(c, memberName, th, qr)}
 </div></div></body></html>`;
 }
 
-// المتنُ يُرسَم على ترتيب القائمة، والمحجوبُ يُطوى فيرتفع ما بعده
+// المتنُ يُرسَم على ترتيب القائمة. والمحجوبُ يُحجَب في موضعه ولا يرتفع
+//   ما بعده: رفعُ العلامة وخفضُها لا يُزحزح سطرًا، والتحريكُ يدويٌّ
+//   بالسهمين وحدَهما (ملاحظة ٤١٧)
 function bodyHtml(c, memberName, th, qr) {
   const d = c.design || {};
-  const blocks = normalizeBlocks(d.blocks, c.kind).filter(b => b.on !== false);
-  const at = k => blocks.find(b => b.key === k);
+  const all = normalizeBlocks(d.blocks, c.kind);
   const out = [];
   let facts = [];
   const flushFacts = () => {
@@ -257,46 +273,54 @@ function bodyHtml(c, memberName, th, qr) {
     out.push(`<div class="facts">${facts.join('')}</div>`);
     facts = [];
   };
-  for (const b of blocks) {
+  // المحجوبُ يُرسَم خفيًّا فيُمسِك موضعَه (ملاحظة ٤١٧)
+  const off = b => (b.on === false ? ' hidden-block' : '');
+  for (const b of all) {
     if (b.key.startsWith('f.')) {
-      const v = (FACT_VALUE[b.key] || (() => ''))(c);
-      if (v) facts.push(`<b data-block="${esc(b.key)}">${esc(b.text || '')}</b>`
-        + `<span>${esc(v)}</span>`);
+      const v = factValue(b, c);
+      // ما لا قيمةَ له أصلًا لم يكن له موضعٌ، فلا يُحفَظ له فراغ
+      if (!v && b.on === false) continue;
+      if (v) facts.push(`<b data-block="${esc(b.key)}" class="fl${off(b)}">${esc(b.text || '')}</b>`
+        + `<span class="fv${off(b)}">${esc(v)}</span>`);
       continue;
     }
     flushFacts();
+    const cls = x => `${x}${off(b)}`;
     if (b.key === 'kind') {
-      out.push(`<div class="kind" data-block="kind">${esc(b.text || KIND[c.kind] || '')}</div>`);
+      out.push(`<div class="${cls('kind')}" data-block="kind">${esc(b.text || KIND[c.kind] || '')}</div>`);
     } else if (b.key === 'title') {
-      out.push(`<h1 data-block="title">${esc(c.title || '')}</h1>`);
+      out.push(`<h1 class="${cls('ttl')}" data-block="title">${esc(c.title || '')}</h1>`);
     } else if (b.key === 'orn') {
-      out.push(ORNAMENT(th.gold));
+      out.push(b.on === false
+        ? `<div class="orn hidden-block"></div>` : ORNAMENT(th.gold));
     } else if (b.key === 'pre') {
-      out.push(`<div class="pre" data-block="pre">${esc(b.text || PRE_TEXT)}</div>`);
+      out.push(`<div class="${cls('pre')}" data-block="pre">${esc(b.text || PRE_TEXT)}</div>`);
     } else if (b.key === 'bian') {
-      out.push(`<div class="bian" data-block="bian">${esc(b.text || 'بأنّ')}</div>`);
+      out.push(`<div class="${cls('bian')}" data-block="bian">${esc(b.text || 'بأنّ')}</div>`);
     } else if (b.key === 'name') {
-      out.push(`<div class="name" data-block="name">${esc(memberName || '')}</div>`);
+      out.push(`<div class="${cls('name')}" data-block="name">${esc(memberName || '')}</div>`);
     } else if (b.key === 'done') {
-      out.push(`<div class="done" data-block="done">${esc(b.text || '')}</div>`);
+      out.push(`<div class="${cls('done')}" data-block="done">${esc(b.text || '')}</div>`);
     }
   }
   flushFacts();
 
-  const sign = at('sign') ? `<div class="sign">
+  // وكتلُ الذيل كذلك: تُحجَب في موضعها ولا تُزحزح جارَها (ملاحظة ٤١٧)
+  const blockOf = k => all.find(b => b.key === k);
+  const offOf = k => (blockOf(k) && blockOf(k).on === false ? ' hidden-block' : '');
+  const sign = `<div class="sign${offOf('sign')}">
     <div class="space">${c.signature === 'image' && d.signature_src
       ? `<img src="${esc(d.signature_src)}" alt="">` : ''}</div>
     <div class="rule"></div>
     <b>${esc(c.signer_name || '')}</b>
     <small>${esc(c.signer_role || '')}</small>
-  </div>` : '<div class="sign"></div>';
-  const serial = at('serial')
-    ? `<div class="no">${esc(c.serial_no || '')}`
-      + `${c.issued_at ? ' · ' + esc(fmtDate(c.issued_at)) : ''}</div>`
-    : '';
-  const stamp = (qr && at('qr'))
-    ? `<div class="stamp"><img src="${qr}" alt="رمز التحقق">`
-      + `${esc(at('qr').text || 'للتحقق من الشهادة')}</div>`
+  </div>`;
+  const serial = `<div class="no${offOf('serial')}">${esc(c.serial_no || '')}`
+    + `${c.issued_at ? ' · ' + esc(fmtDate(c.issued_at)) : ''}</div>`;
+  const qrB = blockOf('qr');
+  const stamp = qr
+    ? `<div class="stamp${offOf('qr')}"><img src="${qr}" alt="رمز التحقق">`
+      + `${esc((qrB && qrB.text) || 'للتحقق من الشهادة')}</div>`
     : '';
   out.push(`<footer>${sign}${serial}${stamp}</footer>`);
   return out.join('\n');

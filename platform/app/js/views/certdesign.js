@@ -15,7 +15,7 @@ import { h, fill, toast, busy, dialog, confirm } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { isManager, can } from '../store.js';
 import { certHtml, CERT_THEMES, DEFAULT_CERT_MARKS, CERT_VARS, printCertificate,
-         CERT_BLOCKS, normalizeBlocks } from '../certdoc.js';
+         CERT_BLOCKS, normalizeBlocks, factValue } from '../certdoc.js';
 import { prepareMark } from '../photo.js';
 import { unifiedPanel } from '../unipanel.js';
 import { bgImage } from '../pdfview.js';
@@ -44,13 +44,18 @@ const HAS_TEXT = key => !NO_TEXT.has(key);
 
 const FONTS = [
   ['', 'خطُّ الشهادة'],
-  ['"Noto Naskh Arabic", serif', 'نسخ'],
+  // خطُّ النسخ المرفقُ بالمنصة، وTraditional Arabic بالاسم (ملاحظة ٤٢٤)
+  ['"Haramain Naskh", "Traditional Arabic", serif', 'نسخ (مرفقٌ بالمنصة)'],
+  ['"Traditional Arabic", "Haramain Naskh", serif', 'Traditional Arabic'],
+  ['"Noto Naskh Arabic", serif', 'نسخ Noto'],
   ['"Amiri", serif', 'أميري'],
   ['"Noto Kufi Arabic", sans-serif', 'كوفي'],
   ['Garamond, serif', 'Garamond'],
   ['Georgia, serif', 'Georgia'],
 ];
 
+// بياناتُ القالب الثابتة. والموقِّعُ ومنصبُه خرجا من هنا: يُكتبان عند
+//   المنح لكلِّ دفعةٍ بحسب من يعتمدها (ملاحظة ٤١٦)
 const FIXED = [
   ['title', 'عنوانُ الشهادة', 'text'],
   ['subject', 'الموضوع', 'text'],
@@ -61,8 +66,6 @@ const FIXED = [
   ['provider', 'الجهةُ المنفّذة', 'text'],
   ['role_text', 'الدور (للخبرة)', 'text'],
   ['body', 'ما باشره (للخبرة)', 'text'],
-  ['signer_name', 'الموقِّع', 'text'],
-  ['signer_role', 'صفةُ الموقِّع', 'text'],
 ];
 
 export async function render(ctx) {
@@ -450,32 +453,13 @@ export async function render(ctx) {
     const clear = h('button.btn.sm.ghost', { type: 'button' }, 'احذفِ التوقيع');
     clear.onclick = () => { d.signature_src = null; paint(); drawTabs(); };
     return h('div.stack',
-      h('p.small.muted', 'توقيعُ مَن يعتمد الشهادات: يُرفع صورةً بخلفيةٍ شفافة، '
-        + 'ويُترك فراغٌ للتوقيع باليد إن لم تُرفع.'),
+      h('p.small.muted', 'الاسمُ والمنصبُ والتوقيعُ يُكتبان عند المنح لا هنا، '
+        + 'فلكلِّ دفعةٍ من يعتمدها (ملاحظة ٤١٦). وما يُرفَع هنا توقيعٌ '
+        + 'افتراضيٌّ يُقترَح عند المنح، ويُبدَّل متى شئت.'),
       h('div.row', up, file, d.signature_src ? clear : null),
       d.signature_src
         ? h('div.mark-prev', h('img', { src: d.signature_src, alt: 'التوقيع' }))
         : h('p.small.muted', 'لم تُرفع صورةُ توقيع — ويُترك الفراغُ ليُوقَّع باليد.'));
-  };
-
-  // بياناتُ القالب الثابتة: تُملأ مرةً فلا تُسأل عند كلِّ منح (ملاحظة ٣٢٤)
-  const fixedBox = () => {
-    const nameIn = h('input', { value: name, 'aria-label': 'اسم القالب' });
-    nameIn.oninput = () => { name = nameIn.value; };
-    const kindSel = h('select', { 'aria-label': 'نوع الشهادة' },
-      h('option', { value: 'course', selected: kind === 'course' }, 'شهادةُ دورة'),
-      h('option', { value: 'experience', selected: kind === 'experience' }, 'شهادةُ خبرة'));
-    kindSel.onchange = () => { kind = kindSel.value; paintSample(); };
-    return h('div.stack',
-      h('p.small.muted', 'ما يُملأ هنا يُكتب في كلِّ شهادةٍ تُمنَح بهذا القالب، '
-        + 'فلا يبقى عند المنح إلا اسمُ صاحبها.'),
-      h('label.field', 'اسمُ القالب', nameIn),
-      h('label.field', 'نوعُ الشهادة', kindSel),
-      h('div.grid-2', FIXED.map(([k, label, type]) => {
-        const i = h('input', { type, value: fixed[k] ?? '', 'aria-label': label });
-        i.oninput = () => { fixed[k] = i.value; paintSample(); };
-        return h('label.field', label, i);
-      })));
   };
 
   const paintSample = () => {
@@ -553,49 +537,137 @@ export async function render(ctx) {
     const b = list.find(x => x.key === key);
     if (!b) return;
     if (key === 'title') {
-      return toast('عنوانُ الشهادة يُكتب في «بياناتُ القالب».', 'warn');
+      uni.show('blocks');
+      return toast('عنوانُ الشهادة يُكتب في «بياناتُ القالب» أسفلَ القائمة.', 'warn');
     }
     if (!HAS_TEXT(key)) return;
-    const inp = h('textarea', { rows: 3, 'aria-label': 'النص' }, b.text || '');
+    const isFact = key.startsWith('f.');
+    const inp = h('textarea', { rows: 2, 'aria-label': 'العبارة' }, b.text || '');
+    // البيانُ قسمان: عبارتُه وقيمتُه (ملاحظة ٤١٨)
+    const valIn = isFact
+      ? h('input', { value: b.val || '', 'aria-label': 'القيمة',
+          placeholder: factValue({ key }, SAMPLE) || 'من بيانات الشهادة' })
+      : null;
     const res = await dialog({
       title: `تعديلُ: ${b.label}`,
       body: h('div.stack',
-        h('p.small.muted', 'المكتوبُ مقترَحٌ لا محتوم — اكتبْ ما شئت.'),
-        inp),
-      buttons: [{ label: 'احفظْ', kind: 'primary', value: () => inp.value },
+        h('p.small.muted', isFact
+          ? 'العبارةُ هي العنوان، والقيمةُ ما يُكتب بعده. '
+            + 'واترُكِ القيمةَ فارغةً لتُؤخَذ من بيانات الشهادة.'
+          : 'المكتوبُ مقترَحٌ لا محتوم — اكتبْ ما شئت.'),
+        h('label.field', 'العبارة', inp),
+        valIn ? h('label.field', 'القيمة', valIn) : null),
+      buttons: [{ label: 'احفظْ', kind: 'primary',
+        value: () => ({ text: inp.value, val: valIn ? valIn.value : null }) },
                 { label: 'إلغاء', value: null }]
     });
     if (res == null) return;
-    b.text = res;
+    b.text = res.text;
+    if (res.val != null) b.val = res.val;
     paint(); drawTabs();
   }
 
+  // نصوصُ الشهادة وبياناتُها في بابٍ واحد: فهما متشابهتان، وما يُكتَب
+  //   في البيانات يَظهر في النصوص (ملاحظة ٤٢٠).
+  //
+  //   وكلُّ بيانٍ قسمان يُعدَّل كلٌّ منهما وحدَه: عنوانُه («الجهةُ
+  //   المنفِّذة») وقيمتُه («مشروع خادم الحرمين الشريفين للترجمة»). والقيمةُ
+  //   إذا تُركت فارغةً أُخذت من بيانات الشهادة (ملاحظة ٤١٨).
+  //
+  //   والحجبُ لا يُزحزح ما بعده: يُمسِك المحجوبُ موضعَه، والتحريكُ
+  //   بالسهمين وحدَهما (ملاحظة ٤١٧).
   const blocksBox = () => {
     const list = blocksOf();
+    const boxes = [];
+
+    // علامةٌ واحدةٌ أعلى القائمة تُنزِل الكلَّ أو تُصعِده (ملاحظة ٤١٩)
+    const shown = list.filter(b => b.on !== false).length;
+    const all = h('input', { type: 'checkbox',
+      checked: shown === list.length ? true : null,
+      'aria-label': 'أظهِرْ كلَّ النصوص أو احجبْها' });
+    all.indeterminate = shown > 0 && shown < list.length;
+    all.onchange = () => {
+      const v = all.checked;
+      list.forEach(b => { b.on = v; });
+      boxes.forEach(cb => { cb.checked = v; });
+      all.indeterminate = false;
+      paint();
+    };
+
+    const rows = list.map((b, i) => {
+      const on = h('input', { type: 'checkbox', checked: b.on !== false ? true : null,
+        'aria-label': `أظهِرْ ${b.label}` });
+      boxes.push(on);
+      on.onchange = () => {
+        b.on = on.checked;
+        const n = list.filter(x => x.on !== false).length;
+        all.checked = n === list.length;
+        all.indeterminate = n > 0 && n < list.length;
+        paint();
+      };
+      const isFact = b.key.startsWith('f.');
+      const lbl = HAS_TEXT(b.key)
+        ? (() => {
+            const i2 = h('input', { value: b.text || '',
+              'aria-label': `عنوانُ ${b.label}` });
+            i2.oninput = () => { b.text = i2.value; };
+            i2.onchange = () => paint();
+            return i2;
+          })()
+        : h('span.small.muted', b.key === 'title' ? 'عنوانُ الشهادة أدناه' : '—');
+      // القيمةُ: للبيانات وحدَها، وفراغُها يعني الأخذَ من بيانات الشهادة
+      const val = isFact
+        ? (() => {
+            const i3 = h('input', { value: b.val || '',
+              placeholder: factValue({ key: b.key }, SAMPLE) || 'من بيانات الشهادة',
+              'aria-label': `قيمةُ ${b.label}` });
+            i3.oninput = () => { b.val = i3.value; };
+            i3.onchange = () => paint();
+            return i3;
+          })()
+        : null;
+      return h('div.cb-row.cert-row2',
+        h('label.check', on, h('span.cb-no', AR(i + 1))),
+        h('div.grow.cb-two', { style: { minWidth: '200px' } },
+          h('b.small', b.label),
+          h('div.cb-pair' + (val ? '' : '.one'),
+            h('label.field.sm', 'العبارة', lbl),
+            val ? h('label.field.sm', 'القيمة', val) : null)),
+        h('div.row', { style: { gap: '4px' } },
+          h('button.btn.xs.ghost', { type: 'button', title: 'ارفعْه سطرًا',
+            onclick: () => moveBlock(i, -1) }, '▲'),
+          h('button.btn.xs.ghost', { type: 'button', title: 'أنزلْه سطرًا',
+            onclick: () => moveBlock(i, 1) }, '▼')));
+    });
+
+    // بياناتُ القالب الثابتة في الباب نفسِه (ملاحظة ٤٢٠)
+    const nameIn = h('input', { value: name, 'aria-label': 'اسم القالب' });
+    nameIn.oninput = () => { name = nameIn.value; };
+    const kindSel = h('select', { 'aria-label': 'نوع الشهادة' },
+      h('option', { value: 'course', selected: kind === 'course' }, 'شهادةُ دورة'),
+      h('option', { value: 'experience', selected: kind === 'experience' }, 'شهادةُ خبرة'));
+    kindSel.onchange = () => { kind = kindSel.value; paintSample(); drawTabs(); };
+
     return h('div.stack',
-      h('p.small.muted', 'النصوصُ بترتيبها في الشهادة من أعلى إلى أسفل. ارفعِ العلامةَ ليَظهر النصُّ واخفضْها ليُحجَب، ويُحرَّر كلُّ نصٍّ من هنا أو بالنقر عليه.'),
-      ...list.map((b, i) => {
-        const on = h('input', { type: 'checkbox', checked: b.on !== false ? true : null,
-          'aria-label': `أظهِرْ ${b.label}` });
-        on.onchange = () => { b.on = on.checked; paint(); };
-        const txt = HAS_TEXT(b.key)
-          ? (() => {
-              const i2 = h('input', { value: b.text || '', 'aria-label': b.label });
-              i2.oninput = () => { b.text = i2.value; };
-              i2.onchange = () => paint();
-              return i2;
-            })()
-          : h('span.small.muted', b.key === 'title' ? 'من بيانات القالب' : '—');
-        return h('div.row.between.wrap.cb-row',
-          h('label.check', on, h('span.cb-no', AR(i + 1))),
-          h('div.grow', { style: { minWidth: '180px' } },
-            h('b.small', b.label), txt),
-          h('div.row', { style: { gap: '4px' } },
-            h('button.btn.xs.ghost', { type: 'button', title: 'ارفعْه سطرًا',
-              onclick: () => moveBlock(i, -1) }, '▲'),
-            h('button.btn.xs.ghost', { type: 'button', title: 'أنزلْه سطرًا',
-              onclick: () => moveBlock(i, 1) }, '▼')));
-      }),
+      h('p.small.muted', 'النصوصُ بترتيبها في الشهادة من أعلى إلى أسفل. '
+        + 'ولكلِّ بيانٍ عبارتُه وقيمتُه، يُعدَّل كلٌّ منهما وحدَه، '
+        + 'والقيمةُ الفارغةُ تُؤخَذ من بيانات الشهادة. '
+        + 'وخفضُ العلامة يحجب النصَّ في موضعه ولا يرفع ما بعده: التحريكُ بالسهمين.'),
+      h('label.check.cb-all', all, h('b.small', 'الكلُّ ظاهر')),
+      ...rows,
+      h('details.vars', { open: true },
+        h('summary.small', 'بياناتُ القالب — تُملأ مرةً فتُكتب في كلِّ شهادةٍ تُمنَح به'),
+        h('div.stack',
+          h('div.uni-grid',
+            h('label.field', 'اسمُ القالب', nameIn),
+            h('label.field', 'نوعُ الشهادة', kindSel)),
+          h('div.uni-grid', FIXED.map(([k, label, type]) => {
+            const i = h('input', { type, value: fixed[k] ?? '', 'aria-label': label });
+            i.oninput = () => { fixed[k] = i.value; paintSample(); };
+            return h('label.field', label, i);
+          })),
+          h('p.small.muted', 'واسمُ الموقِّع ومنصبُه وتوقيعُه لا يُثبَّتان هنا: '
+            + 'يُكتبان عند المنح لكلِّ دفعةٍ بحسب من يعتمدها.'))),
       h('div.row',
         h('button.btn.sm.ghost', { type: 'button', onclick: () => {
           d.blocks = CERT_BLOCKS(kind); paint(); drawTabs();
@@ -603,8 +675,7 @@ export async function render(ctx) {
   };
 
   const TABS = [
-    ['blocks', '≡', 'نصوصُ الشهادة', 'ترتيبُها وحجبُها وتحريرُها', blocksBox],
-    ['fixed', '✎', 'بياناتُ القالب', 'ما يُملأ مرةً لكلِّ الشهادات', fixedBox],
+    ['blocks', '≡', 'نصوصُ الشهادة وبياناتُها', 'عبارةٌ وقيمةٌ لكلِّ سطر', blocksBox],
     ['theme', '▦', 'القالبُ والاتجاه', 'ثلاثةُ قوالبَ وأفقيٌّ ورأسيّ', themeBox],
     ['bg',    '🖼', 'الخلفية', 'PDF بدقّة الطباعة', bgBox],
     ['marks', '◆', 'الشعارات', 'من المكتبة، والنزعُ لا يُتلف', marksBox],

@@ -3,8 +3,8 @@
 import { h, fmtHijri } from './ui.js';
 import { sanitize } from './sanitize.js';
 import { langDir } from './store.js';
-import { PAGE, LETTERHEAD, cardColumns, cardRowsTr, fileName, docVerifyUrl,
-  DOC_STAMP_CSS, docStampNode } from './page.js';
+import { PAGE, BOX, LETTERHEAD, cardColumns, cardRowsTr, fileName, docVerifyUrl,
+  DOC_STAMP_CSS, docStampNode, lineBottoms, pageStarts } from './page.js';
 import { qrPngDataUrl, qrPngBytes } from './qr.js';
 
 let docxLoading = null;
@@ -24,6 +24,8 @@ const GOLD = 'BC9661';
 const TW = mm => Math.round(mm * 1440 / 25.4);           // ملّيمتر → twip
 const PX = mm => Math.round(mm * 96 / 25.4);             // ملّيمتر → بكسل (مكتبة docx)
 const BASE_PT = 12;
+// سلسلةُ الخطوط تُكتَب في الصفحة، وWord يأخذ أوّلَ أسرةٍ منها (ملاحظة ٤٢٤)
+const fam = v => String(v || '').replace(/["']/g, '').split(',')[0].trim() || '';
 
 // يحوّل HTML المنقّى إلى عناصر Word مع الحفاظ على التنسيق الأساسي والجداول
 function htmlToBlocks(docx, html, rtl) {
@@ -56,7 +58,8 @@ function htmlToBlocks(docx, html, rtl) {
         b: st.b || t === 'B' || t === 'STRONG' || /bold|[6-9]00/.test(n.style?.fontWeight || ''),
         i: st.i || t === 'I' || t === 'EM', u: st.u || t === 'U', s: st.s || t === 'S' || t === 'STRIKE',
         sup: st.sup || t === 'SUP', sub: st.sub || t === 'SUB',
-        font: n.getAttribute?.('face') || (n.style?.fontFamily || '').replace(/["']/g, '').split(',')[0] || st.font,
+        // أوّلُ أسرةٍ في السلسلة وحدَها تُكتَب في Word، بلا أقواس (ملاحظة ٤٢٤)
+        font: fam(n.getAttribute?.('face')) || fam(n.style?.fontFamily) || st.font,
         pt: sizeOf(n, st.pt), color: hex || st.color }));
     }
     return runs;
@@ -208,8 +211,9 @@ export function printTranslations(items, { autoPrint = true, name = null, lh = n
   const P = lh && lh.page ? { ...PAGE, ...lh.page } : PAGE;
   const BOX_H = P.h - P.top - P.bottom;      // ارتفاع صندوق الكتابة بالمليمتر
   const BOX_W = P.w - P.side * 2;
-  const NUM_H = 8;                          // شريط رقم الصفحة أسفل صندوق الكتابة
-  const SAFE_H = 9;                         // فسحة أمان تمنع قصّ السطر الأخير (ملاحظتا ٧١ و٧٩)
+  // الحدودُ من page.js وحدَه، فلا يشذُّ المحرر عن التصدير (ملاحظة ٤٢٣)
+  const NUM_H = BOX.numH;                   // شريط رقم الصفحة أسفل صندوق الكتابة
+  const SAFE_H = BOX.safeH;                 // فسحة أمان تمنع قصّ السطر الأخير (ملاحظتا ٧١ و٧٩)
   const WIN_H = BOX_H - NUM_H - SAFE_H;
   w.document.write(`<!doctype html><html lang="${first.track.language_code}" dir="${dir}" data-theme="light"><head><meta charset="utf-8"><title></title>
 <link rel="stylesheet" href="${location.origin}/css/app.css"><style>
@@ -268,24 +272,6 @@ ${DOC_STAMP_CSS(P.side)}
   const docStamp = track =>
     docStampNode(d, track, url => qrPngDataUrl(url, { scale: 6 }));
 
-  // مواضع نهايات الأسطر: لا نقطع سطرًا بين صفحتين
-  function lineBottoms(flow) {
-    const top = flow.getBoundingClientRect().top;
-    const out = [];
-    const walk = d.createTreeWalker(flow, NodeFilter.SHOW_TEXT);
-    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
-      if (!n.nodeValue || !n.nodeValue.trim()) continue;
-      const r = d.createRange(); r.selectNodeContents(n);
-      for (const rect of r.getClientRects()) if (rect.height) out.push(rect.bottom - top);
-    }
-    // العناصر بلا نص (صور، فواصل، خلايا فارغة) تُحسب بحوافها السفلى
-    for (const el of flow.querySelectorAll('img, hr, tr, td, th, li, p, div')) {
-      const rect = el.getBoundingClientRect();
-      if (rect.height) out.push(rect.bottom - top);
-    }
-    return [...new Set(out.map(v => Math.round(v)))].sort((a, b) => a - b);
-  }
-
   function paginate(item) {
     const { track } = item;
     const measure = d.getElementById('measure');
@@ -303,17 +289,10 @@ ${DOC_STAMP_CSS(P.side)}
     const boxPx = probe.getBoundingClientRect().height;
     probe.remove();
 
-    const bottoms = lineBottoms(flow);
+    // الحسابُ نفسُه الذي يرسم فواصلَ المحرر (ملاحظة ٤٢٣)
+    const bottoms = lineBottoms(flow, { doc: d });
     const total = Math.max(flow.getBoundingClientRect().height, bottoms.at(-1) || 0);
-    const starts = [0];
-    let guard = 0;
-    while (starts.at(-1) + boxPx < total - 1 && guard++ < 200) {
-      const start = starts.at(-1);
-      const limit = start + boxPx;
-      const fit = bottoms.filter(b => b > start + 1 && b <= limit + 0.5);
-      // آخر سطر يكتمل داخل الصفحة، وإن لم يكتمل أي سطر قطعنا عند حد الصفحة
-      starts.push(fit.length ? fit.at(-1) : limit);
-    }
+    const starts = pageStarts(bottoms, total, boxPx);
 
     const pages = d.getElementById('pages');
     const lhUrl = lh && lh.src ? lh.src : new URL(LETTERHEAD, location.origin).href;

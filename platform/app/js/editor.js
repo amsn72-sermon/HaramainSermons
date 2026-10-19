@@ -1,11 +1,30 @@
 // محرر الترجمة: ورقة A4 على كليشة الهيئة بمساحة كتابة ثابتة، مع أدوات تنسيق متقدمة وتنقية لما يُلصق.
 import { h } from './ui.js';
 import { sanitize } from './sanitize.js';
-import { letterheadPage, pagesEstimate } from './page.js';
+import { letterheadPage, bodyStarts } from './page.js';
 
 const PT_SIZES = [9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28];
 const LINE_HEIGHTS = [['1', 'مفرد'], ['1.15', '1.15'], ['1.5', '1.5'], ['1.8', '1.8'], ['2', 'مزدوج'], ['2.5', '2.5']];
 const BLOCKS = 'P,H2,H3,BLOCKQUOTE,LI,DIV,TD,TH';
+
+// ـــ الخطوط (ملاحظة ٤٢٤)
+//
+//   Traditional Arabic خطٌّ لا يُرفَق: ترخيصُه لا يسمح، فيُطلَب بالاسم
+//   فيظهر عند من ثبَّته (وهو مثبَّتٌ مع Office في الغالب) ويظهر في Word
+//   عند كلِّ من عنده. و«خطُّ النسخ» مرفقٌ بالمنصة في /assets، فهو
+//   المرجعُ المضمونُ الذي لا يتوقَّف على جهاز العضو. وأوّلُ أسرةٍ في
+//   السلسلة هي التي تُكتَب في ملفِّ Word، فجُعلت في كلٍّ أسرتَه.
+export const FONT_CHOICES = [
+  ['', 'الخط'],
+  ['Haramain Arabic', 'خط المنصة'],
+  ['"Haramain Naskh", "Traditional Arabic", "Noto Naskh Arabic", serif', 'نسخ (مرفقٌ بالمنصة)'],
+  ['"Traditional Arabic", "Haramain Naskh", "Noto Naskh Arabic", serif', 'Traditional Arabic'],
+  ['Arial', 'Arial'],
+  ['Tahoma', 'Tahoma'],
+  ['Times New Roman', 'Times New Roman'],
+  ['Georgia', 'Georgia'],
+  ['Verdana', 'Verdana']
+];
 
 export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب هنا…', readOnly = false, label = 'النص', onChange, top = null, plain = false, detachTools = false } = {}) {
   const area = h('div.area', {
@@ -13,7 +32,7 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
     'aria-label': label, 'data-placeholder': placeholder, spellcheck: 'true'
   });
   area.innerHTML = sanitize(html);
-  const { page, body } = plain ? { page: area, body: area } : letterheadPage(top, area);
+  const { page, body, num } = plain ? { page: area, body: area, num: null } : letterheadPage(top, area);
   const pages = h('span.small.muted.pages-est');
   const changed = () => { updatePages(); onChange && onChange(); };
 
@@ -21,21 +40,27 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
   // فتبدأ الخطبة الثانية في صفحة جديدة مثلًا (ملاحظة ١٣٣)
   const guides = plain ? null : h('div.lh-guides', { 'aria-hidden': 'true', contenteditable: 'false' });
   const margins = plain ? null : h('div.lh-margins', { 'aria-hidden': 'true' });
-  let lastPages = 0;
-  function drawGuides(n) {
-    if (!guides || n === lastPages) return;
-    lastPages = n;
-    guides.replaceChildren(...Array.from({ length: Math.max(0, n - 1) }, (_, i) => h('div.lh-brk',
-      { style: { top: `calc(100% * ${i + 1})` } },
+  // مواضعُ الفواصل بالبكسل كما يقطعها التصديرُ بالضبط، لا بارتفاع
+  //   الصندوق مضروبًا في رقم الصفحة (ملاحظة ٤٢٣)
+  let lastKey = '';
+  function drawGuides(starts) {
+    if (!guides) return;
+    const key = starts.join(',');
+    if (key === lastKey) return;
+    lastKey = key;
+    guides.replaceChildren(...starts.slice(1).map((px, i) => h('div.lh-brk',
+      { style: { top: `${Math.round(px)}px` } },
       h('span.lh-brk-t', `نهاية الصفحة ${i + 1}`),
       h('span.lh-brk-t.next', `بداية الصفحة ${i + 2}`))));
   }
   function updatePages() {
     if (plain) return;
     requestAnimationFrame(() => {
-      const n = pagesEstimate(body);
+      const { starts } = bodyStarts(body);
+      const n = Math.max(1, starts.length);
       pages.textContent = `≈ ${n} صفحة عند الطباعة`;
-      drawGuides(n);
+      if (num) num.dataset.n = String(n);
+      drawGuides(starts);
     });
   }
 
@@ -132,7 +157,9 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
   const sep = () => h('span.sep', { 'aria-hidden': 'true' });
 
   const tools = h('div.tools', { role: 'toolbar', 'aria-label': 'تنسيق النص' },
-    sel('الخط', [['', 'الخط'], ['Haramain Arabic', 'خط المنصة'], ['Arial', 'Arial'], ['Tahoma', 'Tahoma'], ['Times New Roman', 'Times New Roman'], ['Georgia', 'Georgia'], ['Verdana', 'Verdana']], v => v && cmd('fontName', v)),
+    // الخطوط: ومنها خطُّ النسخ المرفقُ بالمنصة، وTraditional Arabic
+    //   بالاسم لمن كان عنده مثبَّتًا — وسلسلةُ التراجع واحدة (ملاحظة ٤٢٤)
+    sel('الخط', FONT_CHOICES, v => v && cmd('fontName', v)),
     sel('حجم الخط', [['', 'الحجم'], ...PT_SIZES.map(p => [String(p), `${p} pt`])], v => v && fontSizePt(Number(v))),
     sel('نوع الفقرة', [['', 'الفقرة'], ['p', 'نص عادي'], ['h2', 'عنوان رئيسي'], ['h3', 'عنوان فرعي'], ['blockquote', 'اقتباس']], v => v && cmd('formatBlock', v)),
     sel('تباعد الأسطر', [['', 'التباعد'], ...LINE_HEIGHTS], v => v && lineHeight(v)),

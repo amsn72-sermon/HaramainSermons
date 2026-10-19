@@ -12,6 +12,23 @@ export const LETTERHEAD = '/assets/letterhead.jpg';
 // وهي المقاساتُ التي ثبتت في تصدير المادة والكتاب المجمَّع منذ ملاحظة ٧١،
 // فتُعمَّم على المُخرَجات كلِّها فلا يشذُّ واحدٌ عن الحدود.
 export const BOX = { numH: 8, safeH: 9 };
+
+// ـــ خطُّ النسخ: سلسلةٌ واحدةٌ في كلِّ مُخرَج (ملاحظة ٤٢٤)
+//
+//   «خطُّ النسخ» مرفقٌ بالمنصة فهو المضمون، وTraditional Arabic يُطلَب
+//   بالاسم فيظهر عند من ثبَّته. والنوافذُ التي تُبنى بـ document.write
+//   لا تحمل app.css، فيُحقَن تعريفُ الخطِّ فيها بعنوانٍ مطلق.
+export const NASKH_STACK =
+  '"Haramain Naskh", "Traditional Arabic", "Noto Naskh Arabic", "Amiri", Garamond, serif';
+export const FONT_FACE_CSS = () => {
+  const o = location.origin;
+  return `@font-face { font-family: 'Haramain Naskh'; `
+    + `src: url('${o}/assets/naskh-regular.ttf') format('truetype'); `
+    + `font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Haramain Naskh'; `
+    + `src: url('${o}/assets/naskh-bold.ttf') format('truetype'); `
+    + `font-weight: 700; font-display: swap; }`;
+};
 export const boxWidth  = () => PAGE.w - PAGE.side * 2;
 export const boxHeight = () => PAGE.h - PAGE.top - PAGE.bottom;
 export const winHeight = () => boxHeight() - BOX.numH - BOX.safeH;
@@ -226,23 +243,85 @@ export function dataCard(m, languageCode, khateeb, docNo = null) {
     h('tbody', h('tr', cols.map(([k, v]) => h('td', { class: isNo(k) ? 'doc-cell' : '' }, v)))));
 }
 
-// إطار الصفحة: body هو صندوق الكتابة الثابت
+// إطار الصفحة: body هو صندوق الكتابة الثابت، وتحته شريطُ رقم الصفحة
+//   كما يخرج في الطباعة — فما تراه في المحرر هو ما يُطبَع (ملاحظة ٤٢٣)
 export function letterheadPage(...children) {
   const body = h('div.lh-body', children);
-  const page = h('div.a4.lh-page', body);
-  return { page, body };
+  const num = h('div.lh-num', { 'aria-hidden': 'true' }, h('span', 'شريطُ رقم الصفحة'));
+  const page = h('div.a4.lh-page', body, num);
+  return { page, body, num };
 }
 
-// عدد الصفحات المتوقع عند الطباعة: ارتفاع المحتوى الفعلي إلى ارتفاع صندوق الكتابة
-export function pagesEstimate(body) {
-  const box = body.clientHeight || 1;
-  const top = body.getBoundingClientRect().top - body.scrollTop;
+// ـــ ترقيمُ الصفحات: حسابٌ واحدٌ للمحرر والتصدير (ملاحظة ٤٢٣)
+//
+//   كان المحرر يقسّم بارتفاع صندوق الكليشة كلِّه، والتصديرُ يقسّم بارتفاع
+//   نافذة الكتابة (وهي أقلُّ بشريط الرقم وفسحة الأمان)، ويقطع عند آخر
+//   سطرٍ يكتمل لا عند حدِّ الصفحة. فكان ما يُوازِنه المستخدمُ على الشاشة
+//   يختلف عن PDF. فصار الحسابُ هنا وحدَه، ويُستعمل في الموضعين.
+
+const SKIP = '.lh-guides, .lh-margins, .lh-num';
+
+// مواضعُ نهايات الأسطر داخل عنصر التدفُّق، بالبكسل من أعلى محتواه
+export function lineBottoms(flow, { doc = null, skip = SKIP } = {}) {
+  const d = doc || flow.ownerDocument || document;
+  const top = flow.getBoundingClientRect().top - (flow.scrollTop || 0);
+  const out = [];
+  const walk = d.createTreeWalker(flow, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    if (!n.nodeValue || !n.nodeValue.trim()) continue;
+    if (skip && n.parentElement && n.parentElement.closest(skip)) continue;
+    const r = d.createRange(); r.selectNodeContents(n);
+    for (const rect of r.getClientRects()) if (rect.height) out.push(rect.bottom - top);
+  }
+  // العناصر بلا نص (صور، فواصل، خلايا فارغة) تُحسب بحوافها السفلى
+  for (const el of flow.querySelectorAll('img, hr, tr, td, th, li, p, div')) {
+    if (skip && el.closest(skip)) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.height) out.push(rect.bottom - top);
+  }
+  return [...new Set(out.map(v => Math.round(v)))].sort((a, b) => a - b);
+}
+
+// أسفلُ المحتوى الفعليِّ: حشوُ منطقة الكتابة لا يُحتسَب صفحةً
+export function contentBottom(flow, { skip = SKIP } = {}) {
+  const d = flow.ownerDocument || document;
+  const top = flow.getBoundingClientRect().top - (flow.scrollTop || 0);
   let bottom = 0;
-  for (const el of body.children) {
-    if (el.classList.contains('lh-guides')) continue;   // طبقة العلامات لا تُحتسب (ملاحظة ١٣٣)
+  for (const el of flow.children) {
+    if (skip && el.matches(skip)) continue;
     let rect = el.getBoundingClientRect();
-    if (el.classList.contains('area')) { const r = document.createRange(); r.selectNodeContents(el); rect = r.getBoundingClientRect(); }
+    if (el.classList.contains('area')) {
+      const r = d.createRange(); r.selectNodeContents(el); rect = r.getBoundingClientRect();
+    }
     if (rect.height) bottom = Math.max(bottom, rect.bottom - top);
   }
-  return Math.max(1, Math.ceil((bottom - 1) / box));
+  return bottom;
+}
+
+// مواضعُ بدايات الصفحات: لا يُقطَع سطرٌ بين صفحتين
+export function pageStarts(bottoms, total, boxPx) {
+  const starts = [0];
+  if (!(boxPx > 0)) return starts;
+  let guard = 0;
+  while (starts[starts.length - 1] + boxPx < total - 1 && guard++ < 2000) {
+    const start = starts[starts.length - 1];
+    const limit = start + boxPx;
+    const fit = bottoms.filter(b => b > start + 1 && b <= limit + 0.5);
+    // آخر سطر يكتمل داخل الصفحة، وإن لم يكتمل أي سطر قطعنا عند حد الصفحة
+    starts.push(fit.length ? fit[fit.length - 1] : limit);
+  }
+  return starts;
+}
+
+// بداياتُ صفحات صندوقِ كتابةٍ قائمٍ في الصفحة — بالحساب نفسِه الذي يُصدِّر
+export function bodyStarts(body) {
+  const boxPx = body.clientHeight || 1;
+  const bottoms = lineBottoms(body);
+  const total = Math.max(contentBottom(body), bottoms[bottoms.length - 1] || 0);
+  return { starts: pageStarts(bottoms, total, boxPx), boxPx, total };
+}
+
+// عدد الصفحات المتوقع عند الطباعة
+export function pagesEstimate(body) {
+  return Math.max(1, bodyStarts(body).starts.length);
 }

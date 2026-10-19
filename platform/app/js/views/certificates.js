@@ -197,22 +197,79 @@ export async function render() {
     const issueNow = h('input', { type: 'checkbox', checked: can('cert_issue') || isManager(),
       'aria-label': 'إصدار مباشر' });
 
+    // ـــ الموقِّعُ يُكتَب عند المنح لا في القالب (ملاحظة ٤١٦)
+    //
+    //   كان الاسمُ والمنصبُ والتوقيعُ ثوابتَ في القالب، فتخرج الشهاداتُ
+    //   كلُّها بتوقيعٍ واحد. فصارت تُسأل لكلِّ دفعةٍ بحسب من يعتمدها.
+    const signer = h('input', { 'aria-label': 'اسم الموقِّع',
+      placeholder: 'عبدالرحمن بن محمد' });
+    const signerRole = h('input', { 'aria-label': 'منصب الموقِّع',
+      placeholder: 'مديرُ المشروع' });
+    const signKind = h('select', { 'aria-label': 'التوقيع' },
+      h('option', { value: 'blank' }, 'فراغٌ يُوقَّع عليه باليد بعد الطباعة'),
+      h('option', { value: 'image' }, 'صورةُ توقيعٍ تُدرَج'),
+      h('option', { value: 'none' }, 'بلا توقيعٍ — اكتفاءً بالباركود'));
+    const signFile = h('input', { type: 'file', accept: 'image/*', hidden: true,
+      'aria-label': 'ملفُّ التوقيع' });
+    const signUp = h('button.btn.xs', { type: 'button' }, '⤒ ارفعْ صورةَ التوقيع');
+    const signPrev = h('div.mark-prev');
+    let signSrc = '';
+    signUp.onclick = () => signFile.click();
+    signFile.onchange = async () => {
+      const file = signFile.files?.[0]; if (!file) return;
+      try {
+        signSrc = await prepareMark(file, 500);
+        signKind.value = 'image';
+        fill(signPrev, h('img', { src: signSrc, alt: 'التوقيع' }));
+      } catch (e) { toast(e.message, 'bad'); }
+      signFile.value = '';
+    };
+    // توقيعُ القالب الافتراضيُّ يُقترَح، ويُبدَّل من هنا
+    const tplOf = id => tpls.find(t => t.id === id) || null;
+    const suggest = () => {
+      const t = tplOf(sel.value);
+      const f = (t && t.fixed) || {};
+      if (!signer.value.trim()) signer.value = f.signer_name || '';
+      if (!signerRole.value.trim()) signerRole.value = f.signer_role || '';
+      if (!signSrc && t && t.tpl && t.tpl.signature_src) {
+        signSrc = t.tpl.signature_src;
+        fill(signPrev, h('img', { src: signSrc, alt: 'التوقيع' }));
+      }
+    };
+    sel.addEventListener('change', suggest);
+    suggest();
+
     let done = null;
     const res = await dialog({
       title: 'منحُ شهادة',
       body: h('div.stack',
         h('p.small.muted', 'اختَرِ الأسماءَ ثم القالب. وبياناتُ الشهادة تُؤخذ من القالب '
-          + 'وبياناتِ العضو، فلا يُملأ شيءٌ هنا.'),
+          + 'وبياناتِ العضو، ولا يُكتَب هنا إلا من يعتمدها.'),
         h('label.field', 'الأسماء', q),
         box, tally,
         h('label.field', 'القالب', sel),
+        h('fieldset.stack', h('legend', 'من يعتمد هذه الدفعة'),
+          h('p.small.muted', 'اسمُ المسؤول ومنصبُه وتوقيعُه لهذه الدفعة وحدَها، '
+            + 'ويُعدَّل لكلِّ شهادةٍ بعد المنح إن شئت.'),
+          h('div.grid-2',
+            h('label.field', 'اسمُ الموقِّع', signer),
+            h('label.field', 'المنصب', signerRole)),
+          h('label.field', 'التوقيع', signKind),
+          h('div.row.between.wrap',
+            h('span.small.muted', 'صورةُ التوقيع'), h('div.row', signUp, signFile)),
+          signPrev),
         h('label.check', issueNow, h('span', 'أصدِرْها فورًا برقمها وباركودِها'))),
       buttons: [{ label: 'امنحْ', kind: 'primary',
         validate: async () => {
           if (!chosen.size) return 'اختَرْ عضوًا واحدًا على الأقل';
+          if (signKind.value === 'image' && !signSrc) return 'ارفعْ صورةَ التوقيع أو بدِّلِ الخيار';
           try {
             done = await db.rpc('grant_certificates',
-              { p_template: sel.value, p_members: [...chosen], p_issue: issueNow.checked });
+              { p_template: sel.value, p_members: [...chosen], p_issue: issueNow.checked,
+                p_signer: signer.value.trim() || null,
+                p_signer_role: signerRole.value.trim() || null,
+                p_signature: signKind.value,
+                p_signature_src: signKind.value === 'image' ? signSrc : null });
           } catch (e) { return e.message; }
           return true;
         },

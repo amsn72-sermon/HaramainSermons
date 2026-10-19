@@ -7,7 +7,7 @@ import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDate } from '../u
 import { db, storage } from '../sb.js';
 import { isManager, can } from '../store.js';
 import { LH_DEFAULT, normLh, uploadLhImage } from '../letterhead.js';
-import { PAGE, LETTERHEAD } from '../page.js';
+import { PAGE, BOX, LETTERHEAD } from '../page.js';
 import { unifiedPanel } from '../unipanel.js';
 
 const mayDesign = () => isManager() || can('arch_design') || can('arch_edit');
@@ -83,7 +83,11 @@ export async function render() {
       'aria-label': 'صورة الكليشة' });
     const sheet = h('div.lh-sheet');
     const win = h('div.lh-win');
-    sheet.append(h('img.lh-bg', { alt: '' }), win);
+    // شريطُ رقم الصفحة وفسحةُ الأمان: يُرَيان في المحرر كما يخرجان في
+    //   PDF، فنافذةُ الكتابة هي نافذةُ التصدير بعينها (ملاحظة ٤٢٣)
+    const strip = h('div.lh-strip', h('span', 'رقمُ الصفحة'));
+    const safe = h('div.lh-safe');
+    sheet.append(h('img.lh-bg', { alt: '' }), win, strip, safe);
 
     const num = (key, label, max) => {
       const i = h('input', { type: 'number', min: '0', max: String(max), step: '1',
@@ -102,10 +106,20 @@ export async function render() {
         catch { img.src = LETTERHEAD; }
       } else img.src = LETTERHEAD;
       const p = tpl.page;
-      win.style.top = `${(p.top / PAGE.h) * 100}%`;
-      win.style.height = `${((PAGE.h - p.top - p.bottom) / PAGE.h) * 100}%`;
-      win.style.insetInlineStart = `${(p.side / PAGE.w) * 100}%`;
-      win.style.width = `${((PAGE.w - p.side * 2) / PAGE.w) * 100}%`;
+      const pc = v => `${(v / PAGE.h) * 100}%`;
+      const side = `${(p.side / PAGE.w) * 100}%`;
+      const wide = `${((PAGE.w - p.side * 2) / PAGE.w) * 100}%`;
+      // نافذةُ الكتابة = الصندوقُ ناقصًا شريطَ الرقم وفسحةَ الأمان
+      const winH = Math.max(0, PAGE.h - p.top - p.bottom - BOX.numH - BOX.safeH);
+      for (const el of [win, strip, safe]) {
+        el.style.insetInlineStart = side; el.style.width = wide;
+      }
+      win.style.top = pc(p.top);
+      win.style.height = pc(winH);
+      strip.style.top = pc(p.top + winH);
+      strip.style.height = pc(BOX.numH);
+      safe.style.top = pc(p.top + winH + BOX.numH);
+      safe.style.height = pc(BOX.safeH);
     };
 
     file.onchange = () => busy(file, async () => {
@@ -151,7 +165,9 @@ export async function render() {
               num('top', 'هامشُ الرأس مم', 150),
               num('bottom', 'هامشُ الذيل مم', 150),
               num('side', 'الهامشُ الجانبيُّ مم', 90)),
-            h('p.small.muted', 'المستطيلُ على الكليشة هو موضعُ الكتابة.')) }
+            h('p.small.muted', 'المستطيلُ الذهبيُّ هو نافذةُ الكتابة كما تخرج في PDF '
+              + 'بالضبط، وتحتَه شريطُ رقم الصفحة ثمَّ فسحةُ أمانٍ لا يُكتَب فيهما '
+              + `(${BOX.numH} مم و${BOX.safeH} مم).`)) }
       ]
     });
     uni.foot.append(saveBtn, backBtn);

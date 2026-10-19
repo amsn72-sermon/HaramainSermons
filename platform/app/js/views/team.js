@@ -533,6 +533,43 @@ export async function render(ctx, opts = {}) {
     };
     drawIqama();
 
+    // ـــ ميثاقُ العمل في ملفِّ العضو: نسختُه ووقتُه، ووثيقةُ إثباتٍ
+    //   تُطبَع على كليشة الهيئة (ملاحظة ٤٢٧)
+    const charterCard = await (async () => {
+      let recs = [];
+      try {
+        const m2 = await import('../sigproof.js');
+        recs = await m2.signatureRecords(m.id);
+      } catch { recs = []; }
+      if (!recs.length) {
+        return h('fieldset.stack', h('legend', 'ميثاقُ العمل'),
+          h('p.small.muted', 'لم يوقِّعْ على الميثاق بعد، فلا وثيقةَ إثباتٍ له. '
+            + 'ويُطالَب به عند دخوله ولا يتابع عمله قبله.'));
+      }
+      const cur = recs.find(r => r.policy_version === POLICY_VERSION);
+      return h('fieldset.stack', h('legend', 'ميثاقُ العمل'),
+        h('div.stack', { style: { gap: '6px' } }, ...recs.map(r => {
+          const b = h('button.btn.xs', { type: 'button',
+            title: `وثيقةُ إثبات التوقيع على النسخة ${r.policy_version}` }, '🖨 وثيقةُ إثبات');
+          b.onclick = () => busy(b, async () => {
+            const m2 = await import('../sigproof.js');
+            m2.printProof(r);
+          });
+          return h('div.row.between.wrap', { style: { gap: '8px' } },
+            h('div.stack', { style: { gap: '2px', minWidth: '200px' } },
+              h('b.small', `النسخة ${r.policy_version}`,
+                r.policy_version === POLICY_VERSION
+                  ? h('span.badge.ok', 'الجارية') : h('span.badge.warn', 'سابقة')),
+              h('span.small.muted', `باسم «${r.signed_name}» في ${fmtDateTime(r.accepted_at)}`),
+              r.proof_code
+                ? h('span.small.muted', { dir: 'ltr' }, r.proof_code)
+                : h('span.small.muted', 'بلا رمزِ وثيقةٍ — توقيعٌ سابقٌ لاستحداثه')),
+            b);
+        })),
+        cur ? null : h('p.small.warn', `لم يوقِّعْ على النسخة الجارية ${POLICY_VERSION} بعد — `
+          + 'ويُطالَب بها عند دخوله. والمحتجُّ عليه فيما مضى نصُّ نسخته هو.'));
+    })();
+
     const result = await dialog({
       title: `${m.full_name} — ${roleLabel(m)}`,
       body: h('div.stack',
@@ -564,7 +601,7 @@ export async function render(ctx, opts = {}) {
             + 'ويُسجّل تأهيلَ من درّبهم.')) : null,
         h('fieldset', h('legend', 'اللغات التي يُتقنها'), h('div.stack', { style: { gap: '10px' } }, langSelect, langChips)),
         langsCard,
-        mayCard, cityCard, answersCard, permCard, mfaCard),
+        mayCard, cityCard, answersCard, permCard, mfaCard, charterCard),
       buttons: [
         { label: 'حفظ', kind: 'primary', validate: () => {
           if (mayBox.checked && !chosen.size) {

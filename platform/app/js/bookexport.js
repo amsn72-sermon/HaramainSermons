@@ -1,7 +1,7 @@
 // تصدير مجمَّع على هيئة كتاب: غلافٌ وفهرسٌ وخطبٌ مرقَّمة على كليشة الهيئة (ملاحظة ١٥٢)
 //   يُبنى في نافذة مستقلة كما تُبنى ورقة الطباعة، ثم يُطبع أو يُحفظ PDF.
 import { PAGE, LETTERHEAD, cardColumns, heading, docVerifyUrl,
-  DOC_STAMP_CSS, docStampNode } from './page.js';
+  DOC_STAMP_CSS, docStampNode, BOX, lineBottoms, pageStarts } from './page.js';
 import { sanitize } from './sanitize.js';
 import { langDir, langName, MOSQUE_ANY } from './store.js';
 import { fmtHijri } from './ui.js';
@@ -33,8 +33,8 @@ export function printBook(items, meta, { autoPrint = true } = {}) {
   const P = PAGE;
   const BOX_H = P.h - P.top - P.bottom;
   const BOX_W = P.w - P.side * 2;
-  const NUM_H = 8;
-  const SAFE_H = 9;
+  const NUM_H = BOX.numH;
+  const SAFE_H = BOX.safeH;
   const WIN_H = BOX_H - NUM_H - SAFE_H;
 
   w.document.write(`<!doctype html><html lang="ar" dir="rtl" data-theme="light"><head><meta charset="utf-8"><title></title>
@@ -121,35 +121,11 @@ ${DOC_STAMP_CSS(P.side)}
     return docStampNode(d, track, url => qrPngDataUrl(url, { scale: 6 }));
   }
 
-  // مواضع نهايات الأسطر داخل تدفّق واحد
-  function lineBottoms(flow) {
-    const top = flow.getBoundingClientRect().top;
-    const out = [];
-    const walk = d.createTreeWalker(flow, NodeFilter.SHOW_TEXT);
-    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
-      if (!n.nodeValue || !n.nodeValue.trim()) continue;
-      const r = d.createRange(); r.selectNodeContents(n);
-      for (const rect of r.getClientRects()) if (rect.height) out.push(rect.bottom - top);
-    }
-    for (const x of flow.querySelectorAll('img, hr, tr, td, th, li, p, div')) {
-      const rect = x.getBoundingClientRect();
-      if (rect.height) out.push(rect.bottom - top);
-    }
-    return [...new Set(out.map(v => Math.round(v)))].sort((a, b) => a - b);
-  }
-
+  // القطعُ بحساب page.js وحدَه، فلا يشذُّ المجمَّعُ عن المحرر (ملاحظة ٤٢٣)
   function startsOf(flow, boxPx) {
-    const bottoms = lineBottoms(flow);
+    const bottoms = lineBottoms(flow, { doc: d });
     const total = Math.max(flow.getBoundingClientRect().height, bottoms.at(-1) || 0);
-    const starts = [0];
-    let guard = 0;
-    while (starts.at(-1) + boxPx < total - 1 && guard++ < 400) {
-      const start = starts.at(-1);
-      const limit = start + boxPx;
-      const fit = bottoms.filter(b => b > start + 1 && b <= limit + 0.5);
-      starts.push(fit.length ? fit.at(-1) : limit);
-    }
-    return { starts, total };
+    return { starts: pageStarts(bottoms, total, boxPx), total };
   }
 
   function build() {

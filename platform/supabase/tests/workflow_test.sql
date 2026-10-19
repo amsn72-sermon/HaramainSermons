@@ -8337,3 +8337,145 @@ begin
 
   raise notice 'PASS: التصديرُ المجمَّع يَعُدُّ خطبَه وصفحاتِه، والعربيةُ أولُ لغاته';
 end $$;
+
+-- =====================================================================
+-- ٩٤) إثباتُ التوقيع: بصمةُ النصِّ ورمزُ تحقُّقه، والوثيقةُ تُبنى منه
+--     (ملاحظات ٤٢٥ و٤٢٦ و٤٢٧)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_m uuid; v_code text; v_again text; v_hash text; v_n int;
+        v_text text := 'ميثاقُ العمل — نصٌّ يوقَّع عليه حرفًا بحرف';
+begin
+  select id into v_m from public.profiles
+   where status = 'active' and role = 'translator' and id <> v_mgr limit 1;
+  if v_m is null then raise notice 'PASS: لا مترجمَ في القاعدة'; return; end if;
+
+  -- يوقِّع العضوُ بنفسه، فتُحسَب بصمةُ النصِّ في الخادم
+  perform set_config('request.jwt.claim.sub', v_m::text, true);
+  v_code := public.accept_policy('1.2', 'نجم الثاقب', 'confidentiality', v_text);
+  if v_code is null or v_code !~ '^SG-[0-9A-F]{10}$' then
+    raise exception 'FAIL: لم يُولَّد رمزُ التحقُّق: %', coalesce(v_code, 'null');
+  end if;
+
+  select doc_hash into v_hash from public.policy_acceptances
+   where member_id = v_m and policy_version = '1.2';
+  if v_hash <> encode(sha256(convert_to(v_text, 'UTF8')), 'hex') then
+    raise exception 'FAIL: البصمةُ لا تُطابق النصَّ الموقَّع';
+  end if;
+
+  -- والتوقيعُ مرّةً ثانيةً لا يُنشئ سجلًّا جديدًا ولا رمزًا جديدًا
+  v_again := public.accept_policy('1.2', 'نجم الثاقب', 'confidentiality', v_text);
+  if v_again <> v_code then raise exception 'FAIL: تبدَّل الرمزُ بإعادة التوقيع'; end if;
+  select count(*)::int into v_n from public.policy_acceptances
+   where member_id = v_m and policy_version = '1.2';
+  if v_n <> 1 then raise exception 'FAIL: تكرَّر سجلُّ التوقيع: %', v_n; end if;
+
+  -- ووثيقةُ الإثبات تُقرأ لصاحبها
+  select count(*)::int into v_n from public.policy_proof(v_m, '1.2');
+  if v_n <> 1 then raise exception 'FAIL: لم تُقرأْ وثيقةُ الإثبات لصاحبها'; end if;
+
+  -- ولا تُقرأ لعضوٍ آخرَ ليس مديرًا
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select count(*)::int into v_n from public.policy_proof(v_m, '1.2');
+  if v_n <> 1 then raise exception 'FAIL: لم يقرأْها مديرُ المشروع'; end if;
+  select count(*)::int into v_n from public.policy_proof_by_code(v_code);
+  if v_n <> 1 then raise exception 'FAIL: لم يُتحقَّقْ بالرمز'; end if;
+
+  raise notice 'PASS: التوقيعُ يحمل بصمةَ نصِّه ورمزَ تحقُّقه، ووثيقتُه تُقرأ لصاحبها وللمدير';
+end $$;
+
+-- =====================================================================
+-- ٩٥) حذفُ العام الأرشيفيّ: الفارغُ يُحذَف وما فيه خطبةٌ يُرفَض
+--     (ملاحظة ٤٢١)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_n int; v_busy int;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+
+  perform public.add_arch_year(1330, null);
+  select count(*)::int into v_n from public.arch_sections where h_year = 1330;
+  if v_n < 1 then raise exception 'FAIL: لم يُنشأْ قسمُ العام'; end if;
+
+  perform public.delete_arch_year(1330);
+  select count(*)::int into v_n from public.arch_years where h_year = 1330;
+  if v_n <> 0 then raise exception 'FAIL: لم يُحذَفِ العامُ الفارغ'; end if;
+  select count(*)::int into v_n from public.arch_sections where h_year = 1330;
+  if v_n <> 0 then raise exception 'FAIL: بقيت أقسامُ العام المحذوف'; end if;
+
+  -- وما فيه خطبةٌ يُرفَض
+  select h_year into v_busy from public.arch_sermons group by h_year limit 1;
+  if v_busy is not null then
+    begin
+      perform public.delete_arch_year(v_busy);
+      raise exception 'FAIL: حُذف عامٌ فيه خطب';
+    exception when others then
+      if position('FAIL' in SQLERRM) > 0 then raise; end if;
+    end;
+  end if;
+
+  -- والحذفُ لمدير المشروع وحدَه
+  begin
+    perform set_config('request.jwt.claim.sub',
+      (select id::text from public.profiles where role = 'translator'
+        and status = 'active' limit 1), true);
+    perform public.add_arch_year(1331, null);
+    raise exception 'FAIL: أضاف المترجمُ عامًا';
+  exception when others then
+    if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+
+  raise notice 'PASS: العامُ الفارغُ يُحذَف بأقسامه، وما فيه خطبةٌ يُرفَض';
+end $$;
+
+-- =====================================================================
+-- ٩٦) توقيعُ الشهادة يُكتَب عند المنح لا في القالب (ملاحظة ٤١٦)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_m uuid; v_t uuid; v_res jsonb; v_id uuid;
+        v_nm text; v_rl text; v_sg text; v_src text;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select id into v_m from public.profiles where status = 'active' limit 1;
+  if v_m is null then raise notice 'PASS: لا أعضاءَ في القاعدة'; return; end if;
+
+  v_t := public.save_cert_template(jsonb_build_object(
+    'name', 'قالبُ اختبار التوقيع', 'kind', 'course',
+    'tpl', jsonb_build_object('theme', 'classic'),
+    'fixed', jsonb_build_object('title', 'دورةٌ تجريبية',
+                                'signer_name', 'ثابتٌ قديم',
+                                'signer_role', 'منصبٌ قديم')));
+
+  -- التوقيعُ المكتوبُ عند المنح يعلو ما في القالب
+  v_res := public.grant_certificates(v_t, array[v_m], false,
+            'عبدالرحمن بن محمد', 'مديرُ المشروع', 'image', 'data:image/png;base64,AAA');
+  v_id := ((v_res -> 'ids') ->> 0)::uuid;
+  select signer_name, signer_role, signature, design ->> 'signature_src'
+    into v_nm, v_rl, v_sg, v_src
+    from public.certificates where id = v_id;
+  if v_nm <> 'عبدالرحمن بن محمد' then raise exception 'FAIL: لم يُكتبِ الموقِّع: %', v_nm; end if;
+  if v_rl <> 'مديرُ المشروع' then raise exception 'FAIL: لم يُكتبِ المنصب: %', v_rl; end if;
+  if v_sg <> 'image' then raise exception 'FAIL: لم يُحفظْ نوعُ التوقيع: %', v_sg; end if;
+  if v_src is null then raise exception 'FAIL: لم تُحفظْ صورةُ التوقيع'; end if;
+
+  -- وما سُكت عنه يرجع إلى القالب
+  v_res := public.grant_certificates(v_t, array[v_m], false);
+  v_id := ((v_res -> 'ids') ->> 0)::uuid;
+  select signer_name, signature into v_nm, v_sg
+    from public.certificates where id = v_id;
+  if v_nm <> 'ثابتٌ قديم' then raise exception 'FAIL: لم يُورَثْ موقِّعُ القالب: %', v_nm; end if;
+  if v_sg <> 'blank' then raise exception 'FAIL: لم يكنِ الأصلُ فراغًا: %', v_sg; end if;
+
+  -- وصورةُ التوقيع لازمةٌ متى اختير «صورة»
+  begin
+    perform public.grant_certificates(v_t, array[v_m], false, 'فلان', 'منصب', 'image', null);
+    raise exception 'FAIL: قُبل توقيعٌ بصورةٍ بلا صورة';
+  exception when others then
+    if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+
+  raise notice 'PASS: توقيعُ الشهادة يُكتَب عند المنح، وما سُكت عنه يرجع إلى القالب';
+end $$;

@@ -4,6 +4,11 @@
 @font-face { font-family: 'Haramain Arabic'; src: url('/assets/arabic-regular.ttf') format('truetype'); font-weight: 400; font-display: swap; }
 @font-face { font-family: 'Haramain Arabic'; src: url('/assets/arabic-medium.ttf') format('truetype'); font-weight: 500 600; font-display: swap; }
 @font-face { font-family: 'Haramain Arabic'; src: url('/assets/arabic-bold.ttf') format('truetype'); font-weight: 700; font-display: swap; }
+/* خطُّ النسخ المرفقُ بالمنصة: مرجعٌ مضمونٌ لا يتوقَّف على جهاز العضو
+   (ملاحظة ٤٢٤). ومعه Traditional Arabic بالاسم لمن كان عنده مثبَّتًا،
+   فإن لم يكن نزل إلى المرفق، فإن لم يكن نزل إلى خطّ المنصة. */
+@font-face { font-family: 'Haramain Naskh'; src: url('/assets/naskh-regular.ttf') format('truetype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Haramain Naskh'; src: url('/assets/naskh-bold.ttf') format('truetype'); font-weight: 700; font-display: swap; }
 
 :root {
   /* هوية النسخة الأولى: الداكن هو الأصل، والفاتح اختياري */
@@ -217,8 +222,17 @@ td .sub { display: block; color: var(--muted); font-size: .82rem; }
    --pt نقطة طباعة واحدة بمقياس عرض الصفحة، فتطابق الأحجامُ الطباعةَ. */
 .a4 { position: relative; width: 100%; aspect-ratio: 210 / 297; container-type: inline-size; background: #fff; color: #111; box-shadow: 0 2px 14px rgb(0 0 0 / 35%); border-radius: 2px; overflow: hidden; }
 .lh-page::before { content: ''; position: absolute; inset: 0; background: url('/assets/letterhead.jpg') center / 100% 100% no-repeat; pointer-events: none; }
-.lh-body { --pt: calc(100cqw / 595.28); position: absolute; top: calc(38 / 297 * 100%); bottom: calc(32 / 297 * 100%); inset-inline: calc(20 / 210 * 100%);
+/* نافذةُ الكتابة هي نافذةُ التصدير بعينها: أعلى 38، وأسفلُها 32 للكليشة
+   + 8 لشريط رقم الصفحة + 9 فسحةَ أمان = 49 (انظر BOX في page.js).
+   فما يُوازنه المستخدمُ على الشاشة هو ما يخرج في PDF (ملاحظة ٤٢٣). */
+.lh-body { --pt: calc(100cqw / 595.28); position: absolute; top: calc(38 / 297 * 100%); bottom: calc(49 / 297 * 100%); inset-inline: calc(20 / 210 * 100%);
   overflow-y: auto; overscroll-behavior: contain; font-size: calc(var(--pt) * 12); line-height: 1.8; scrollbar-width: thin; }
+/* شريطُ رقم الصفحة: يُرى موضعُه ولا يُكتَب فيه، ولا يُطبَع من المحرر */
+.lh-num { --pt: calc(100cqw / 595.28); position: absolute; top: calc(248 / 297 * 100%);
+  height: calc(8 / 297 * 100%); inset-inline: calc(20 / 210 * 100%); pointer-events: none;
+  display: flex; align-items: center; justify-content: center; z-index: 2;
+  border-top: 1px dashed rgb(188 150 97 / 45%); }
+.lh-num span { font-size: calc(var(--pt) * 7); color: rgb(107 98 87 / 75%); letter-spacing: .3px; }
 .lh-body .area { min-height: 100%; outline: none; padding-bottom: 1em; }
 .lh-body p, .print-body p { margin: 0 0 .6em; }
 .lh-body h2, .print-body h2 { font-size: 1.35em; margin: .4em 0; } .lh-body h3, .print-body h3 { font-size: 1.15em; margin: .4em 0; }
@@ -227,11 +241,10 @@ td .sub { display: block; color: var(--muted); font-size: .82rem; }
 .editor.readonly .lh-body { cursor: default; }
 
 /* بطاقة البيانات أعلى مساحة الترجمة: صفّان بعرض الصفحة، عرض كل عمود بحسب بيانه */
-table.data-card { border-collapse: collapse; table-layout: auto; width: 100%; margin: 0 0 1.1em; font-size: .88em; line-height: 1.45; direction: rtl; text-align: center; user-select: none; }
+table.data-card { border-collapse: collapse; table-layout: auto; width: 100%; margin: 0 0 1.1em; font-size: calc(var(--pt, 1pt) * 11); line-height: 1.45; direction: rtl; text-align: center; user-select: none; }
 table.data-card th, table.data-card td { border: 1px solid #bc9661; padding: .35em .5em; vertical-align: middle; text-align: center; }
 table.data-card th { background: rgb(188 150 97 / 16%); color: #8a6835; font-weight: 700; white-space: nowrap; letter-spacing: .2px; }
 table.data-card td { color: #111; }
-.print-body table.data-card { font-size: 10pt; }
 
 /* عارض الأصل */
 .pdf-viewer { outline: none; user-select: none; -webkit-user-select: none; }
@@ -1034,9 +1047,10 @@ a.prod-kpi:hover { border-color: var(--gold); }
   font-size: calc(var(--pt) * 7); color: #c13d3d; background: rgb(255 255 255 / 85%);
   padding: 0 4px; border-radius: 3px; white-space: nowrap; }
 .lh-brk-t.next { inset-inline-start: auto; inset-inline-end: 0; transform: none; color: #2f6f4f; }
-.editor.no-guides .lh-guides, .editor.no-guides .lh-margins { display: none; }
+.editor.no-guides .lh-guides, .editor.no-guides .lh-margins,
+.editor.no-guides .lh-num { display: none; }
 .tools button.on { border-color: var(--gold); color: var(--gold); }
-@media print { .lh-guides, .lh-margins { display: none !important; } }
+@media print { .lh-guides, .lh-margins, .lh-num { display: none !important; } }
 
 /* الأرشيف: بطاقات الأنواع، ومسار التصفّح، ورقم التوثيق في السطر (ملاحظتا ١٣٧ و١٣٨) */
 .arch-filters { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); align-items: end; }
@@ -1726,6 +1740,13 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
   padding: 18px 12px; border: 1px solid var(--border); border-radius: 14px;
   background: var(--card); text-decoration: none; color: inherit; transition: .15s; }
 .year-tile:hover { border-color: var(--gold); transform: translateY(-2px); }
+/* حذفُ العام الفارغ: زرٌّ خفيٌّ يظهر عند لمس البطاقة (ملاحظة ٤٢١) */
+.year-tile { position: relative; }
+.year-del { position: absolute; top: 6px; inset-inline-start: 6px; border: 0; background: transparent;
+  color: var(--muted); font-size: .92rem; line-height: 1; padding: 4px 6px; border-radius: 8px;
+  cursor: pointer; opacity: 0; transition: .15s; }
+.year-tile:hover .year-del, .year-del:focus-visible { opacity: 1; }
+.year-del:hover { background: color-mix(in srgb, #b3261e 18%, transparent); color: #ff9b92; }
 .year-no { font-size: 1.9rem; line-height: 1; color: var(--gold); }
 .year-h { font-size: .7rem; color: var(--muted); }
 .year-meta { display: flex; flex-direction: column; align-items: center; gap: 1px;
@@ -2112,6 +2133,18 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
   margin-bottom: 2px; }
 .cb-row input[type="text"], .cb-row input:not([type]) { width: 100%; }
 
+/* ـــ كلُّ بيانٍ قسمان: عبارتُه وقيمتُه (ملاحظة ٤١٨)، وعلامةٌ واحدةٌ
+   أعلى القائمة تُظهر الكلَّ أو تحجبه (ملاحظة ٤١٩) */
+.cb-all { gap: 8px; padding: 6px 8px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--soft); }
+.cert-row2 { display: flex; flex-wrap: wrap; align-items: flex-start; }
+.cert-row2 .cb-two { min-width: 0; }
+.cb-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.cb-pair.one { grid-template-columns: 1fr; }
+.cb-pair .field.sm { margin: 0; min-width: 0; }
+.cb-pair .field.sm input { max-width: none; width: 100%; }
+@media (max-width: 680px) { .cb-pair { grid-template-columns: 1fr; } }
+
 /* ـــ خططُ التدريب مربَّعاتٌ تُفتَح صفحةً لها (ملاحظة ٣٦٠) */
 .plan-grid { display: grid; gap: 10px;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
@@ -2171,6 +2204,13 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .lh-sheet .lh-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
 .lh-win { position: absolute; border: 2px dashed var(--gold);
   background: color-mix(in srgb, var(--gold) 10%, transparent); }
+/* شريطُ رقم الصفحة وفسحةُ الأمان: ما لا يُكتَب فيه (ملاحظة ٤٢٣) */
+.lh-strip { position: absolute; border: 1px dashed rgb(188 150 97 / 55%); border-top: 0;
+  display: flex; align-items: center; justify-content: center; }
+.lh-strip span { font-size: .56rem; color: #6b6257; }
+.lh-safe { position: absolute; border: 1px dotted rgb(188 150 97 / 35%); border-top: 0;
+  background: repeating-linear-gradient(45deg, transparent 0 4px,
+    rgb(188 150 97 / 10%) 4px 8px); }
 
 /* ـــ التصديرُ المجمَّع: لغاتٌ في شبكةٍ وعدّادٌ تحتها (ملاحظة ٤١٣) */
 .bulk-langs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

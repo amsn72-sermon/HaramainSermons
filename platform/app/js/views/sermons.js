@@ -78,12 +78,32 @@ export async function render(ctx) {
   try { tiles = await db.rpc('arch_year_tiles') || []; } catch (e) { tiles = []; }
 
   // ثلاثُ بطاقاتٍ في الصفّ، تصاعديًّا من اليمين، بأرقام العام (ملاحظتا ٣٢٨ و٣٢٩)
+  // حذفُ عامٍ خلا من الخطب: زرٌّ صغيرٌ على بطاقته لا يظهر إلا للمدير،
+  //   ولا يظهر إلا إذا خلتْ (ملاحظة ٤٢١)
+  const delYear = async (t, ev) => {
+    ev.preventDefault(); ev.stopPropagation();
+    if (!await confirm('حذفُ عامٍ أرشيفيّ',
+      `يُحذَف العامُ ${ARY(t.h_year)} هـ وأقسامُه، وهو خالٍ من الخطب. `
+      + 'ولا يُحذَف عامٌ فيه عمل.', 'احذفْه', 'danger')) return;
+    try {
+      await db.rpc('delete_arch_year', { p_year: t.h_year });
+      tiles = await db.rpc('arch_year_tiles') || [];
+      draw();
+      toast('حُذف العام.', 'ok');
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+
   const grid = h('div.year-grid');
   const draw = () => {
     const rows = [...tiles].sort((a, b) => a.h_year - b.h_year);
     fill(grid, ...(rows.length ? rows.map(t => {
       const pct = Number(t.pct || 0);
+      const empty = !Number(t.sermons) && !Number(t.versions);
       return h('a.year-tile', { href: `/app/sermons/${t.h_year}` },
+        isManager() && empty
+          ? h('button.year-del', { type: 'button', title: 'حذفُ هذا العام — وهو خالٍ من الخطب',
+              'aria-label': `حذف العام ${t.h_year}`, onclick: ev => delYear(t, ev) }, '🗑')
+          : null,
         h('b.year-no', ARY(t.h_year)),
         h('span.year-h', 'هـ'),
         h('div.year-bar', { title: `اكتملَ ${AR(pct)}٪ من جُمَع العام` },

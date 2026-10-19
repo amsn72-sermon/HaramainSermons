@@ -3,12 +3,18 @@ import { h, toast, busy, fmtDate, fmtDateTime } from '../ui.js';
 import { db, auth } from '../sb.js';
 import { state } from '../store.js';
 import { brand, themeToggle, footer } from './shell.js';
-import { POLICY_KEY, POLICY_VERSION, POLICY_TITLE, POLICY_INTRO, POLICY_SECTIONS, POLICY_ACK } from '../policy.js';
+import { POLICY_KEY, POLICY_VERSION, POLICY_TITLE, POLICY_INTRO, POLICY_SECTIONS, POLICY_ACK,
+         policyOf, policyPlainText } from '../policy.js';
 
-export function policyText() {
+// نصُّ نسخةٍ بعينها: الجاريةُ بأصلها، ومن وقَّع على نسخةٍ عُرِضت عليه
+//   نسختُه هي لا ما استُحدث بعدها (ملاحظة ٤٢٥)
+export function policyText(version = POLICY_VERSION) {
+  const p = version === POLICY_VERSION
+    ? { intro: POLICY_INTRO, sections: POLICY_SECTIONS }
+    : policyOf(version);
   return h('div.policy-text',
-    h('p.muted', POLICY_INTRO),
-    POLICY_SECTIONS.map(([title, items]) =>
+    h('p.muted', p.intro),
+    p.sections.map(([title, items]) =>
       h('section', h('h3', title), h('ul', items.map(t => h('li', t))))));
 }
 
@@ -22,7 +28,7 @@ export async function policyDialog() {
   if (signed) {
     try {
       const rows = await db.select('policy_acceptances', {
-        select: 'signed_name,policy_version,accepted_at',
+        select: 'signed_name,policy_version,accepted_at,proof_code',
         member_id: `eq.${state.profile.id}`, policy_key: `eq.${POLICY_KEY}`, order: 'accepted_at.desc', limit: 1
       });
       stamp = rows[0] || null;
@@ -36,7 +42,19 @@ export async function policyDialog() {
           ? `تم التوقيع${stamp ? ` باسم «${stamp.signed_name}» في ${fmtDateTime(stamp.accepted_at)} — النسخة ${stamp.policy_version}` : ''}`
           : 'لم توقّع على هذه السياسة بعد'),
       h('p.small.muted', `النسخة ${POLICY_VERSION}`),
-      policyText(),
+      // وثيقةُ إثبات توقيعه بين يديه (ملاحظة ٤٢٧)
+      signed && stamp
+        ? h('div.row.wrap',
+            h('button.btn.sm', { type: 'button',
+              onclick: async ev => busy(ev.currentTarget, async () => {
+                const m = await import('../sigproof.js');
+                await m.proofFor(state.profile.id, stamp.policy_version);
+              }) }, '🖨 وثيقةُ إثبات توقيعي'),
+            stamp.proof_code
+              ? h('span.small.muted', { dir: 'ltr', style: { alignSelf: 'center' } }, stamp.proof_code)
+              : null)
+        : null,
+      policyText(signed && stamp ? stamp.policy_version : POLICY_VERSION),
       signed ? null : h('div.stack',
         h('label.check.top', agree, h('span', POLICY_ACK)),
         h('label.field', 'التوقيع: اكتب اسمك الكامل', name))),
@@ -51,7 +69,9 @@ export async function policyDialog() {
   });
   if (!res) return false;
   try {
-    await db.rpc('accept_policy', { p_version: POLICY_VERSION, p_name: res, p_key: POLICY_KEY });
+    // النصُّ يُرسَل كما عُرِض، فتُحسَب بصمتُه في الخادم (ملاحظة ٤٢٥)
+    await db.rpc('accept_policy', { p_version: POLICY_VERSION, p_name: res,
+      p_key: POLICY_KEY, p_text: policyPlainText(POLICY_VERSION) });
     state.policySigned = true;
     toast('شكرًا لك، سُجّل توقيعك.', 'ok');
     return true;
@@ -69,7 +89,8 @@ export async function render(ctx) {
     const typed = name.value.trim();
     if (typed.length < 3) return toast('اكتب اسمك الكامل توقيعًا.', 'bad');
     try {
-      await db.rpc('accept_policy', { p_version: POLICY_VERSION, p_name: typed, p_key: POLICY_KEY });
+      await db.rpc('accept_policy', { p_version: POLICY_VERSION, p_name: typed,
+        p_key: POLICY_KEY, p_text: policyPlainText(POLICY_VERSION) });
       state.policySigned = true;
       toast('شكرًا لك، سُجّل توقيعك.', 'ok');
       ctx.navigate('/app', { replace: true });
@@ -87,6 +108,8 @@ export async function render(ctx) {
         h('label.field', 'التوقيع: اكتب اسمك الكامل', name),
         h('div.row', sign,
           h('button.btn', { type: 'button', onclick: async () => { await auth.signOut(); ctx.navigate('/login', { replace: true }); } }, 'خروج')),
-        h('p.small.muted', 'يُحفظ توقيعك باسمك ونسخة السياسة وتاريخ الموافقة، ويمكن لإدارة المشروع الاطلاع عليه.'))),
+        h('p.small.muted', 'يُحفظ توقيعك باسمك ونسخة الميثاق ووقت الموافقة، ومعه عنوان شبكتك '
+          + 'ووصف جهازك وبصمة النصّ الذي عُرض عليك — إثباتًا للتوقيع. ويمكن لإدارة المشروع '
+          + 'الاطلاع عليه وطبع وثيقة إثبات به.'))),
     footer());
 }
