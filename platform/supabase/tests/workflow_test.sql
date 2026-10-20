@@ -8762,3 +8762,33 @@ begin
   end if;
   raise notice 'PASS: من رُدَّت هويتُه يرفع الصحيحةَ ولو قُبلت بياناتُه، فتعود إلى التدقيق';
 end $$;
+
+
+-- ـــ رفعُ الإدارة وثيقةَ عضوٍ عنه: إذنُ الإنشاء في المستودع كان ناقصًا
+--   فكان الرفعُ يُردُّ بـ«خارجَ نطاق عملك» (ملاحظة ٤٤٨)
+do $$
+declare v_n int;
+begin
+  select count(*) into v_n from pg_policies
+   where schemaname = 'storage' and tablename = 'objects'
+     and policyname = 'admin uploads member docs' and cmd = 'INSERT';
+  if v_n <> 1 then
+    raise exception 'FAIL: لا إذنَ للإدارة برفع وثيقة عضوٍ عنه';
+  end if;
+  select count(*) into v_n from pg_policies
+   where schemaname = 'storage' and tablename = 'objects'
+     and policyname = 'admin uploads member docs'
+     and with_check like '%private-docs%' and with_check like '%is_admin%';
+  if v_n <> 1 then
+    raise exception 'FAIL: إذنُ الرفع ليس مشروطًا بالمستودع والإدارة';
+  end if;
+  -- والقراءةُ لم تُفتَح لغير صاحبها والإدارة
+  select count(*) into v_n from pg_policies
+   where schemaname = 'storage' and tablename = 'objects'
+     and cmd = 'SELECT' and qual like '%private-docs%'
+     and qual not like '%auth.uid()%' and qual not like '%is_admin%';
+  if v_n <> 0 then
+    raise exception 'FAIL: فُتحت قراءةُ الوثائق الخاصة لغير أهلها';
+  end if;
+  raise notice 'PASS: الإدارةُ ترفع وثيقةَ العضو عنه، والقراءةُ على حالها';
+end $$;
