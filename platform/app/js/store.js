@@ -8,6 +8,8 @@ export const state = {
   stages: [],
   khateebs: [],
   loadedRef: false,
+  cardStyle: null,        // خطُّ بطاقة البيانات من الكليشة الأصل (ملاحظة ٤٣٦)
+  supervisedLangs: [],    // لغاتٌ العضو مشرفُها (ملاحظة ٤٤٠)
   policySigned: false,   // وقّع العضو نسخة سياسة السرية الحالية
   policyLoaded: false,
   blockingCirculars: 0,  // تعاميم ملزمة لم يوقّع عليها (ملاحظة ٨٩)
@@ -230,6 +232,19 @@ export async function loadReference(force = false) {
   ]);
   Object.assign(state, { languages, stages, khateebs, loadedRef: true,
     filePattern: settings[0]?.file_name_pattern || null });
+  // خطُّ بطاقة البيانات وحجمُها من الكليشة الأصل، ليستوي المحررُ
+  //   والتصدير (ملاحظة ٤٣٦)
+  if (auth.session) {
+    try {
+      const rows = await db.select('letterheads',
+        { select: 'tpl', is_default: 'eq.true', limit: '1' });
+      const c = rows && rows[0] && rows[0].tpl && rows[0].tpl.card;
+      state.cardStyle = c ? { font: c.font || '', size: Number(c.size) || 11 } : null;
+    } catch { state.cardStyle = null; }
+    // لغاتٌ هو مشرفُها: تفتح له لوحةَ المتابعة وتوزيعَ لغته (ملاحظة ٤٤٠)
+    try { state.supervisedLangs = await db.rpc('my_supervised_langs') || []; }
+    catch { state.supervisedLangs = []; }
+  }
 }
 
 // العربيةُ لغةٌ مسجَّلةٌ لتُنتقى لغةً أمًّا، وهي لغةُ المصدر: لا تكون

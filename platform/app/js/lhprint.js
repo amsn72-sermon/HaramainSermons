@@ -38,7 +38,14 @@ export const DOC_CSS = `
   .doc .seal .code .no { font-size: 13pt; font-weight: 700; direction: ltr; letter-spacing: 1px; }
   .doc .seal .qr { text-align: center; font-size: 8pt; color: #6b6257; }
   .doc .seal .qr img { width: 24mm; height: 24mm; display: block; margin: 0 auto 1mm; }
-  .doc .keep { break-inside: avoid; }`;
+  .doc .keep { break-inside: avoid; }
+  /* عمودُ الباركود في الكشف: رمزٌ صغيرٌ تحته رقمُه (ملاحظة ٤٣٢) */
+  .doc td.qr-cell { text-align: center; padding: 1mm; }
+  .doc td.qr-cell img { width: 13mm; height: 13mm; display: block; margin: 0 auto .6mm; }
+  .doc td.qr-cell span { font-size: 6.5pt; color: #6b6257; direction: ltr;
+                         display: block; letter-spacing: .2px; }
+  .doc table.roster { font-size: 9pt; }
+  .doc table.roster td, .doc table.roster th { padding: 1mm 1.4mm; }`;
 
 // ما وُسِم بـ«keep» لا يُقطَع بين صفحتين: إن وقع القطعُ في وسطه نزل
 //   كلُّه إلى الصفحة التالية — ما لم يكن أطولَ من الصفحة أصلًا.
@@ -113,8 +120,9 @@ ${DOC_CSS}
     const boxPx = probe.getBoundingClientRect().height;
     probe.remove();
 
-    const total = await settledHeight(flow);
-    const starts = keepWhole(flow, flowStarts(flow, { doc: d, boxPx, total }), boxPx);
+    const paged = flowStarts(flow, { doc: d, boxPx, total: await settledHeight(flow) });
+    const total = paged.total;
+    const starts = keepWhole(flow, paged.starts, boxPx);
 
     const lhUrl = new URL(LETTERHEAD, location.origin).href;
     const pages = d.getElementById('pages');

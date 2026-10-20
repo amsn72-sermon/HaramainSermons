@@ -123,8 +123,7 @@ ${DOC_STAMP_CSS(P.side)}
 
   // القطعُ بحساب page.js وحدَه، فلا يشذُّ المجمَّعُ عن المحرر (ملاحظتا ٤٢٣ و٤٣٠)
   async function startsOf(flow, boxPx) {
-    const total = await settledHeight(flow);
-    return { starts: flowStarts(flow, { doc: d, boxPx, total }), total };
+    return flowStarts(flow, { doc: d, boxPx, total: await settledHeight(flow) });
   }
 
   async function build() {

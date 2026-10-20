@@ -328,6 +328,10 @@ export async function render(ctx) {
   const picked = new Map(); // code -> { stages: Map(key -> assigneeId), audio: stageKey }
   (draft.languages || []).forEach(l => picked.set(l.code, { stages: new Map(l.stages.map(s => [s.key, s.assignee])), audio: l.audio_stage || 'translation' }));
   const translatorStage = key => state.stages.find(s => s.key === key)?.assignee_role === 'translator';
+  // مشرفُ اللغة: تُسنَد إليه مراحلُ الترجمة ابتداءً فيوزّعها على أهل لغته،
+  //   ومرحلةُ مراجعته لا تكون إلا له. واللغةُ التي لا مشرفَ لها للمنسق
+  //   (ملاحظة ٤٤٠)
+  const supOf = code => state.languages.find(l => l.code === code)?.supervisor_id || null;
   const langSearch = h('input', { type: 'search', placeholder: 'ابحث عن لغة' });
   const langPills = h('div.lang-pills');
   const assignBox = h('div.stack');
@@ -343,13 +347,25 @@ export async function render(ctx) {
       }
       return members.filter(m => m.role === 'coordinator' || m.role === 'manager');
     }
+    // ومراجعةُ مشرف اللغة لا تُسنَد إلى غيره (ملاحظة ٤٤٠)
+    const sup = supOf(code);
+    if (stage.key === 'lang_supervision') {
+      return sup ? members.filter(m => m.id === sup) : [];
+    }
     // ولا يظهر إلا من اعتُمدت له هذه اللغةُ للإسناد (ملاحظتا ١٧٣ و٢٤٩)
     return members.filter(m => assignOf(m).has(code));
   }
   function suggest(code) {
     const entry = picked.get(code); const used = new Set();
+    const sup = supOf(code);
     for (const s of activeStages) {
       if (!entry.stages.has(s.key)) continue;
+      // مشرفُ اللغة أولُ من يستلم: مراحلُ الترجمة بأنواعها والتحريرُ له،
+      //   ثمَّ يوزّعها هو على أهل لغته (ملاحظة ٤٤٠)
+      if (sup && (s.key === 'lang_supervision' || s.assignee_role === 'translator')) {
+        entry.stages.set(s.key, sup);
+        continue;
+      }
       const c = candidates(s, code);
       // صاحبُ الدور الافتراضيِّ في هذه اللغة أولًا، ثم الأولوية، ثم أقلُّهم حملًا
       const want = sugOf.get(`${code}|${s.key}`);
@@ -366,7 +382,10 @@ export async function render(ctx) {
   // والمنصةُ تقترح ولا تعتمد: الكلمةُ الأخيرةُ للمنسّق.
   function addLang(code) {
     if (picked.has(code)) return;
-    picked.set(code, { stages: new Map(activeStages.map(s => [s.key, ''])), audio: 'translation' });
+    // ومرحلةُ المشرف لا تُضاف للغةٍ لا مشرفَ لها (ملاحظة ٤٤٠)
+    const keys = activeStages.filter(s =>
+      s.key !== 'lang_supervision' || supOf(code));
+    picked.set(code, { stages: new Map(keys.map(s => [s.key, ''])), audio: 'translation' });
     suggest(code);
   }
   function toggleLang(code) {
@@ -408,13 +427,20 @@ export async function render(ctx) {
       const tr = entry.stages.get('translation');
       if (tr && ['sharia_review', 'linguistic_review'].some(k => entry.stages.get(k) === tr)) warnings.push('المترجم نفسه يراجع ترجمته — يُفضَّل مراجع مستقل');
       if (!members.some(m => assignOf(m).has(code))) warnings.push('لا عضوَ معتمدًا للإسناد في هذه اللغة — اعتمد لغات الإسناد في شاشة الفريق');
+      // مراحلُ هذه اللغة: ومراجعةُ المشرف لا تُعرَض لغةً لا مشرفَ لها
+      //   (ملاحظة ٤٤٠)
+      const langStages = activeStages.filter(s =>
+        s.key !== 'lang_supervision' || supOf(code));
+      const sup = supOf(code);
       return h('fieldset',
-        h('legend', langName(code)),
+        h('legend', langName(code),
+          sup ? h('span.badge.gold', { style: { marginInlineStart: '6px' } },
+            'مشرفُ اللغة: ' + (members.find(m => m.id === sup)?.full_name || '—')) : null),
         h('div.row', { style: { marginBottom: '8px' } },
-          h('button.btn.sm', { type: 'button', onclick: () => { activeStages.forEach(s => entry.stages.has(s.key) || entry.stages.set(s.key, '')); suggest(code); drawAssign(); } }, 'المسار الكامل'),
+          h('button.btn.sm', { type: 'button', onclick: () => { langStages.forEach(s => entry.stages.has(s.key) || entry.stages.set(s.key, '')); suggest(code); drawAssign(); } }, 'المسار الكامل'),
           h('button.btn.sm', { type: 'button', onclick: () => { activeStages.forEach(s => { if (!s.is_required) entry.stages.delete(s.key); }); drawAssign(); } }, 'مترجم ثم المنسق'),
           h('button.btn.sm.ghost', { type: 'button', onclick: () => toggleLang(code) }, 'إزالة اللغة')),
-        h('div.grid', activeStages.map(s => {
+        h('div.grid', langStages.map(s => {
           const on = entry.stages.has(s.key);
           const opts = candidates(s, code);
           const box = h('input', { type: 'checkbox', checked: on, disabled: s.is_required, onchange: e => {

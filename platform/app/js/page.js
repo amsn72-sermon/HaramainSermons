@@ -238,9 +238,16 @@ export function cardRowsTr(m, languageCode, khateeb, titleTr, docNo) {
 export function dataCard(m, languageCode, khateeb, docNo = null) {
   const cols = cardColumns(m, languageCode, khateeb, docNo);
   const isNo = k => k === 'رقم التوثيق';
-  return h('table.data-card', { dir: 'rtl', lang: 'ar', contenteditable: 'false' },
+  // خطُّ البطاقة وحجمُها من الكليشة الأصل (ملاحظة ٤٣٦)
+  const cs = (typeof state !== 'undefined' && state.cardStyle) || null;
+  const table = h('table.data-card', { dir: 'rtl', lang: 'ar', contenteditable: 'false' },
     h('thead', h('tr', cols.map(([k]) => h('th', k)))),
     h('tbody', h('tr', cols.map(([k, v]) => h('td', { class: isNo(k) ? 'doc-cell' : '' }, v)))));
+  if (cs) {
+    if (cs.font) table.style.fontFamily = cs.font;
+    if (cs.size) table.style.fontSize = `calc(var(--pt, 1pt) * ${cs.size})`;
+  }
+  return table;
 }
 
 // إطار الصفحة: body هو صندوق الكتابة الثابت، وتحته شريطُ رقم الصفحة
@@ -298,8 +305,15 @@ export function contentBottom(flow, { skip = SKIP } = {}) {
   return bottom;
 }
 
-// مواضعُ بدايات الصفحات: لا يُقطَع سطرٌ بين صفحتين
-export function pageStarts(bottoms, total, boxPx) {
+// مواضعُ بدايات الصفحات: لا يُقطَع سطرٌ بين صفحتين، ولا يُترَك عنوانٌ
+//   وحدَه في ذيل صفحة (ملاحظتا ٤٣٠ و٤٣٧)
+//
+//   وقاعدةُ العنوان تُطبَّق هنا — في أثناء التقسيم — لا بعده. فلو سُحب
+//   القطعُ إلى الوراء بعد تمام الحساب، لصارت الصفحةُ التي تليه مطالَبةً
+//   بأكثرَ مما تسع، فتُقَصُّ الزيادةُ ولا تظهر في التالية، فيسقط سطرٌ
+//   من المستند صمتًا (ملاحظة ٤٣٧). فالسحبُ هنا يستأنف الحسابَ من موضعه،
+//   فلا تتجاوز صفحةٌ سعتَها أبدًا.
+export function pageStarts(bottoms, total, boxPx, keeps = null) {
   const starts = [0];
   if (!(boxPx > 0)) return starts;
   let guard = 0;
@@ -310,7 +324,18 @@ export function pageStarts(bottoms, total, boxPx) {
     //   سطرًا بين صفحتين، وفسحةُ الأمان تحتمل هذا القدر (ملاحظة ٤٣٠)
     const fit = bottoms.filter(b => b > start + 1 && b <= limit + 2);
     // آخر سطر يكتمل داخل الصفحة، وإن لم يكتمل أي سطر قطعنا عند حد الصفحة
-    starts.push(fit.length ? fit[fit.length - 1] : limit);
+    let cut = fit.length ? fit[fit.length - 1] : limit;
+    // العنوانُ الذي انتهى عند القطع ينزل كلُّه إلى الصفحة التالية
+    if (keeps) {
+      for (const k of keeps) {
+        if (k.bottom > cut + 2 || k.bottom < cut - 8) continue;
+        const top = Math.floor(k.top);
+        if (top > start + 1 && top < cut) { cut = top; }
+        break;
+      }
+    }
+    if (!(cut > start + 1)) cut = limit;          // حِرزٌ من الدوران
+    starts.push(Math.min(cut, limit));            // لا تتجاوز صفحةٌ سعتَها
   }
   return starts;
 }
@@ -393,8 +418,8 @@ function isHeadingLike(el) {
   return !!b && (b.textContent || '').trim().length >= txt.length - 2;
 }
 
-export function avoidTrailingHeading(flow, starts) {
-  if (starts.length < 2) return starts;
+// كتلُ العناوين ومواضعُها، تُقاس مرةً وتُمرَّر إلى القطع
+export function headingBlocks(flow) {
   const top0 = flow.getBoundingClientRect().top - (flow.scrollTop || 0);
   const blocks = [...flow.querySelectorAll(BLOCKS_SEL)]
     .filter(el => !el.querySelector(BLOCKS_SEL))          // الورقةُ الأخيرة وحدَها
@@ -404,37 +429,22 @@ export function avoidTrailingHeading(flow, starts) {
     })
     .filter(b => b.h > 0)
     .sort((a, b) => a.top - b.top);
-  if (!blocks.length) return starts;
-
-  const out = [starts[0]];
-  for (let i = 1; i < starts.length; i++) {
-    const s = starts[i];
-    let moved = s;
-    // آخرُ كتلةٍ تنتهي عند القطع أو قبله بقليل
-    for (let k = blocks.length - 1; k >= 0; k--) {
-      const b = blocks[k];
-      if (b.bottom > s + 1.5) continue;
-      if (b.bottom < s - 6) break;                        // ليس ملاصقًا للقطع
-      const after = blocks[k + 1];
-      if (after && isHeadingLike(b.el) && Math.floor(b.top) > out[out.length - 1] + 1) {
-        moved = Math.floor(b.top);
-      }
-      break;
-    }
-    out.push(moved);
-  }
-  return out;
+  // العنوانُ الذي لا شيءَ بعده ليس عنوانًا يُحفَظ مع كلامه
+  return blocks
+    .filter((b, i) => i + 1 < blocks.length && isHeadingLike(b.el))
+    .map(b => ({ top: b.top, bottom: b.bottom }));
 }
 
 // بداياتُ صفحاتِ تدفُّقٍ: القياسُ والقطعُ وحفظُ العنوان مع كلامه — دالّةٌ
 //   واحدةٌ يستعملها المحررُ والتصديرُ والمجمَّعُ والمستنداتُ، فلا يشذُّ
-//   مُخرَجٌ عن مُخرَج (ملاحظتا ٤٢٣ و٤٣٠)
+//   مُخرَجٌ عن مُخرَج (ملاحظات ٤٢٣ و٤٣٠ و٤٣٧)
 export function flowStarts(flow, { doc = null, boxPx, total = null } = {}) {
   const bottoms = lineBottoms(flow, { doc });
-  const end = total == null
-    ? Math.max(flow.getBoundingClientRect().height, bottoms[bottoms.length - 1] || 0)
-    : total;
-  return avoidTrailingHeading(flow, pageStarts(bottoms, end, boxPx));
+  // المحتوى قد يتجاوز صندوقَه (عائمٌ أو مزاحٌ)، فيُؤخَذ أبعدُ الاثنين
+  //   حتى لا يسقط ذيلُ المستند (ملاحظة ٤٣٧)
+  const base = total == null ? flow.getBoundingClientRect().height : total;
+  const end = Math.max(base, bottoms[bottoms.length - 1] || 0);
+  return { starts: pageStarts(bottoms, end, boxPx, headingBlocks(flow)), total: end };
 }
 
 // بداياتُ صفحات صندوقِ كتابةٍ قائمٍ في الصفحة — بالحساب نفسِه الذي يُصدِّر
@@ -442,7 +452,7 @@ export function bodyStarts(body) {
   const boxPx = body.clientHeight || 1;
   const bottoms = lineBottoms(body);
   const total = Math.max(contentBottom(body), bottoms[bottoms.length - 1] || 0);
-  const starts = avoidTrailingHeading(body, pageStarts(bottoms, total, boxPx));
+  const starts = pageStarts(bottoms, total, boxPx, headingBlocks(body));
   return { starts, boxPx, total };
 }
 

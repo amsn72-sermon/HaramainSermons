@@ -357,7 +357,9 @@ function guideDialog(kind) {
 export async function render(ctx) {
   const data = await load();
   // جدولة اللقاءات وإدارة القاعات تتبع صلاحية «القاعات»، والرؤية للجميع (ملاحظة ١٧٢)
-  const admin = isAdmin() && can('rooms');
+  // إنشاءُ القاعات واللقاءات وتعديلُها بصلاحيةٍ يمنحها المدير
+  //   (ملاحظة ٤٤١) — والشاشةُ تبقى لمن يحضر
+  const admin = isAdmin() && can('rooms') && can('rooms_edit');
   let level = ctx.query.get('kind') || '';
   if (!ROOM_KINDS[level]) level = '';
 
@@ -551,7 +553,7 @@ export async function render(ctx) {
         admin ? h('button.icon-btn', { type: 'button', title: 'أمين السرّ', 'aria-label': 'أمين السرّ',
           onclick: () => pickSecretary(m) }, h('span.ico', { 'aria-hidden': 'true' }, '✎')) : null,
         admin ? iconBtn('cancel', 'إلغاء اللقاء', () => cancel(m), 'danger') : null,
-        isManager() && can('rooms') ? iconBtn('trash', 'حذف الاجتماع', () => removeMeeting(m), 'danger') : null));
+        isManager() && can('rooms_edit') ? iconBtn('trash', 'حذف الاجتماع', () => removeMeeting(m), 'danger') : null));
   }
 
   // ---------------- سطر لقاءٍ منتهٍ (ملاحظة ١٦٧) ----------------
@@ -570,7 +572,7 @@ export async function render(ctx) {
           () => openMinutes(m), m.minutes_state === 'final' ? 'ok' : ''),
         admin ? iconBtn('log', 'سجلّ الحضور', () => attendance(m)) : null,
         admin ? iconBtn('edit', 'تعديل البيانات والموعد والرابط والمدعوّين', () => edit(m)) : null,
-        isManager() && can('rooms') ? iconBtn('trash', 'حذف الاجتماع', () => removeMeeting(m), 'danger') : null));
+        isManager() && can('rooms_edit') ? iconBtn('trash', 'حذف الاجتماع', () => removeMeeting(m), 'danger') : null));
   }
 
   // ---------------- الرسم ----------------
@@ -639,7 +641,7 @@ export async function render(ctx) {
           r.join_url ? iconBtn('qr', 'رمز القاعة', () => roomCard(r)) : null,
           admin ? iconBtn('edit', 'إعداد القاعة: الاسم والسعة والرابط', () => saveRoom(k, r)) : null,
           // القاعات الستّ الأصلية تُعدَّل ولا تُحذف (ملاحظة ١٧٨)
-          isManager() && can('rooms') && !r.is_fixed
+          isManager() && can('rooms_edit') && !r.is_fixed
             ? iconBtn('trash', 'حذف القاعة', () => removeRoom(r), 'danger') : null))))
         : h('p.muted', 'لا قاعات بعد — أضف أولاها.'));
 

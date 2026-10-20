@@ -6,10 +6,22 @@ import { h, dialog, toast } from './ui.js';
 import { db, storage } from './sb.js';
 import { PAGE, LETTERHEAD } from './page.js';
 
+// خطُّ بطاقة البيانات وحجمُها يُضبطان في الكليشة، فيسريان على المحرر
+//   وعلى PDF وعلى ملفِّ Word جميعًا (ملاحظة ٤٣٦)
+export const CARD_FONTS = [
+  ['', 'خطُّ الصفحة'],
+  ['"Haramain Naskh", "Traditional Arabic", serif', 'نسخ (مرفقٌ بالمنصة)'],
+  ['"Traditional Arabic", "Haramain Naskh", serif', 'Traditional Arabic'],
+  ['"Haramain Arabic", sans-serif', 'خطُّ المنصة'],
+  ['Arial, sans-serif', 'Arial'],
+  ['"Times New Roman", serif', 'Times New Roman']
+];
+
 export const LH_DEFAULT = () => ({
   v: 1,
   bg: null,                       // مسارُ الصورة في مستودع الهوية
-  page: { top: PAGE.top, bottom: PAGE.bottom, side: PAGE.side }
+  page: { top: PAGE.top, bottom: PAGE.bottom, side: PAGE.side },
+  card: { font: '', size: 11 }    // بطاقةُ البيانات (ملاحظة ٤٣٦)
 });
 
 export const normLh = t => {
@@ -19,6 +31,8 @@ export const normLh = t => {
     const n = Number(v);
     return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : dflt;
   };
+  const fonts = CARD_FONTS.map(f => f[0]);
+  const cf = String((t.card || {}).font || '');
   return {
     v: 1,
     bg: typeof t.bg === 'string' && t.bg ? t.bg : null,
@@ -26,6 +40,10 @@ export const normLh = t => {
       top: num((t.page || {}).top, 0, 120, d.page.top),
       bottom: num((t.page || {}).bottom, 0, 120, d.page.bottom),
       side: num((t.page || {}).side, 0, 80, d.page.side)
+    },
+    card: {
+      font: fonts.includes(cf) ? cf : '',
+      size: num((t.card || {}).size, 7, 16, d.card.size)
     }
   };
 };
@@ -43,7 +61,7 @@ export async function lhForPrint(id) {
   if (t.bg) {
     try { src = await storage.signedUrl('brand', t.bg, 1800); } catch { /* تبقى كليشةُ الهيئة */ }
   }
-  return { src, page: t.page, name: row.name };
+  return { src, page: t.page, card: t.card, name: row.name };
 }
 
 // نافذةُ «تصديرٌ من قالبٍ مختار»: كليشةٌ أو قالبُ مجمَّع (ملاحظة ٤٠٩)

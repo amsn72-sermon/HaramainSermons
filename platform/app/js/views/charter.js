@@ -5,7 +5,7 @@ import { db } from '../sb.js';
 import { isAdmin, isManager, roleLabel } from '../store.js';
 import { POLICY_KEY, POLICY_VERSION, POLICY_TITLE } from '../policy.js';
 import { policyText } from './policy.js';
-import { proofFor, rosterDialog } from '../sigproof.js';
+import { proofFor, rosterDialog, rosterRows } from '../sigproof.js';
 import { exportExcel, exportPdf, exportWord } from '../teamexport.js';
 
 const GROUP_NAME = { admins: 'الحسابات الإدارية', translators: 'المترجمون المتخصصون',
@@ -103,15 +103,12 @@ export async function render(ctx) {
   // كشفٌ كاملٌ على كليشة الهيئة: الميثاقُ منسَّقًا ثم جدولُ من يُختار
   //   (ملاحظة ٤٢٩)
   const rosterBtn = h('button.btn.sm.primary', { type: 'button' }, '🖨 طباعةُ الكشف');
-  rosterBtn.onclick = () => busy(rosterBtn, () => rosterDialog(people.map(m => {
-    const sg = signOf[m.id];
-    const old = !sg ? prevOf[m.id] : null;
-    const rec = sg || old;
-    return { id: m.id, full_name: m.full_name, member_no: m.member_no,
-      group: GROUP_NAME[groupOf(m)], signed: !!rec,
-      policy_version: rec ? rec.policy_version : '',
-      accepted_at: rec ? rec.accepted_at : null };
-  })));
+  rosterBtn.onclick = () => busy(rosterBtn, async () => {
+    // الكشفُ من القاعدة: فيه الهويةُ ورمزُ الوثيقة (ملاحظتا ٤٣٢ و٤٣٣)
+    const rows = await rosterRows();
+    if (!rows.length) { toast('لا أعضاءَ في الكشف.', 'warn'); return; }
+    await rosterDialog(rows);
+  });
 
   const wordBtn = h('button.btn.sm', { type: 'button' }, 'تصدير Word');
   wordBtn.onclick = () => busy(wordBtn, () => exportWord(sheet(), title, { note }).catch(e => toast(e.message, 'bad')));

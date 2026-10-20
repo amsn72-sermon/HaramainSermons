@@ -66,6 +66,7 @@ ${charterHtml(r.policy_version)}
 <table class="rec">
   ${row('اسمُ العضو', r.full_name)}
   ${row('رقمُ العضوية', r.member_no == null ? '' : String(r.member_no))}
+  ${row('رقمُ الهوية أو الإقامة', r.national_id, true)}
   ${row('البريدُ الإلكتروني', r.email, true)}
   ${row('الاسمُ الذي وقَّع به', r.signed_name)}
   ${row('نسخةُ الميثاق', r.policy_version)}
@@ -121,27 +122,34 @@ ${charterHtml(version)}
 <h2>كشفُ التوقيع على الميثاق</h2>
 <p class="note">${esc(note || `عددُ من في الكشف ${AR(n)}، وقَّع منهم ${AR(signed)}.`)}
   وتاريخُ الكشف ${esc(fmtDate(new Date()))}.</p>
-<table>
+<table class="roster">
   <thead><tr>
-    <th style="width:10mm">م</th><th>العضو</th><th style="width:20mm">رقمُ العضوية</th>
-    <th style="width:28mm">الفريق</th><th style="width:22mm">الحال</th>
-    <th style="width:18mm">النسخة</th><th style="width:34mm">تاريخُ التوقيع</th>
+    <th style="width:9mm">م</th><th>العضو</th><th style="width:26mm">رقمُ الهوية</th>
+    <th style="width:20mm">الحال</th><th style="width:16mm">النسخة</th>
+    <th style="width:32mm">تاريخُ التوقيع</th><th style="width:20mm">التحقُّق</th>
   </tr></thead>
   <tbody>
-    ${rows.map((r, i) => `<tr>
+    ${rows.map((r, i) => {
+      // باركودُ كلِّ عضوٍ في صفِّه، يُفتَح به إثباتُه وحدَه (ملاحظة ٤٣٢)
+      const q = r.signed && r.proof_code
+        ? qrDataUri(signVerifyUrl(r.proof_code), { margin: 0, dark: '#1d2b3a' }) : null;
+      return `<tr>
       <td>${AR(i + 1)}</td>
       <td>${esc(r.full_name)}</td>
-      <td>${esc(r.member_no == null ? '—' : String(r.member_no))}</td>
-      <td>${esc(r.group || '—')}</td>
+      <td class="ltr">${esc(r.national_id || '—')}</td>
       <td>${r.signed ? 'وقَّع' : 'لم يوقِّعْ'}</td>
       <td>${esc(r.signed ? r.policy_version : '—')}</td>
       <td>${esc(r.signed ? ARD(r.accepted_at) : '—')}</td>
-    </tr>`).join('')}
+      <td class="qr-cell">${q
+        ? `<img src="${q}" alt="${esc(r.proof_code)}"><span>${esc(r.proof_code)}</span>`
+        : '—'}</td>
+    </tr>`;
+    }).join('')}
   </tbody>
 </table>
 <p class="note">هذا الكشفُ بيانٌ بمن وقَّع على الميثاق المعروض أعلاه وتاريخِ توقيعه.
-  وتفصيلُ كلِّ توقيعٍ — عنوانُ الشبكة والجهازُ وبصمةُ النصِّ ورمزُ التحقُّق —
-  في وثيقة إثبات التوقيع الخاصّة بصاحبه.</p>
+  ويُمسَح باركودُ كلِّ صفٍّ فيُفتَح إثباتُ صاحبه وحدَه. وتفصيلُ التوقيع —
+  عنوانُ الشبكة والجهازُ وبصمةُ النصِّ — في وثيقة إثباته الخاصّة.</p>
 </div>`;
 }
 
@@ -150,6 +158,18 @@ export function printRoster(rows, opts = {}) {
   const ok = printOnLetterhead(rosterHtml(rows, opts), { title: 'كشف التوقيع على الميثاق' });
   if (!ok) toast('امنعْ حجبَ النوافذ ليُفتح الكشف.', 'bad');
   return ok;
+}
+
+// كشفُ الموقِّعين من القاعدة: فيه الهويةُ ورمزُ الوثيقة (ملاحظتا ٤٣٢ و٤٣٣)
+export async function rosterRows({ key = POLICY_KEY } = {}) {
+  let rows = [];
+  try { rows = await db.rpc('policy_roster', { p_key: key }) || []; } catch { rows = []; }
+  return rows.map(r => ({
+    id: r.member_id, full_name: r.full_name, member_no: r.member_no,
+    national_id: r.national_id, signed: !!r.accepted_at,
+    policy_version: r.policy_version || '', accepted_at: r.accepted_at,
+    proof_code: r.proof_code || ''
+  }));
 }
 
 // نافذةُ اختيار من يُرفَق في الكشف (ملاحظة ٤٢٩)

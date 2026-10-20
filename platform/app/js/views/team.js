@@ -345,12 +345,17 @@ export async function render(ctx, opts = {}) {
     //   هنا يُمنع في قاعدة البيانات لا في الشاشة وحدَها، ولا يرى
     //   العضوُ لوحتَه هذه. ولوحةُ الصلاحيات نفسُها لا تُمنح لأحد.
     // ---------------------------------------------------------------
+    // قائمةُ الصلاحيات للإداريين كما كانت، ولغيرهم مفاتيحُ الاطّلاع
+    //   الثلاثةُ وحدَها — فيفتح المديرُ الأرشيفَ أو المتابعةَ لمترجمٍ
+    //   بعينه (ملاحظات ٤٣٩ و٤٤١ و٤٤٤)
     const PERMED = ['coordinator', 'supervisor', 'field_lead', 'viewer'];
+    const OPEN_KEYS = ['arch_read', 'board_view', 'rooms_edit'];
+    const permedRole = r => PERMED.includes(r);
     const permWant = new Map();          // المفتاح ← true | false | null (أصلُه)
     const permBody = h('div.perm-wrap', h('p.small.muted', 'يُحمَّل…'));
     const permUntil = h('input', { type: 'date', 'aria-label': 'أجل المنح' });
     const permCard = !isManager() ? null
-      : h('fieldset.stack', { style: { display: PERMED.includes(m.role) ? '' : 'none' } },
+      : h('fieldset.stack', { style: { display: '' } },
       h('legend', 'صلاحيات الحساب'),
       h('p.small.muted', 'لكلِّ صلاحيةٍ أصلُها: مفتوحةٌ ابتداءً أو مغلقةٌ لا تُنال إلا بمنحِك. ولا يرى العضوُ هذه اللوحة.'),
       permBody,
@@ -363,12 +368,30 @@ export async function render(ctx, opts = {}) {
       try { rows = await db.rpc('member_perm_sheet', { p_member: m.id }) || []; }
       catch { permBody.replaceChildren(h('p.small.muted', 'تعذّر تحميل الصلاحيات.')); return; }
       permWant.clear();
+      // لغير الإداريين: مفاتيحُ الاطّلاع وحدَها
+      if (!permedRole(role.value)) rows = rows.filter(r => OPEN_KEYS.includes(r.key));
+      if (!rows.length) {
+        permBody.replaceChildren(h('p.small.muted',
+          'لا صلاحياتٍ تُمنَح لهذا الدور.'));
+        return;
+      }
       const groups = new Map();
       for (const r of rows) {
         if (!groups.has(r.grp || 'أخرى')) groups.set(r.grp || 'أخرى', []);
         groups.get(r.grp || 'أخرى').push(r);
       }
-      const rowEl = r => {
+      // علامةُ صحٍّ على رأس كلِّ قسم: تفتح الداخلَ كلَّه أو تغلقه،
+      //   وتُظهِر حالَ القسم بنظرة. والمفردُ باقٍ يُرفَع ويُخفَض وحدَه
+      //   (ملاحظة ٤٤٢)
+      const boxesOf = new Map();
+      const syncGroup = g => {
+        const b = boxesOf.get(g);
+        if (!b) return;
+        const on = b.boxes.filter(x => x.checked).length;
+        b.all.checked = on === b.boxes.length;
+        b.all.indeterminate = on > 0 && on < b.boxes.length;
+      };
+      const rowEl = (r, g) => {
         const eff = r.setting === null || r.setting === undefined ? r.default_open : r.setting;
         const cb = h('input', { type: 'checkbox', checked: eff ? true : null, 'aria-label': r.label });
         const tag = h('span.perm-tag');
@@ -383,20 +406,39 @@ export async function render(ctx, opts = {}) {
             tag.textContent = txt;
           }
         };
-        cb.addEventListener('change', () => { permWant.set(r.key, cb.checked); paint(); });
+        cb.addEventListener('change', () => {
+          permWant.set(r.key, cb.checked); paint(); syncGroup(g);
+        });
         const undo = h('button.btn.xs.ghost', { type: 'button', title: 'العودة إلى الأصل' },
           '↺');
         undo.onclick = () => {
-          permWant.set(r.key, null); cb.checked = !!r.default_open; paint();
+          permWant.set(r.key, null); cb.checked = !!r.default_open; paint(); syncGroup(g);
         };
+        cb.addEventListener('paint', paint);
         paint();
         return h('label.check.perm-row', { class: r.parent ? 'child' : 'head' }, cb,
           h('span.perm-name', r.label,
             r.sensitive ? h('small.warn', ' ⚠ صلاحيةٌ حسّاسة — تُمنح بتقدير') : null),
           tag, undo);
       };
-      permBody.replaceChildren(...[...groups].map(([g, list]) =>
-        h('div.perm-group', h('h4', g), ...list.map(rowEl))));
+      permBody.replaceChildren(...[...groups].map(([g, list]) => {
+        const rows2 = list.map(r => rowEl(r, g));
+        const boxes = rows2.map(el => el.querySelector('input[type="checkbox"]'));
+        const all = h('input', { type: 'checkbox', 'aria-label': `كلُّ صلاحيات ${g}` });
+        boxesOf.set(g, { all, boxes });
+        all.onchange = () => {
+          const v = all.checked;
+          list.forEach((r, i) => {
+            permWant.set(r.key, v);
+            boxes[i].checked = v;
+            boxes[i].dispatchEvent(new Event('paint'));
+          });
+          all.indeterminate = false;
+        };
+        syncGroup(g);
+        return h('div.perm-group',
+          h('label.check.perm-head', all, h('h4', g)), ...rows2);
+      }));
     }
     if (permCard) drawPerms();
 
@@ -414,7 +456,7 @@ export async function render(ctx, opts = {}) {
     }
 
     role.addEventListener('change', () => {
-      if (permCard) permCard.style.display = PERMED.includes(role.value) ? '' : 'none';
+      if (permCard) drawPerms();
     });
 
     // اللغات من قائمة منسدلة مع رقائق تُحذف بضغطة (ملاحظة ٥٢)

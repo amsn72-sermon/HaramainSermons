@@ -168,7 +168,9 @@ export async function render(ctx) {
   });
 
   // صورة الهوية أو الإقامة
-  const idFile = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp,application/pdf',
+  // وصورُ الجوالات الحديثة heic، فتُقبَل كما تُقبَل jpg (ملاحظة ٤٤٧)
+  const idFile = h('input', { type: 'file',
+    accept: 'image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf',
     'aria-label': 'صورة الهوية أو الإقامة' });
   const idUp = h('button.btn.sm', { type: 'button' }, priv.iqama_path ? 'تغيير الصورة' : 'رفع الصورة');
   idUp.onclick = () => busy(idUp, async () => {
@@ -179,8 +181,9 @@ export async function render(ctx) {
       const ext = (file.type === 'application/pdf' ? 'pdf' : file.type.split('/')[1]) || 'jpg';
       const path = `${me.id}/iqama-${Date.now()}.${ext}`;
       await storage.upload('private-docs', path, file);
-      await db.update('profile_private', { id: `eq.${me.id}` }, { iqama_path: path });
-      toast('رُفعت الصورة.', 'ok');
+      // الدالّةُ تعيدها إلى التدقيق وتمسح سببَ الردّ (ملاحظة ٤٤٧)
+      await db.rpc('set_my_iqama', { p_path: path });
+      toast('رُفعت الصورة، وهي عند المنسق للتدقيق.', 'ok');
       ctx.navigate('/app/me', { replace: true });
     } catch (e) { toast(e.message, 'bad'); }
   });
@@ -383,6 +386,37 @@ export async function render(ctx) {
       } catch (e) { toast(e.message, 'bad'); }
     };
 
+    // بابُ رفعٍ في «مستنداتي» نفسِها: من رُدَّت هويتُه أو فُتح له
+    //   التجديدُ يرفع من هنا ولو قُبلت بياناتُه فاختفت بطاقتُها
+    //   (ملاحظة ٤٤٧)
+    const upBox = r => {
+      if (r.kind !== 'iqama') return null;
+      const need = r.status === 'rejected' || r.renewal_open || !r.status;
+      if (!need) return null;
+      const f2 = h('input', { type: 'file',
+        accept: 'image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf',
+        'aria-label': 'صورة الهوية أو الإقامة' });
+      const b2 = h('button.btn.sm.primary', { type: 'button' }, '⤒ ارفعِ الصحيحة');
+      b2.onclick = () => busy(b2, async () => {
+        const file = f2.files[0];
+        if (!file) return toast('اختر الملف أولًا.', 'bad');
+        if (file.size > 10 * 1024 * 1024) return toast('الحد الأقصى 10 ميغابايت.', 'bad');
+        try {
+          const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
+            .replace(/[^a-z0-9]/g, '') || 'jpg';
+          const path = `${me.id}/iqama-${Date.now()}.${ext}`;
+          await storage.upload('private-docs', path, file);
+          await db.rpc('set_my_iqama', { p_path: path });
+          toast('رُفعت الصورة، وهي عند المنسق للتدقيق.', 'ok');
+          ctx.navigate('/app/me', { replace: true });
+        } catch (e) { toast(e.message, 'bad'); }
+      });
+      return h('div.stack', { style: { gap: '6px', width: '100%' } },
+        h('p.small.muted', 'صورةٌ واضحةٌ أو ملفُّ PDF، ولا يطّلع عليها إلا المنسقُ '
+          + 'ومديرُ المشروع. وبرفعها تعود إلى التدقيق ويُمحى سببُ الردّ.'),
+        h('div.row.wrap', { style: { gap: '6px' } }, f2, b2));
+    };
+
     const row = r => {
       const expired = r.days_left != null && Number(r.days_left) < 0;
       const soon = r.days_left != null && Number(r.days_left) >= 0 && Number(r.days_left) <= 90;
@@ -407,7 +441,8 @@ export async function render(ctx) {
               : r.status === 'rejected' ? 'أُعيد إليك' : 'تحت المراجعة'),
           (!r.renewal_open && r.status === 'approved')
             ? h('button.btn.xs', { type: 'button', onclick: () => askOwn(r) }, 'تجديد')
-            : null));
+            : null),
+        upBox(r));
     };
 
     docsCard.replaceChildren(

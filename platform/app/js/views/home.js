@@ -1,7 +1,7 @@
 // لوحة المتابعة (المنسق والمدير)، والمترجم يُحوَّل إلى مهامه
 import { h, fill, emptyState, fmtSermonDate, fmtDate, fmtDateTime, toast, busy, dialog, confirm } from '../ui.js';
 import { db } from '../sb.js';
-import { state, isAdmin, isManager, MATERIAL_SELECT, MOSQUE, MOSQUE_ANY, CITY, PRIORITY, sortStages, currentStage, trackProgress,
+import { state, isAdmin, isManager, can, MATERIAL_SELECT, MOSQUE, MOSQUE_ANY, CITY, PRIORITY, sortStages, currentStage, trackProgress,
   isLateNow, hadLateness, langName, stageName } from '../store.js';
 import { statusBadge, trackTimer, progressBar, stageStrip, timelineTable, lateSummary, deleteDialog } from './parts.js';
 
@@ -37,7 +37,12 @@ function urgency(t) {
 const URGENCY_CLASS = ['u-late', 'u-soon', '', 'u-done'];
 
 export async function render(ctx) {
-  if (!isAdmin()) { const m = await import('./tasks.js'); return m.list(ctx); }
+  // لوحةُ المتابعة بصلاحيةٍ يمنحها مديرُ المشروع، ومن لم تُفتَح له نزل
+  //   إلى «مهامي» (ملاحظة ٤٤٤)
+  //   ومشرفُ اللغة يراها بحكم إشرافه، فبها يوزّع أعمال لغته (ملاحظة ٤٤٠)
+  if (!can('board_view') && !(state.supervisedLangs || []).length) {
+    const m = await import('./tasks.js'); return m.list(ctx);
+  }
 
   const all = await db.select('materials', { select: MATERIAL_SELECT, order: 'created_at.desc', limit: 300 });
   // المحذوف لا يظهر في قائمة العمل (ملاحظة ٦٦)
@@ -419,10 +424,27 @@ export async function render(ctx) {
   // تغيير مسؤول مرحلة لم تكتمل (ومنها المترجم قبل الاستلام أو أثناءه)
   async function reassign(t, s) {
     const def = state.stages.find(x => x.key === s.stage_key);
-    const all = await loadMembers();
-    const ok = all.filter(p => p.id !== s.assignee_id && (
-      def.assignee_role === 'translator' ? (p.member_languages || []).some(l => l.language_code === t.language_code)
-        : def.assignee_role === 'coordinator' ? ['coordinator', 'manager'].includes(p.role) : p.role === 'manager'));
+    // مراحلُ الترجمة: مرشَّحو اللغة من القاعدة، المشرفُ أولًا ثمَّ أهلُها،
+    //   ومن سأل وهو مشرفٌ لم يُر إلا أهلَ لغتِه (ملاحظة ٤٤٠)
+    let ok = [];
+    if (def.assignee_role === 'translator') {
+      let cands = [];
+      try { cands = await db.rpc('stage_candidates', { p_lang: t.language_code }) || []; }
+      catch { cands = []; }
+      ok = cands.filter(p => p.id !== s.assignee_id)
+        .map(p => ({ id: p.id,
+          full_name: p.is_supervisor ? `${p.full_name} — مشرفُ اللغة` : p.full_name }));
+      if (!cands.length) {
+        const all = await loadMembers();
+        ok = all.filter(p => p.id !== s.assignee_id
+          && (p.member_languages || []).some(l => l.language_code === t.language_code));
+      }
+    } else {
+      const all = await loadMembers();
+      ok = all.filter(p => p.id !== s.assignee_id && (
+        def.assignee_role === 'coordinator' ? ['coordinator', 'manager'].includes(p.role)
+          : p.role === 'manager'));
+    }
     if (!ok.length) return toast('لا يوجد عضو مفعّل آخر مؤهل لهذه المرحلة في هذه اللغة.', 'bad');
     const pick = h('select', ok.map(p => h('option', { value: p.id }, p.full_name)));
     const chosen = await dialog({
@@ -454,7 +476,8 @@ export async function render(ctx) {
           t.status !== 'completed' && h('button.btn.sm.danger', { type: 'button', onclick: e => busy(e.currentTarget, () => cancelTrack(m, t)) }, 'إلغاء إسناد اللغة')),
         stageStrip(t),
         t.status !== 'completed' && h('div.row', { style: { gap: '6px' } }, h('span.small.muted', 'تغيير المسؤول:'),
-          t.stages.filter(s => s.status !== 'done').map(s => h('button.btn.sm', { type: 'button', onclick: e => busy(e.currentTarget, () => reassign(t, s)) },
+          t.stages.filter(s => s.status !== 'done'
+            && (s.stage_key !== 'lang_supervision' || isAdmin())).map(s => h('button.btn.sm', { type: 'button', onclick: e => busy(e.currentTarget, () => reassign(t, s)) },
             `${stageName(s.stage_key)} — ${s.assignee?.full_name || '—'}`))),
         timelineTable(t))))));
     details.scrollIntoView({ behavior: 'smooth' });

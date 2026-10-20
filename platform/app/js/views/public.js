@@ -144,7 +144,8 @@ export async function render(ctx) {
     const box = h('div.vp-slot');
     const show = () => {
       const t = list[Number(sel.value) || 0];
-      box.replaceChildren(t ? videoPlayer({ videoId: t.videoId, title: `${rec.title} — ${nameAr(t)}`, subtitle: `${bilingual(t)}` })
+      box.replaceChildren(t ? videoPlayer({ videoId: t.videoId, title: `${rec.title} — ${nameAr(t)}`,
+        subtitle: `${bilingual(t)}`, ccLang: langCode(t) })
         : h('div.empty', 'لا يوجد تسجيل — No recording'));
     };
     sel.addEventListener('change', show); show();
@@ -340,7 +341,8 @@ function arafahCard(rec, prefer = '') {
   const box = h('div.vp-slot');
   const show = () => {
     const t = list[Number(sel.value) || 0];
-    box.replaceChildren(t ? videoPlayer({ videoId: t.videoId, title: `${rec.title} — ${nameAr(t)}`, subtitle: bilingual(t) })
+    box.replaceChildren(t ? videoPlayer({ videoId: t.videoId, title: `${rec.title} — ${nameAr(t)}`,
+      subtitle: bilingual(t), ccLang: langCode(t) })
       : h('div.empty', 'لا يوجد تسجيل — No recording'));
   };
   sel.addEventListener('change', show); show();

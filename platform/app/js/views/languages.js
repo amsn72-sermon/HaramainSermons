@@ -5,8 +5,15 @@ import { state, loadReference, isManager } from '../store.js';
 
 export async function render(ctx) {
   await loadReference(true);
-  const counts = await db.select('member_languages', { select: 'language_code' });
+  const counts = await db.select('member_languages', { select: 'language_code,member_id' });
   const n = code => counts.filter(c => c.language_code === code).length;
+  // أسماءُ الأعضاء لعرض مشرف اللغة واختياره (ملاحظة ٤٤٠)
+  let people = [];
+  try {
+    people = await db.select('profiles',
+      { select: 'id,full_name', status: 'eq.active', order: 'full_name.asc' }) || [];
+  } catch { people = []; }
+  const nameOf = id => people.find(p => p.id === id)?.full_name || '—';
   const reload = async () => { await loadReference(true); ctx.navigate('/app/languages', { replace: true }); };
 
   async function add() {
@@ -72,6 +79,38 @@ export async function render(ctx) {
     } catch (err) { toast(err.message, 'bad'); }
   };
 
+  // ـــ مشرفُ اللغة: أولُ من يستلم وآخرُ من يسلّم، ويوزّع على أهل لغته.
+  //   تعيينُه بيد مدير المشروع، ولا يكون إلا ممن اعتُمدت له اللغة (ملاحظة ٤٤٠)
+  const supDialog = async l => {
+    const ids = new Set(counts.filter(c => c.language_code === l.code).map(c => c.member_id));
+    const cands = people.filter(p => ids.has(p.id));
+    const pick = h('select', { 'aria-label': 'مشرف اللغة' },
+      h('option', { value: '' }, 'بلا مشرف — المسؤولية للمنسق'),
+      cands.map(p => h('option',
+        { value: p.id, selected: l.supervisor_id === p.id }, p.full_name)));
+    const res = await dialog({
+      title: `${l.name_ar} — مشرفُ اللغة`,
+      body: h('div.stack',
+        h('p.small.muted', 'مشرفُ اللغة واحدٌ لكلِّ لغة: تُسنَد إليه مراحلُ الترجمة '
+          + 'والمراجعة والتحرير ابتداءً، فيوزّعها على أهل لغته ثمَّ تعود إليه '
+          + 'يراجعها، ثمَّ تذهب للمنسق. ولا يُنشئ عملًا ولا يُسنِد ابتداءً. '
+          + 'واللغةُ التي لا مشرفَ لها مسؤوليتُها للمنسق.'),
+        cands.length ? h('label.field', 'المشرف', pick)
+          : h('p.err', 'لا عضوَ معتمدًا في هذه اللغة بعد — اربطْ بها مترجمًا '
+              + 'من «فريق العمل» أولًا.')),
+      buttons: [
+        { label: 'حفظ', kind: 'primary', value: () => pick.value || '' },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (res === null) return;
+    try {
+      await db.rpc('set_lang_supervisor', { p_lang: l.code, p_member: res || null });
+      toast(res ? 'عُيِّن مشرفُ اللغة.' : 'رُفع مشرفُ اللغة.', 'ok');
+      reload();
+    } catch (err) { toast(err.message, 'bad'); }
+  };
+
   function card(l) {
     const members = n(l.code);
     const state2 = l.is_source ? 'core' : l.is_initiative ? 'init'
@@ -92,10 +131,18 @@ export async function render(ctx) {
           l.is_source ? h('span.badge.gold', 'لغةُ المصدر')
             : l.is_core ? h('span.badge.gold', 'ثابتة')
             : h('span.badge', { class: l.is_active ? 'ok' : '' }, l.is_active ? 'مفعّلة' : 'معطّلة'))),
+      l.is_source ? null
+        : h('span.small.lang-sup',
+            l.supervisor_id ? ['مشرفُ اللغة: ', h('b', nameOf(l.supervisor_id))]
+              : h('span.muted', 'لا مشرفَ لها — المسؤولية للمنسق')),
       isManager() && !l.is_source
-        ? h('button.btn.xs', { type: 'button', style: { marginTop: '6px' },
-            onclick: e => { e.stopPropagation(); initDialog(l); } },
-            l.is_initiative ? 'إخراجٌ من المبادرة' : 'ضمٌّ إلى المبادرة')
+        ? h('div.row', { style: { gap: '4px', marginTop: '6px' } },
+            h('button.btn.xs', { type: 'button',
+              onclick: e => { e.stopPropagation(); initDialog(l); } },
+              l.is_initiative ? 'إخراجٌ من المبادرة' : 'ضمٌّ إلى المبادرة'),
+            h('button.btn.xs', { type: 'button',
+              onclick: e => { e.stopPropagation(); supDialog(l); } },
+              l.supervisor_id ? 'تغييرُ المشرف' : 'تعيينُ مشرف'))
         : null);
     if (!fixed) el.onclick = () => toggle(l, el);
     return el;

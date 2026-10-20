@@ -2741,6 +2741,10 @@ begin
   exception when others then if position('FAIL' in SQLERRM) > 0 then raise; end if;
   end;
 
+  -- والقاعاتُ صارت بصلاحيةٍ يمنحها المدير، فتُمنَح للمنسق (ملاحظة ٤٤١)
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  perform public.set_member_perm('00000000-0000-0000-0000-00000000000b',
+    'rooms_edit', true, null, 'اختبار');
   perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000b', true);
   v_room2 := public.save_room(jsonb_build_object('name', 'قاعة الترجمة الفورية', 'capacity', 12));
   if (select capacity from public.rooms where id = v_room2) <> 12 then
@@ -3142,6 +3146,8 @@ begin
 
   -- ثم تُفتح للمنسق فيعود إليه عمله
   perform public.set_member_perms(v_crd, '{}'::jsonb);
+  -- وصلاحيةُ القاعات مغلقةٌ بأصلها فتُمنَح معها (ملاحظة ٤٤١)
+  perform public.set_member_perm(v_crd, 'rooms_edit', true, null, 'اختبار');
   perform set_config('request.jwt.claim.sub', v_crd::text, true);
   if not public.has_perm('rooms') then raise exception 'FAIL: لم تُفتح الصلاحية بعد رفعها'; end if;
   perform public.save_room(jsonb_build_object('name', 'قاعة بعد الفتح', 'kind', 'meeting'));
@@ -8534,4 +8540,225 @@ begin
 
   perform set_config('request.jwt.claim.sub', v_mgr::text, true);
   raise notice 'PASS: الوثائقُ كلُّها تحمل رمزًا، والتحقُّقُ به عامٌّ بلا حساب ولا يُفشي الشبكةَ والجهاز';
+end $$;
+
+-- =====================================================================
+-- ٩٨) صلاحياتٌ يمنحها المدير، وأرشيفٌ مغلقٌ في القاعدة، وهويةٌ في
+--     وثيقة الإثبات (ملاحظات ٤٣١ و٤٣٩ و٤٤١ و٤٤٤)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_tr uuid; v_n int;
+begin
+  -- المفاتيحُ الثلاثةُ مغلقةٌ بأصلها
+  select count(*)::int into v_n from public.perm_keys
+   where key in ('arch_read', 'rooms_edit', 'board_view') and default_open;
+  if v_n <> 0 then raise exception 'FAIL: صلاحيةٌ جديدةٌ مفتوحةٌ بأصلها'; end if;
+
+  -- ولم تُفتَح للمترجمين
+  select id into v_tr from public.profiles
+   where role = 'translator' and status = 'active' limit 1;
+  if v_tr is not null then
+    select count(*)::int into v_n from public.member_perms
+     where member_id = v_tr and perm_key = 'arch_read' and allowed;
+    if v_n <> 0 then raise exception 'FAIL: فُتحت للمترجم بلا منح'; end if;
+  end if;
+
+  -- وقراءةُ الأرشيف مغلقةٌ في القاعدة لا في الشاشة
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  if not public.may_read_arch() then raise exception 'FAIL: المديرُ لا يقرأ الأرشيف'; end if;
+  if v_tr is not null then
+    perform set_config('request.jwt.claim.sub', v_tr::text, true);
+    if public.may_read_arch() then raise exception 'FAIL: المترجمُ يقرأ الأرشيف'; end if;
+    select count(*)::int into v_n from public.arch_year_tiles();
+    if v_n <> 0 then raise exception 'FAIL: المترجمُ قرأ بطاقاتِ الأعوام: %', v_n; end if;
+    select count(*)::int into v_n from public.arch_section_tiles(1445);
+    if v_n <> 0 then raise exception 'FAIL: المترجمُ قرأ أقسامَ العام'; end if;
+  end if;
+
+  -- فإذا منحها المديرُ انفتحت
+  if v_tr is not null then
+    perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+    perform public.set_member_perm(v_tr, 'arch_read', true, null, null);
+    perform set_config('request.jwt.claim.sub', v_tr::text, true);
+    if not public.may_read_arch() then raise exception 'FAIL: لم تنفعِ المنحة'; end if;
+    perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+    perform public.set_member_perm(v_tr, 'arch_read', null, null, null);
+  end if;
+
+  -- ورقمُ الهوية في وثيقة الإثبات
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.policy_proof(v_mgr, null);
+
+  raise notice 'PASS: الأرشيفُ والقاعاتُ والمتابعةُ بصلاحياتٍ مغلقةٍ بأصلها، والأرشيفُ مغلقٌ في القاعدة';
+end $$;
+
+-- =====================================================================
+-- ٩٩) رقمُ التوثيق يُمنَح عند رفع النصِّ لا عند إنشاء الخطبة (ملاحظة ٤٤٥)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_sec uuid; v_id uuid; v_no text; v_vno text;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  select id into v_sec from public.arch_sections where h_year = 1445 limit 1;
+  if v_sec is null then
+    perform public.add_arch_year(1445, null);
+    select id into v_sec from public.arch_sections where h_year = 1445 limit 1;
+  end if;
+
+  -- خطبةٌ بعنوانٍ وتاريخٍ وخطيبٍ بلا نصّ: لا رقمَ لها
+  v_id := public.save_arch_sermon(jsonb_build_object(
+    'section_id', v_sec, 'sermon_date', '2024-01-05', 'mosque', 'makkah',
+    'title', 'خطبةٌ بلا نصّ', 'khateeb', 'الشيخ فلان'));
+  select doc_no into v_no from public.arch_sermons where id = v_id;
+  if v_no is not null then
+    raise exception 'FAIL: سُحب رقمٌ لخطبةٍ خاوية: %', v_no;
+  end if;
+
+  -- فإذا رُفع نصُّها أخذت رقمَها وأخذت نسختُها رقمَها
+  insert into public.arch_versions (sermon_id, language_code, is_source, body_html)
+  values (v_id, 'ar', true, '<p>الحمد لله</p>');
+  select doc_no into v_no from public.arch_sermons where id = v_id;
+  select doc_no into v_vno from public.arch_versions
+   where sermon_id = v_id and language_code = 'ar';
+  if v_no is null then raise exception 'FAIL: لم تأخذِ الخطبةُ رقمَها عند الرفع'; end if;
+  if v_vno is null then raise exception 'FAIL: لم تأخذِ النسخةُ رقمَها'; end if;
+
+  -- ونسخةٌ خاويةٌ لا تُرقَّم
+  insert into public.arch_versions (sermon_id, language_code, body_html)
+  values (v_id, 'en', '   ');
+  select doc_no into v_vno from public.arch_versions
+   where sermon_id = v_id and language_code = 'en';
+  if v_vno is not null then raise exception 'FAIL: رُقِّمت نسخةٌ خاوية: %', v_vno; end if;
+
+  delete from public.arch_sermons where id = v_id;
+  raise notice 'PASS: لا رقمَ لخطبةٍ خاوية، ويُمنَح لها ولنسختها عند رفع النصّ';
+end $$;
+
+-- =====================================================================
+-- ١٠٠) مشرفُ اللغة: يُعيَّن من أهلها، ويُبدِّل في لغته، ولا يتعدّاها
+--      (ملاحظة ٤٤٠)
+-- =====================================================================
+do $$
+declare v_mgr uuid := '00000000-0000-0000-0000-00000000000a';
+        v_sup uuid; v_other uuid; v_track uuid; v_lang text; v_n int; v_stage text;
+begin
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+
+  -- مرحلةُ مراجعة المشرف موجودةٌ في موضعها
+  select count(*)::int into v_n from public.workflow_stages
+   where key = 'lang_supervision' and sort = 45;
+  if v_n <> 1 then raise exception 'FAIL: مرحلةُ مراجعة المشرف غائبةٌ أو في غير موضعها'; end if;
+
+  -- مشرفٌ من أهل اللغة
+  select ml.member_id, ml.language_code into v_sup, v_lang
+    from public.member_languages ml
+    join public.profiles p on p.id = ml.member_id
+   where p.status = 'active' and p.role = 'translator' limit 1;
+  if v_sup is null then raise notice 'PASS: لا مترجمَ في القاعدة'; return; end if;
+
+  perform public.set_lang_supervisor(v_lang, v_sup);
+  select supervisor_id into v_other from public.languages where code = v_lang;
+  if v_other <> v_sup then raise exception 'FAIL: لم يُعيَّنِ المشرف'; end if;
+
+  -- ولا يُعيَّن من لا يُتقن اللغة
+  select p.id into v_other from public.profiles p
+   where p.status = 'active' and p.id <> v_sup
+     and not exists (select 1 from public.member_languages ml
+                      where ml.member_id = p.id and ml.language_code = v_lang)
+   limit 1;
+  if v_other is not null then
+    begin
+      perform public.set_lang_supervisor(v_lang, v_other);
+      raise exception 'FAIL: عُيِّن مشرفٌ لا يُتقن اللغة';
+    exception when others then
+      if position('FAIL' in SQLERRM) > 0 then raise; end if;
+    end;
+  end if;
+
+  -- والتعيينُ لمدير المشروع وحدَه
+  perform set_config('request.jwt.claim.sub', v_sup::text, true);
+  begin
+    perform public.set_lang_supervisor(v_lang, v_sup);
+    raise exception 'FAIL: عيَّن المشرفُ نفسَه';
+  exception when others then
+    if position('FAIL' in SQLERRM) > 0 then raise; end if;
+  end;
+
+  -- ويعرف المشرفُ لغاتِه
+  select count(*)::int into v_n from public.my_supervised_langs();
+  if v_n < 1 then raise exception 'FAIL: المشرفُ لا يرى لغتَه'; end if;
+
+  -- وقائمةُ المرشَّحين لا تُعطيه إلا أهلَ لغته
+  select count(*)::int into v_n from public.stage_candidates(v_lang);
+  if v_n < 1 then raise exception 'FAIL: لا مرشَّحين في لغة المشرف'; end if;
+  select count(*)::int into v_n from public.stage_candidates(v_lang) c
+    join public.member_languages ml
+      on ml.member_id = c.id and ml.language_code = v_lang;
+  if v_n <> (select count(*)::int from public.stage_candidates(v_lang)) then
+    raise exception 'FAIL: في المرشَّحين من لا يُتقن اللغة';
+  end if;
+
+  -- ولغةٌ ليس مشرفًا عليها لا يرى مرشَّحيها
+  select code into v_stage from public.languages
+   where code <> v_lang and is_active and coalesce(supervisor_id::text, '') = '' limit 1;
+  if v_stage is not null then
+    select count(*)::int into v_n from public.stage_candidates(v_stage);
+    if v_n <> 0 then raise exception 'FAIL: رأى المشرفُ مرشَّحي لغةٍ ليست لغتَه: %', v_n; end if;
+  end if;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_lang_supervisor(v_lang, null);
+  raise notice 'PASS: مشرفُ اللغة يُعيَّن من أهلها بيد المدير، ويرى مرشَّحي لغته وحدَها';
+end $$;
+
+-- ـــ إعادةُ رفع الهوية بعد ردِّها: بابٌ لا يُغلق، وحالٌ تعود للتدقيق
+--   (ملاحظة ٤٤٧)
+do $$
+declare v_tr uuid; v_crd uuid; v_st text; v_note text;
+begin
+  select id into v_tr from public.profiles where role = 'translator' limit 1;
+  select id into v_crd from public.profiles where role = 'coordinator' limit 1;
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  insert into public.profile_private (id) values (v_tr) on conflict (id) do nothing;
+  update public.profile_private set iqama_path = v_tr || '/iqama-old.jpg',
+         data_status = 'accepted' where id = v_tr;
+  perform public.review_member_doc(v_tr, 'iqama', 'rejected', 'الصورةُ لغيرك');
+  select iqama_status::text, iqama_note into v_st, v_note
+    from public.profile_private where id = v_tr;
+  if v_st <> 'rejected' or v_note is null then
+    raise exception 'FAIL: لم تُسجَّل إعادةُ الهوية: % %', v_st, v_note;
+  end if;
+
+  -- والعضوُ يرفع الصحيحةَ بنفسه ولو قُبلت بياناتُه، فتعود للتدقيق
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  perform public.set_my_iqama(v_tr || '/iqama-new.jpg');
+  select iqama_status::text, iqama_note into v_st, v_note
+    from public.profile_private where id = v_tr;
+  if v_st <> 'pending' or v_note is not null then
+    raise exception 'FAIL: لم تعدِ الهويةُ إلى التدقيق: % %', v_st, v_note;
+  end if;
+  if (select iqama_path from public.profile_private where id = v_tr)
+     <> v_tr || '/iqama-new.jpg' then
+    raise exception 'FAIL: لم يُبدَّل مسارُ الصورة';
+  end if;
+
+  -- ولا يرفع في مجلَّد غيره
+  begin
+    perform public.set_my_iqama(v_crd || '/iqama-x.jpg');
+    raise exception 'FAIL: رفع في مجلَّد غيره';
+  exception when sqlstate '42501' then null;
+  end;
+
+  -- ورفعُ الإدارة عنه يعيدها إلى التدقيق كذلك
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  perform public.review_member_doc(v_tr, 'iqama', 'rejected', 'غيرُ واضحة');
+  perform public.admin_set_iqama(v_tr, v_tr || '/iqama-admin.jpg');
+  select iqama_status::text, iqama_note into v_st, v_note
+    from public.profile_private where id = v_tr;
+  if v_st <> 'pending' or v_note is not null then
+    raise exception 'FAIL: رفعُ الإدارة لم يُعدِ الهويةَ للتدقيق: % %', v_st, v_note;
+  end if;
+  raise notice 'PASS: من رُدَّت هويتُه يرفع الصحيحةَ ولو قُبلت بياناتُه، فتعود إلى التدقيق';
 end $$;

@@ -77,7 +77,7 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
     document.body.append(probe);
     const boxPx = probe.getBoundingClientRect().height || 1;
     probe.remove();
-    const starts = flowStarts(measure, { boxPx });
+    const { starts } = flowStarts(measure, { boxPx });
     const mw = measure.getBoundingClientRect().width || 1;
     const bw = body.getBoundingClientRect().width || mw;
     return { starts, ratio: bw / mw };

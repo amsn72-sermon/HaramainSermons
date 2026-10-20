@@ -72,14 +72,106 @@ export async function render(ctx) {
   // الصورُ والنصوصُ الحرّةُ تُرسَم على الصفحة المصغَّرة كما تُرسَم في
   //   الكتاب — بالنسبة نفسِها (ملاحظة ٣٥٥)
   // -------------------------------------------------------------------
+  // -------------------------------------------------------------------
+  // الاختيارُ المباشر (ملاحظة ٤٤٣): يُضغَط العنصرُ على الصفحة نفسِها
+  //   فيُحدَّد، ويُنقَل بالسحب، وتُعدَّل خصائصُه في بطاقته، ويُحذَف منها.
+  //   وما لا يُنقَل — كالنقش والترويسة — يُحدَّد ويُرفَع ويُعاد.
+  // -------------------------------------------------------------------
+  let objSel = null;                 // { page, type, i }
+  const SEL_LABEL = {
+    mark: 'صورة', text: 'نصّ', shape: 'شكل', band: 'الشريط',
+    wm: 'العلامةُ المائية', banner: 'الراية', title: 'كتلةُ العنوان',
+    foot: 'سطرا الذيل', pattern: 'النقشُ الباهت', coverbg: 'صورةُ الغلاف',
+    stamp: 'ختمُ التاريخ', head: 'ترويسةُ الصفحة', orn: 'زخرفةُ الذيل',
+    pno: 'رقمُ الصفحة', bsm: 'البسملة', colo: 'كتلةُ الحقوق',
+    pagebg: 'خلفيةُ الصفحة', covermark: 'شعار',
+    blurb: 'نبذةُ الظهر', bandimg: 'شريطُ البسملة'
+  };
+  const SHAPE_LABEL = { rect: 'مستطيل', circle: 'دائرة', line: 'خطّ', frame: 'إطار' };
+
+  const same = (a, b) => a && b && a.page === b.page && a.type === b.type && a.i === b.i;
+
+  // يُعلَّم العنصرُ المرسوم بما يمثّله، فالضغطةُ تعرف صاحبَها
+  function tag(el, type, i = null) {
+    if (!el) return el;
+    el.classList.add('bd-obj');
+    el.__sel = { type, i };
+    if (same(objSel, { page, type, i })) el.classList.add('sel');
+    return el;
+  }
+
+  // ـــ ما يمثّله المحدَّد: كائنُه، وكيف يُنقَل، وكيف يُرفَع
+  function selTarget(sl) {
+    if (!sl) return null;
+    const S = SH();
+    const s = slotOf(t, SLOT_OF(sl.page));
+    const cv = t.cover, dv = t.divider, inn = t.inner;
+    const bk = (t.back || (t.back = {}));
+    const mm2pct = v => (Number(v || 0) / S.h) * 100;
+    switch (sl.type) {
+      case 'mark': return { obj: s.marks[sl.i], arr: s.marks, move: 'xy' };
+      case 'covermark': return { obj: cv.marks[sl.i], arr: cv.marks, move: 'xy' };
+      case 'text': return { obj: s.texts[sl.i], arr: s.texts, move: 'xy' };
+      case 'shape': return { obj: s.shapes[sl.i], arr: s.shapes, move: 'xy' };
+      case 'pagebg': return { obj: s,
+        off: () => { s.bg = null; s.bgName = null; } };
+      case 'band': return { obj: s.band, off: () => { s.band.on = false; } };
+      case 'wm': return { obj: s.wm,
+        off: () => { s.wm = { src: null, size: 50, opacity: 8 }; } };
+      case 'coverbg': return sl.page === 'back'
+        ? { obj: bk, off: () => { bk.bg = null; } }
+        : { obj: cv, off: () => { cv.bg = null; } };
+      case 'pattern': return sl.page === 'back'
+        ? { obj: bk, off: () => { bk.pattern = false; } }
+        : { obj: cv, off: () => { cv.pattern = false; } };
+      case 'banner':
+        if (sl.page === 'cover') {
+          return { obj: cv, move: 'y',
+            get: () => mm2pct(cv.bannerTop ?? 26),
+            set: p => { cv.bannerTop = Math.max(0, Math.min(80,
+              Math.round((p / 100) * S.h))); },
+            off: () => { cv.bannerW = 0; } };
+        }
+        if (sl.page === 'back') return { obj: bk, off: () => { bk.mark = false; } };
+        return { obj: dv, off: () => { dv.banner = false; } };
+      case 'title':
+        if (sl.page === 'cover') {
+          return { obj: cv, move: 'y', get: () => cv.titleY ?? 52,
+            set: p => { cv.titleY = Math.max(20, Math.min(80, Math.round(p))); } };
+        }
+        return { obj: dv, move: 'y', get: () => dv.midY ?? 62,
+          set: p => { dv.midY = Math.max(20, Math.min(90, Math.round(p))); } };
+      case 'foot': return sl.page === 'back'
+        ? { obj: bk, off: () => { bk.foot = false; } }
+        : { obj: cv, off: () => { cv.foot = false; } };
+      case 'stamp': return { obj: dv, off: () => { dv.stamp = false; } };
+      case 'head': return { obj: inn, off: () => { inn.head = false; } };
+      case 'orn': return { obj: inn, off: () => { inn.ornament = false; } };
+      case 'pno': return { obj: inn, off: () => { inn.foot = false; } };
+      case 'bandimg': return { obj: inn, off: () => { inn.band = false; } };
+      case 'blurb': return { obj: bk };
+      default: return { obj: null };
+    }
+  }
+
+  function selName(sl) {
+    if (!sl) return '';
+    if (sl.type === 'shape') {
+      const sh = slotOf(t, SLOT_OF(sl.page)).shapes[sl.i];
+      return SHAPE_LABEL[sh?.kind] || 'شكل';
+    }
+    return SEL_LABEL[sl.type] || 'عنصر';
+  }
+
   function deco(key) {
     const S = SH();
     const s = slotOf(t, key);
     const out = [];
     if (s.bg) {
-      out.push(h('img.bd-bg', { src: s.bg, alt: '', style: {
+      out.push(tag(h('img.bd-bg', { src: s.bg, alt: '', style: {
         objectFit: s.bgFit === 'contain' ? 'contain' : 'cover',
-        opacity: s.bgFade != null ? String(Math.max(0, Math.min(100, s.bgFade)) / 100) : null } }));
+        opacity: s.bgFade != null ? String(Math.max(0, Math.min(100, s.bgFade)) / 100) : null } }),
+        'pagebg'));
     }
     for (const sh of s.shapes) {
       if (!sh) continue;
@@ -97,33 +189,34 @@ export async function render(ctx) {
         st.background = sh.color || '#b9975b';
         if (sh.kind === 'circle') st.borderRadius = '50%';
       }
-      out.push(h('div.bd-sh', { style: st }));
+      out.push(tag(h('div.bd-sh', { style: st }), 'shape', s.shapes.indexOf(sh)));
     }
     if (s.band && s.band.on) {
-      out.push(h('div.bd-band', { style: {
+      out.push(tag(h('div.bd-band', { style: {
         height: `${((s.band.h ?? 10) / S.h) * 100}%`,
         background: s.band.color || '#174a38',
         opacity: String(Math.max(0, Math.min(100, s.band.opacity ?? 100)) / 100),
-        top: s.band.top ? '0' : 'auto', bottom: s.band.top ? 'auto' : '0' } }));
+        top: s.band.top ? '0' : 'auto', bottom: s.band.top ? 'auto' : '0' } }), 'band'));
     }
     if (s.wm && s.wm.src) {
-      out.push(h('div.bd-wm', h('img', { src: s.wm.src, alt: '', style: {
+      out.push(tag(h('div.bd-wm', h('img', { src: s.wm.src, alt: '', style: {
         width: `${Math.max(10, Math.min(100, s.wm.size ?? 50))}%`,
-        opacity: String(Math.max(1, Math.min(60, s.wm.opacity ?? 8)) / 100) } })));
+        opacity: String(Math.max(1, Math.min(60, s.wm.opacity ?? 8)) / 100) } })), 'wm'));
     }
     for (const m of s.marks) {
       if (!m || !m.src) continue;
-      out.push(h('img.bd-mk', { src: m.src, alt: '', style: {
+      out.push(tag(h('img.bd-mk', { src: m.src, alt: '', style: {
         insetInlineStart: `${m.x}%`, top: `${m.y}%`, height: `${(m.h / S.h) * 100}%`,
-        opacity: m.opacity != null ? String(Math.max(0, Math.min(100, m.opacity)) / 100) : null } }));
+        opacity: m.opacity != null ? String(Math.max(0, Math.min(100, m.opacity)) / 100) : null } }),
+        'mark', s.marks.indexOf(m)));
     }
     for (const x of s.texts) {
       if (!x || !String(x.text || '').trim()) continue;
-      out.push(h('div.bd-tx', { style: {
+      out.push(tag(h('div.bd-tx', { style: {
         insetInlineStart: `${x.x ?? 10}%`, top: `${x.y ?? 10}%`, width: `${x.w ?? 80}%`,
         fontSize: `${((x.size ?? 4) / S.w) * 100}cqw`, color: x.color || '#174a38',
         textAlign: x.align || 'center', fontWeight: x.bold ? '700' : '400' } },
-        String(x.text)));
+        String(x.text)), 'text', s.texts.indexOf(x)));
     }
     return out;
   }
@@ -131,32 +224,36 @@ export async function render(ctx) {
   function miniCover() {
     const S = SH();
     const p = h('div.bd-page', { style: { background: t.cover.paper } });
-    if (t.cover.pattern) p.append(h('div.bd-pat', { style: { '--g': t.cover.gold } }));
+    if (t.cover.pattern) {
+      p.append(tag(h('div.bd-pat', { style: { '--g': t.cover.gold } }), 'pattern'));
+    }
     if (t.cover.bg) {
-      p.append(h('img.bd-cover-bg', { src: t.cover.bg, alt: '',
-        style: { opacity: String(Math.max(0, Math.min(100, t.cover.fade)) / 100) } }));
+      p.append(tag(h('img.bd-cover-bg', { src: t.cover.bg, alt: '',
+        style: { opacity: String(Math.max(0, Math.min(100, t.cover.fade)) / 100) } }), 'coverbg'));
     }
-    for (const m of t.cover.marks) {
-      p.append(h('img.bd-mk', { src: m.src, alt: '', style: {
-        insetInlineStart: `${m.x}%`, top: `${m.y}%`, height: `${(m.h / S.h) * 100}%` } }));
-    }
+    t.cover.marks.forEach((m, i) => {
+      p.append(tag(h('img.bd-mk', { src: m.src, alt: '', style: {
+        insetInlineStart: `${m.x}%`, top: `${m.y}%`, height: `${(m.h / S.h) * 100}%` } }),
+        'covermark', i));
+    });
     if (Number(t.cover.bannerW) > 0) {
       const b = h('div.bd-banner', { style: {
         top: `${((t.cover.bannerTop ?? 26) / S.h) * 100}%`,
         width: `${(Number(t.cover.bannerW) / S.w) * 100}%` } });
       b.innerHTML = pennantSvg(t.cover.ink, t.cover.gold);
-      p.append(b);
+      p.append(tag(b, 'banner'));
     }
-    p.append(h('div.bd-mid', { style: { top: `${t.cover.titleY ?? 52}%` } },
+    p.append(tag(h('div.bd-mid', { style: { top: `${t.cover.titleY ?? 52}%` } },
       h('b.bd-t1', { style: { color: t.cover.ink } }, 'مجمَّع الخطب السنوي'),
       h('div.bd-rule', { style: { background: t.cover.gold } }),
       h('div.bd-t2', { style: { color: t.cover.gold } }, 'لخُطب المسجد الحرام المترجمة'),
       h('div.bd-t3', { style: { color: t.cover.gold } }, 'إلى الإنجليزية'),
-      h('div.bd-t4', { style: { color: t.cover.ink } }, 'لعام ١٤٤٥هـ')));
+      h('div.bd-t4', { style: { color: t.cover.ink } }, 'لعام ١٤٤٥هـ')), 'title'));
     if (t.cover.foot !== false) {
-      p.append(h('div.bd-foot', { style: { color: t.cover.ink } },
+      p.append(tag(h('div.bd-foot', { style: { color: t.cover.ink } },
         h('span', 'الهيئةُ العامة للعناية بشؤون المسجد الحرام والمسجد النبوي'),
-        h('span', 'مشروعُ خادم الحرمين الشريفين لترجمة خطب الحرمين — بتنفيذ جامعة أمِّ القرى')));
+        h('span', 'مشروعُ خادم الحرمين الشريفين لترجمة خطب الحرمين — بتنفيذ جامعة أمِّ القرى')),
+        'foot'));
     }
     p.append(...deco('cover'));
     return p;
@@ -169,19 +266,20 @@ export async function render(ctx) {
       const b = h('div.bd-banner', { style: { top: '0',
         width: `${(Number(t.divider.bannerW) / S.w) * 100}%` } });
       b.innerHTML = pennantSvg(t.divider.ink, t.cover.gold);
-      p.append(b);
+      p.append(tag(b, 'banner'));
     }
     if (t.divider.ghost && t.cover.bg) p.append(h('img.bd-ghost', { src: t.cover.bg, alt: '' }));
     if (t.divider.stamp !== false) {
-      p.append(h('div.bd-stamp', { style: { color: t.divider.ink } },
-        h('div', 'خطبـة الجمعة'), h('div', '٧ محرم ١٤٤٤هـ'), h('div', 'الموافق 2022/8/5م')));
+      p.append(tag(h('div.bd-stamp', { style: { color: t.divider.ink } },
+        h('div', 'خطبـة الجمعة'), h('div', '٧ محرم ١٤٤٤هـ'), h('div', 'الموافق 2022/8/5م')),
+        'stamp'));
     }
-    p.append(h('div.bd-mid', { style: { top: `${t.divider.midY ?? 62}%` } },
+    p.append(tag(h('div.bd-mid', { style: { top: `${t.divider.midY ?? 62}%` } },
       h('div.bd-t3', { style: { color: t.divider.ink } }, 'موضـوع الخطبة:'),
       h('b.bd-t1', { style: { color: t.divider.ink } }, 'راحـة البال'),
       h('div.bd-t3', { style: { color: t.divider.ink, marginTop: '4%' } }, 'لفضيـلة الشيـخ'),
       h('b.bd-t2', { style: { color: t.divider.ink } }, 'د. سعود بن إبراهيم الشريم'),
-      h('div.bd-rule', { style: { background: t.cover.gold } })));
+      h('div.bd-rule', { style: { background: t.cover.gold } })), 'title'));
     p.append(...deco('divider'));
     return p;
   }
@@ -189,12 +287,12 @@ export async function render(ctx) {
   function miniInner() {
     const p = h('div.bd-page', { style: { background: t.inner.paper } });
     if (t.inner.head) {
-      p.append(h('div.bd-head', { style: { color: t.inner.gold,
+      p.append(tag(h('div.bd-head', { style: { color: t.inner.gold,
         borderBottom: `1px solid ${t.inner.gold}` } },
-        h('span', 'مجمَّع الخطب السنوي'), h('span', 'لعام ١٤٤٥هـ')));
+        h('span', 'مجمَّع الخطب السنوي'), h('span', 'لعام ١٤٤٥هـ')), 'head'));
     }
     const win = h('div.bd-win');
-    if (t.inner.band) win.append(h('img.bd-band', { src: BASMALA_BAND, alt: '' }));
+    if (t.inner.band) win.append(tag(h('img.bd-band', { src: BASMALA_BAND, alt: '' }), 'bandimg'));
     win.append(h('div.bd-kh', { style: { color: t.cover.ink } }, '(الخطبةُ الأولى)'));
     for (let i = 0; i < 9; i++) {
       win.append(h('div.bd-line', { style: { background: t.inner.ink,
@@ -204,13 +302,13 @@ export async function render(ctx) {
     if (t.inner.ornament) {
       const o = h('div.bd-orn');
       o.innerHTML = footOrnamentSvg(t.inner.gold);
-      p.append(o);
+      p.append(tag(o, 'orn'));
     }
     if (t.inner.foot) {
-      p.append(h('div.bd-no',
+      p.append(tag(h('div.bd-no',
         h('span', { class: `pno ${t.inner.pageno || 'circle'}`,
           style: { color: t.inner.ink, borderColor: t.inner.gold } },
-          AR(t.inner.numStart ?? 1))));
+          AR(t.inner.numStart ?? 1))), 'pno'));
     }
     p.append(...deco('inner'));
     return p;
@@ -218,7 +316,7 @@ export async function render(ctx) {
 
   function miniBasmala() {
     const p = h('div.bd-page', { style: { background: t.inner.paper } });
-    p.append(h('div.bd-bsm', h('img', { src: BASMALA_IMG, alt: 'البسملة' })));
+    p.append(tag(h('div.bd-bsm', h('img', { src: BASMALA_IMG, alt: 'البسملة' })), 'bsm'));
     p.append(...deco('front'));
     return p;
   }
@@ -233,7 +331,7 @@ export async function render(ctx) {
       h('div.bd-rights', { style: { borderColor: t.cover.gold } },
         String(t.colophon?.rights || 'حقوقُ الطبع محفوظة…').slice(0, 90)),
       h('div.bd-qr', { style: { borderColor: t.inner.ink } }));
-    p.append(box);
+    p.append(tag(box, 'colo'));
     p.append(...deco('colophon'));
     return p;
   }
@@ -242,24 +340,26 @@ export async function render(ctx) {
     const S = SH();
     const b = t.back || {};
     const p = h('div.bd-page', { style: { background: b.paper || t.cover.paper } });
-    if (b.pattern) p.append(h('div.bd-pat', { style: { '--g': b.gold || t.cover.gold } }));
+    if (b.pattern) {
+      p.append(tag(h('div.bd-pat', { style: { '--g': b.gold || t.cover.gold } }), 'pattern'));
+    }
     if (b.bg) {
-      p.append(h('img.bd-cover-bg', { src: b.bg, alt: '',
-        style: { opacity: String(Math.max(0, Math.min(100, b.fade ?? 16)) / 100) } }));
+      p.append(tag(h('img.bd-cover-bg', { src: b.bg, alt: '',
+        style: { opacity: String(Math.max(0, Math.min(100, b.fade ?? 16)) / 100) } }), 'coverbg'));
     }
     if (b.mark !== false) {
       const bn = h('div.bd-banner', { style: { top: '6%',
         width: `${(Number(b.markW ?? 26) / S.w) * 100}%` } });
       bn.innerHTML = pennantSvg(b.ink || t.cover.ink, b.gold || t.cover.gold);
-      p.append(bn);
+      p.append(tag(bn, 'banner'));
     }
-    p.append(h('div.bd-mid', { style: { top: '46%' } },
+    p.append(tag(h('div.bd-mid', { style: { top: '46%' } },
       h('div.bd-t3', { style: { color: b.ink || t.cover.ink } },
-        String(b.blurb || 'نبذةُ ظهر الكتاب — تُكتب هنا.').slice(0, 160))));
+        String(b.blurb || 'نبذةُ ظهر الكتاب — تُكتب هنا.').slice(0, 160))), 'blurb'));
     if (b.foot !== false) {
-      p.append(h('div.bd-foot', { style: { color: b.ink || t.cover.ink } },
+      p.append(tag(h('div.bd-foot', { style: { color: b.ink || t.cover.ink } },
         h('span', 'الهيئةُ العامة للعناية بشؤون المسجد الحرام والمسجد النبوي'),
-        b.isbn ? h('span', { dir: 'ltr' }, String(b.isbn)) : null));
+        b.isbn ? h('span', { dir: 'ltr' }, String(b.isbn)) : null), 'foot'));
     }
     p.append(...deco('back'));
     return p;
@@ -291,6 +391,124 @@ export async function render(ctx) {
     drawAll();
   }
 
+  // ـــ الضغطُ والسحبُ على الصفحة نفسِها (ملاحظة ٤٤٣)
+  function bindSelect(sheet, key) {
+    sheet.addEventListener('pointerdown', ev => {
+      const el = ev.target.closest('.bd-obj');
+      if (!el || !sheet.contains(el)) return;
+      ev.preventDefault();
+      if (page !== key) { page = key; }
+      objSel = { page: key, ...el.__sel };
+      const tg = selTarget(objSel);
+      // التحديدُ يُرى فورًا بلا إعادةِ بناءٍ تقطع السحب
+      sheet.querySelectorAll('.bd-obj.sel').forEach(x => x.classList.remove('sel'));
+      el.classList.add('sel');
+      drawProps();
+      if (!tg || !tg.move) return;
+      const box = sheet.getBoundingClientRect();
+      const rtl = getComputedStyle(sheet).direction === 'rtl' ? -1 : 1;
+      const x0 = ev.clientX, y0 = ev.clientY;
+      const sx = tg.move === 'xy' ? Number(tg.obj.x ?? 0) : 0;
+      const sy = tg.move === 'xy' ? Number(tg.obj.y ?? 0) : tg.get();
+      el.setPointerCapture?.(ev.pointerId);
+      const onMove = e2 => {
+        const dy = ((e2.clientY - y0) / box.height) * 100;
+        const ny = Math.max(0, Math.min(98, sy + dy));
+        if (tg.move === 'xy') {
+          const dx = (((e2.clientX - x0) * rtl) / box.width) * 100;
+          tg.obj.x = Math.round(Math.max(0, Math.min(98, sx + dx)) * 10) / 10;
+          tg.obj.y = Math.round(ny * 10) / 10;
+          el.style.insetInlineStart = `${tg.obj.x}%`;
+          el.style.top = `${tg.obj.y}%`;
+        } else {
+          tg.set(ny);
+          el.style.top = `${tg.get()}%`;
+        }
+      };
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        drawAll();
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    });
+  }
+
+  // ـــ بطاقةُ المحدَّد: ما يُعدَّل فيه وما يُحذَف به
+  function selCard() {
+    if (!objSel) {
+      return h('p.small.muted.bd-selhint',
+        'اضغطْ أيَّ عنصرٍ على الصفحة — شعارًا أو نصًّا أو رايةً أو إطارًا — '
+        + 'يُحدَّد فتَنقلَه بالسحب وتُعدِّلَه وتحذفَه.');
+    }
+    const tg = selTarget(objSel);
+    if (!tg || !tg.obj) { objSel = null; return h('span'); }
+    const o = tg.obj;
+    const fields = [];
+    if (tg.move === 'xy') {
+      fields.push(num(o, 'x', 'من اليمين ٪', 0, 98), num(o, 'y', 'من الأعلى ٪', 0, 98));
+    }
+    if (objSel.type === 'mark' || objSel.type === 'covermark') {
+      fields.push(num(o, 'h', 'الارتفاع مم', 3, 200));
+      if (objSel.type === 'mark') fields.push(num(o, 'opacity', 'الظهور ٪', 5, 100, 5));
+    }
+    if (objSel.type === 'text') {
+      fields.push(num(o, 'w', 'العرض ٪', 10, 100), num(o, 'size', 'القياس مم', 2, 40),
+        h('label.field.sm', 'اللون', colorIn(o.color, v => { o.color = v; })));
+    }
+    if (objSel.type === 'shape') {
+      fields.push(num(o, 'w', 'العرض ٪', 1, 100),
+        o.kind === 'line' ? num(o, 'thick', 'السُّمك مم', 0.2, 10, 0.1)
+          : num(o, 'h', 'الارتفاع ٪', 1, 100),
+        h('label.field.sm', 'اللون', colorIn(o.color, v => { o.color = v; })));
+    }
+    if (objSel.type === 'banner' && objSel.page === 'cover') {
+      fields.push(num(t.cover, 'bannerW', 'عرضُها مم', 0, 60),
+        num(t.cover, 'bannerTop', 'نزولُها مم', 0, 80));
+    }
+    if (objSel.type === 'wm' && o.src) {
+      fields.push(num(o, 'size', 'قياسُها ٪', 10, 100), num(o, 'opacity', 'ظهورُها ٪', 1, 60));
+    }
+    if (objSel.type === 'band') {
+      fields.push(num(o, 'h', 'ارتفاعُه مم', 1, 60),
+        h('label.field.sm', 'لونُه', colorIn(o.color, v => { o.color = v; })));
+    }
+    const dup = (objSel.type === 'text' || objSel.type === 'shape' || objSel.type === 'mark'
+      || objSel.type === 'covermark') && tg.arr
+      ? h('button.btn.xs', { type: 'button', title: 'نسخةٌ منه',
+          onclick: () => {
+            tg.arr.splice(objSel.i + 1, 0, { ...o, y: (o.y ?? 0) + 4 });
+            objSel = { ...objSel, i: objSel.i + 1 }; drawAll();
+          } }, '⧉ نسخة')
+      : null;
+    const del = (tg.arr || tg.off)
+      ? h('button.btn.xs.danger', { type: 'button',
+          onclick: () => {
+            if (tg.arr) tg.arr.splice(objSel.i, 1); else tg.off();
+            objSel = null; drawAll();
+          } }, '🗑 احذفْه')
+      : null;
+    const layer = tg.arr
+      ? h('div.row', { style: { gap: '4px' } },
+          h('button.btn.xs.ghost', { type: 'button', title: 'إلى الأمام',
+            onclick: () => { move(tg.arr, objSel.i, 1); objSel = null; } }, '▲'),
+          h('button.btn.xs.ghost', { type: 'button', title: 'إلى الخلف',
+            onclick: () => { move(tg.arr, objSel.i, -1); objSel = null; } }, '▼'))
+      : null;
+    const body = objSel.type === 'text'
+      ? textIn(o.text, v => { o.text = v; }, { rows: 2, label: 'النص' }) : null;
+    return h('div.card.stack.bd-sel',
+      h('div.row.between.wrap',
+        h('b', `المحدَّد: ${selName(objSel)} — ${PAGE_LABEL[objSel.page] || ''}`),
+        h('button.btn.xs.ghost', { type: 'button',
+          onclick: () => { objSel = null; drawAll(); } }, 'إلغاءُ التحديد')),
+      body,
+      fields.length ? h('div.row.wrap', { style: { gap: '6px', alignItems: 'end' } }, fields)
+        : h('p.small.muted', 'هذا العنصرُ ثابتُ الموضع: يُحدَّد ويُرفَع ويُعاد من أدواته.'),
+      h('div.row.wrap', { style: { gap: '6px' } }, dup, layer, del));
+  }
+
   function drawStage() {
     const S = SH();
     const st = STATIONS[station];
@@ -315,10 +533,21 @@ export async function render(ctx) {
         ...st.pages.map(k => {
           const box = h('div.bd-sheet' + (page === k ? '.on' : ''),
             { style: { aspectRatio: `${S.w} / ${S.h}` } }, MAKE[k]());
-          return h('button.bd-sheet-wrap', { type: 'button',
-            title: `اعمَلْ على ${PAGE_LABEL[k]}`,
-            onclick: () => { page = k; drawAll(); } },
+          bindSelect(box, k);
+          // صفحةٌ تُضغَط لتُعمَل عليها، وعناصرُها تُضغَط لتُحدَّد (ملاحظة ٤٤٣)
+          const wrap = h('div.bd-sheet-wrap', { tabindex: '0', role: 'button',
+            title: `اعمَلْ على ${PAGE_LABEL[k]}`, 'aria-pressed': String(page === k) },
             box, h('span.small.muted', PAGE_LABEL[k]));
+          wrap.addEventListener('click', ev => {
+            if (ev.target.closest('.bd-obj')) return;
+            if (page === k) { objSel = null; drawProps(); return; }
+            page = k; objSel = null; drawAll();
+          });
+          wrap.addEventListener('keydown', ev => {
+            if (ev.key !== 'Enter' && ev.key !== ' ') return;
+            ev.preventDefault(); page = k; objSel = null; drawAll();
+          });
+          return wrap;
         })),
       h('div.row.between.wrap.bd-savebar',
         h('span.small.muted', 'اضغطْ صفحةً لتعمل عليها، وأدواتُها إلى جانبها.'),
@@ -728,7 +957,7 @@ export async function render(ctx) {
     if (uni) uniKey = uni.active || uniKey;
     uni = unifiedPanel({ stage: null, tabs,
       onTab: k => { uniKey = k; } });
-    fill(props, uni.el, imgFile, bgFile, pageFile, wmFile);
+    fill(props, selCard(), uni.el, imgFile, bgFile, pageFile, wmFile);
     if (tabs.some(x => x.key === uniKey)) uni.show(uniKey);
   }
 

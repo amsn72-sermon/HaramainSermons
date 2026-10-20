@@ -33,8 +33,8 @@ const routes = [
   ['/app/field', () => import('./views/staff.js').then(m => ({ render: m.field })), true, true],
   ['/app/answers', () => import('./views/staff.js').then(m => ({ render: m.answers })), true, true],
   // أرشيفُ الخطب السنوي: أعوامٌ وأسابيعُ جُمَع (ملاحظة ٣٠٣)
-  ['/app/sermons', () => import('./views/sermons.js'), true, 'rp_archive'],
-  ['/app/sermons/:year', () => import('./views/sermons.js'), true, 'rp_archive'],
+  ['/app/sermons', () => import('./views/sermons.js'), true, 'perm'],
+  ['/app/sermons/:year', () => import('./views/sermons.js'), true, 'perm'],
   // تنقيحُ نسخةٍ على الكليشة ثم حفظُها (ملاحظة ٣٣٨)
   ['/app/sermon-edit/:id', () => import('./views/sermonedit.js'), true, 'rp_archive'],
   // مصمِّمُ قوالب المجمَّع السنوي (ملاحظتا ٣٣٩ و٣٥٠)
@@ -93,6 +93,8 @@ const PERM_OF = {
   '/app/languages': 'st_languages', '/app/khateebs': 'st_khateebs',
   '/app/workflow': 'st_workflow',
   '/app/stats': 'rp_stats', '/app/archive': 'rp_archive',
+  // الأرشيفُ ولوحةُ المتابعة والقاعات: صلاحياتٌ يمنحها المدير (٤٣٩ و٤٤١ و٤٤٤)
+  '/app/sermons': 'arch_read',
   '/app/sermon-edit': 'rp_archive', '/app/book-design': 'arch_design',
   '/app/export-templates': 'arch_design'
 };
@@ -189,8 +191,11 @@ async function render() {
       const supervisorMay = isWatcher()
         && !NOT_FOR_SUPERVISOR.includes(path) && !path.startsWith('/app/revise');
       // مواقعُ العمل يفتحها القائدُ ليرى فريقَه، ولا يحرّر (ملاحظة ٢٢٧)
+      // 'perm' — الشاشةُ تُفتَح بالصلاحية لا بالدور، فيبلغها المترجمُ
+      //   إن منحها مديرُ المشروع (ملاحظات ٤٣٩ و٤٤١ و٤٤٤)
       const mayView = route.adminOnly === 'manager' ? isManager()
         : route.adminOnly === 'lead' ? (isAdmin() || supervisorMay || isTeamLead())
+        : route.adminOnly === 'perm' ? true
         : isAdmin() || supervisorMay;
       if (route.adminOnly && !mayView) return navigate('/app', { replace: true });
       // قائمة الصلاحيات: ما أُغلق على الحساب لا يُفتح ولو كُتب مساره (ملاحظة ١٧٢)

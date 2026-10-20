@@ -2,7 +2,7 @@
 // Word (.docx) عبر مكتبة docx المحلية، وPDF عبر طباعة المتصفح. المقاسات من page.js.
 import { h, fmtHijri } from './ui.js';
 import { sanitize } from './sanitize.js';
-import { langDir } from './store.js';
+import { langDir, state } from './store.js';
 import { PAGE, BOX, LETTERHEAD, cardColumns, cardRowsTr, fileName, docVerifyUrl,
   DOC_STAMP_CSS, docStampNode, flowStarts, fontsSettled, settledHeight } from './page.js';
 import { qrPngDataUrl, qrPngBytes } from './qr.js';
@@ -26,6 +26,10 @@ const PX = mm => Math.round(mm * 96 / 25.4);             // ملّيمتر → �
 const BASE_PT = 12;
 // سلسلةُ الخطوط تُكتَب في الصفحة، وWord يأخذ أوّلَ أسرةٍ منها (ملاحظة ٤٢٤)
 const fam = v => String(v || '').replace(/["']/g, '').split(',')[0].trim() || '';
+// بطاقةُ البيانات: خطُّها من الكليشة الأصل ما لم تُختَر كليشةٌ لها خطُّها
+//   (ملاحظة ٤٣٦)
+const CARD_STYLE = (lh = null) => ({ font: '', size: 11,
+  ...(state.cardStyle || {}), ...((lh && lh.card) || {}) });
 
 // يحوّل HTML المنقّى إلى عناصر Word مع الحفاظ على التنسيق الأساسي والجداول
 function htmlToBlocks(docx, html, rtl) {
@@ -96,10 +100,14 @@ function htmlToBlocks(docx, html, rtl) {
   return out;
 }
 
-function cardTable(docx, material, track, khateeb) {
+function cardTable(docx, material, track, khateeb, card = null) {
   const { Paragraph, TextRun, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType } = docx;
   const b = { style: BorderStyle.SINGLE, size: 8, color: GOLD };
-  const run = (text, o = {}) => new TextRun({ text, rightToLeft: true, font: 'Arial', size: 22, ...o });
+  // خطُّ البطاقة وحجمُها من الكليشة الأصل، كما في المحرر وPDF (ملاحظة ٤٣٦)
+  const cf = fam((card || {}).font) || 'Arial';
+  const cpt = Number((card || {}).size) || 11;
+  const run = (text, o = {}) => new TextRun({ text, rightToLeft: true, font: cf,
+    size: Math.round(cpt * 2), ...o });
   const cols = cardColumns(material, track.language_code, khateeb);
   const cell = (children, shading) => new TableCell({
     borders: { top: b, bottom: b, left: b, right: b },
@@ -115,7 +123,8 @@ function cardTable(docx, material, track, khateeb) {
   ];
   if (tr) {
     rows.push(new TableRow({ children: cols.map((_, i) =>
-      cell([para((tr[i] || [])[1] || '', { size: 20, color: '5A6A78' })])) }));
+      cell([para((tr[i] || [])[1] || '', { size: Math.round(Math.max(7, cpt - 1) * 2),
+        color: '5A6A78' })])) }));
   }
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE }, visuallyRightToLeft: true, rows
@@ -185,7 +194,7 @@ export async function docxBlob(items, { name = 'خطب' } = {}) {
         margin: { top: TW(PAGE.top), bottom: TW(PAGE.bottom), left: TW(PAGE.side), right: TW(PAGE.side), header: 0, footer: 0 } } },
       headers: { default: new Header({ children: [letterhead()] }) },
       children: [...(await docStampBlocks(docx, track)),
-        cardTable(docx, material, track, khateeb), new Paragraph({ children: [], spacing: { after: 200 } }),
+        cardTable(docx, material, track, khateeb, CARD_STYLE()), new Paragraph({ children: [], spacing: { after: 200 } }),
         ...htmlToBlocks(docx, track.translation_html, rtl)]
     });
   }
@@ -209,6 +218,8 @@ export function printTranslations(items, { autoPrint = true, name = null, lh = n
   const w = window.open('', '_blank');
   if (!w) return false;
   const P = lh && lh.page ? { ...PAGE, ...lh.page } : PAGE;
+  // خطُّ بطاقة البيانات وحجمُها من الكليشة (ملاحظة ٤٣٦)
+  const CARD = CARD_STYLE(lh);
   const BOX_H = P.h - P.top - P.bottom;      // ارتفاع صندوق الكتابة بالمليمتر
   const BOX_W = P.w - P.side * 2;
   // الحدودُ من page.js وحدَه، فلا يشذُّ المحرر عن التصدير (ملاحظة ٤٢٣)
@@ -228,7 +239,7 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
   display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #6b6257; letter-spacing: .5px; direction: ltr; }
 .flow { position: absolute; top: 0; inset-inline-start: 0; width: ${BOX_W}mm; }
 .print-body { --pt: 1pt; font-size: 12pt; line-height: 1.8; }
-.print-body .data-card { font-size: 11pt; }
+.print-body .data-card { font-size: ${CARD.size}pt;${CARD.font ? ` font-family: ${CARD.font};` : ''} }
 .data-card tr.tr-row td { font-size: 9.5pt; color: #5a6a78; unicode-bidi: plaintext; }
 #measure { position: absolute; visibility: hidden; top: -10000mm; inset-inline-start: 0; width: ${BOX_W}mm; }
 ${DOC_STAMP_CSS(P.side)}
@@ -291,8 +302,8 @@ ${DOC_STAMP_CSS(P.side)}
 
     // الحسابُ نفسُه الذي يرسم فواصلَ المحرر، بعد ثبات الارتفاع
     //   (ملاحظتا ٤٢٣ و٤٣٠)
-    const total = await settledHeight(flow);
-    const starts = flowStarts(flow, { doc: d, boxPx, total });
+    const { starts, total } = flowStarts(flow,
+      { doc: d, boxPx, total: await settledHeight(flow) });
 
     const pages = d.getElementById('pages');
     const lhUrl = lh && lh.src ? lh.src : new URL(LETTERHEAD, location.origin).href;

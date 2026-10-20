@@ -6,7 +6,7 @@
 import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDate } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { isManager, can } from '../store.js';
-import { LH_DEFAULT, normLh, uploadLhImage } from '../letterhead.js';
+import { LH_DEFAULT, normLh, uploadLhImage, CARD_FONTS } from '../letterhead.js';
 import { PAGE, BOX, LETTERHEAD } from '../page.js';
 import { unifiedPanel } from '../unipanel.js';
 
@@ -159,6 +159,26 @@ export async function render() {
           make: () => h('div.stack',
             h('p.small.muted', 'A4 قائمٌ ٢١٠×٢٩٧ مم، ودقّةُ ٣٠٠ نقطةٍ أحسن.'),
             h('label.field', 'ارفعِ الصورة', file)) },
+        { key: 'card', icon: '▦', label: 'بطاقةُ البيانات', hint: 'خطُّها وحجمُها',
+          make: () => {
+            const fo = h('select', { 'aria-label': 'خط بطاقة البيانات' },
+              CARD_FONTS.map(([v, n]) =>
+                h('option', { value: v, selected: (tpl.card.font || '') === v }, n)));
+            fo.onchange = () => { tpl.card.font = fo.value; paint(); };
+            const sz = h('input', { type: 'number', min: '7', max: '16', step: '0.5',
+              value: String(tpl.card.size), 'aria-label': 'حجم خط البطاقة' });
+            sz.oninput = () => {
+              tpl.card.size = Math.max(7, Math.min(16, Number(sz.value) || 11));
+              paint();
+            };
+            return h('div.stack',
+              h('p.small.muted', 'بطاقةُ بيانات الخطبة في صدر الصفحة: خطُّها وحجمُها '
+                + 'يسريان على المحرر وعلى PDF وعلى ملفِّ Word جميعًا. '
+                + 'ومحتواها لا يُعدَّل، فهو من بيانات الخطبة.'),
+              h('div.uni-grid',
+                h('label.field', 'الخط', fo),
+                h('label.field', 'الحجم pt', sz)));
+          } },
         { key: 'page', icon: '▣', label: 'موضعُ الكتابة', hint: 'هوامشُ النصِّ على الكليشة',
           make: () => h('div.stack',
             h('div.uni-grid',

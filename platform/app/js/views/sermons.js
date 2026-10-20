@@ -187,6 +187,71 @@ export async function render(ctx) {
 //   وهو ما يستحضره الناسُ: «رجب» لا «الأسبوع ٢٨» — وصار لكلِّ لغةٍ
 //   صفُّها بأيقوناتها ورمزِ توثيقها (ملاحظات ٣٦٥–٣٧٠).
 // ---------------------------------------------------------------------
+// ـــ اسمُ الخطيب من قائمة الخطباء لا بالحرف (ملاحظة ٤٤٦)
+//
+//   كان يُكتَب باليد، فاختلفت صورتُه: رباعيًّا مرّةً وثلاثيًّا أخرى،
+//   وبـ«الدكتور» مرّةً وبدونها. فصار يُختار من المسجَّلين، ويُضاف
+//   الجديدُ مرةً واحدةً فيُستعمَل بعدُ كما هو. وما كُتب قديمًا يبقى
+//   ظاهرًا في قائمته حتى يُوحَّد.
+let KHATEEBS = null;
+async function khateebList() {
+  if (KHATEEBS) return KHATEEBS;
+  try {
+    KHATEEBS = await db.select('khateebs',
+      { select: 'id,name,mosque,is_active', order: 'name.asc' }) || [];
+  } catch { KHATEEBS = []; }
+  return KHATEEBS;
+}
+
+async function khateebPicker(value = '', { mosque = null } = {}) {
+  const list = (await khateebList())
+    .filter(k => k.is_active !== false && (!mosque || k.mosque === mosque));
+  const names = [...new Set(list.map(k => k.name))];
+  const sel = h('select', { 'aria-label': 'الخطيب' },
+    h('option', { value: '' }, '— اختر الخطيب —'),
+    names.map(n => h('option', { value: n, selected: n === value }, n)),
+    // الاسمُ المكتوبُ قديمًا يبقى ظاهرًا حتى يُوحَّد
+    value && !names.includes(value)
+      ? h('option', { value, selected: true }, `${value} — مكتوبٌ قديمًا`) : null);
+  // الواجهةُ تقرأ `.value` من الحقل كما كانت، فلا يتغيّر ما حولَها
+  if (!(isManager() || can('arch_upload'))) return sel;
+  // ＋ خطيبٌ جديد: يُضاف مرةً واحدةً ثم يُستعمَل كما هو
+  const add = h('button.btn.xs', { type: 'button', title: 'خطيبٌ جديد' }, '＋');
+  add.onclick = () => busy(add, async () => {
+    const nm = h('input', { 'aria-label': 'اسم الخطيب', maxlength: 120 });
+    const mq = h('select', { 'aria-label': 'المسجد' },
+      h('option', { value: 'makkah', selected: mosque === 'makkah' }, MOSQUE.makkah),
+      h('option', { value: 'madinah', selected: mosque === 'madinah' }, MOSQUE.madinah));
+    const res = await dialog({
+      title: 'خطيبٌ جديد',
+      body: h('div.stack',
+        h('p.small.muted', 'يُكتَب الاسمُ مرةً واحدةً على صورته المعتمَدة، '
+          + 'ثم يُختار بعدُ من القائمة فلا يختلف.'),
+        h('label.field', 'الاسم', nm),
+        h('label.field', 'المسجد', mq)),
+      buttons: [{ label: 'أضِفْه', kind: 'primary',
+        validate: () => (nm.value.trim().length >= 3 ? true : 'اكتبِ الاسمَ كاملًا'),
+        value: () => ({ name: nm.value.trim(), mosque: mq.value }) },
+        { label: 'إلغاء', value: null }]
+    });
+    if (!res) return;
+    try {
+      await db.insert('khateebs', { name: res.name, mosque: res.mosque, sort: 100 });
+      KHATEEBS = null;
+      const fresh = (await khateebList()).filter(k => k.is_active !== false);
+      const all = [...new Set(fresh.map(k => k.name))];
+      fill(sel, h('option', { value: '' }, '— اختر الخطيب —'),
+        all.map(n => h('option', { value: n, selected: n === res.name }, n)));
+      sel.value = res.name;
+      toast('أُضيف الخطيب.', 'ok');
+    } catch (e) { toast(e.message, 'bad'); }
+  });
+  const box = h('div.row', { style: { gap: '6px' } }, sel, add);
+  // تبقى القراءةُ من الحقل نفسِه
+  Object.defineProperty(box, 'value', { get: () => sel.value, set: v => { sel.value = v; } });
+  return box;
+}
+
 const H_MONTHS = ['محرَّم', 'صفر', 'ربيع الأول', 'ربيع الآخر', 'جمادى الأولى',
   'جمادى الآخرة', 'رجب', 'شعبان', 'رمضان', 'شوّال', 'ذو القعدة', 'ذو الحجة'];
 const monthName = m => H_MONTHS[(Number(m) || 1) - 1] || `الشهر ${AR(m)}`;
@@ -692,7 +757,8 @@ async function yearPage(ctx, year) {
   //   فتُنشأ الخطبةُ وتُفتَح تحتها صفوفُ اللغات الثابتة (ملاحظة ٤١٥)
   async function quickSermon({ mosque, friday }) {
     const title = h('input', { 'aria-label': 'عنوان الخطبة', maxlength: 200 });
-    const khateeb = h('input', { 'aria-label': 'الخطيب', maxlength: 120 });
+    // اسمُ الخطيب من القائمة لا بالحرف، فلا تختلف صورتُه (ملاحظة ٤٤٦)
+    const khateeb = await khateebPicker('');
     const hj = friday ? fmtHijri(friday) : '';
     const res = await dialog({
       title: `خطبةُ ${MOSQUE[mosque] || ''} — ${hj}`,
@@ -734,7 +800,7 @@ async function yearPage(ctx, year) {
     const langs = trLangs();
     const f = {
       title: h('input', { value: cur.title || '', 'aria-label': 'موضوع الخطبة' }),
-      khateeb: h('input', { value: cur.khateeb || '', 'aria-label': 'الخطيب' }),
+      khateeb: await khateebPicker(cur.khateeb || ''),
       date: h('input', { type: 'date',
         value: cur.sermon_date || (friday ? String(friday).slice(0, 10) : ''),
         'aria-label': 'تاريخ الخطبة' }),
