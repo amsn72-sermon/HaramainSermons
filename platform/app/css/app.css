@@ -371,9 +371,19 @@ dialog .dlg-foot { display: flex; gap: 8px; justify-content: flex-start; padding
 
 /* مشغّل الخطب: لا تحكم من داخل الفيديو، والأزرار أسفله (ملاحظة ٣٢) */
 .player { margin-top: 14px; }
-/* بيانُ أنَّ الترجمةَ المصاحبةَ آليّةٌ من يوتيوب (ملاحظة ٤٣٨) */
-.vp-cc { margin: 6px 0 0; font-size: .72rem; line-height: 1.6; color: var(--muted); text-align: center; }
-.vp-cc .en { opacity: .8; }
+/* النصُّ المصاحبُ في مستطيلٍ تحت شريط الصوت، جملةً جملةً، والمنطوقُ
+   مضيء (ملاحظة ٤٧٢). الارتفاعُ يسع سطرين فلا تقفز الصفحةُ عند التغيُّر. */
+.vp-cap {
+  margin: 8px 0 0; padding: 10px 14px; min-height: 4.4em;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  background: rgba(255, 255, 255, .04); border: 1px solid var(--line, rgba(255, 255, 255, .12));
+  border-radius: 10px; font-size: 1.02rem; line-height: 1.7; color: var(--muted);
+  overflow: hidden; word-break: break-word;
+}
+.vp-cap .vp-w { transition: color .12s linear, opacity .12s linear; opacity: .55; }
+.vp-cap .vp-w.on { color: var(--gold, #d8b46a); opacity: 1; }
+.vp-cap .vp-w + .vp-w { margin-inline-start: .28em; }
+@media (max-width: 560px) { .vp-cap { font-size: .92rem; min-height: 4.2em; padding: 8px 10px; } }
 .vp-frame { position: relative; aspect-ratio: 16 / 9; background: #0d141c; border-radius: 10px; overflow: hidden; }
 .vp-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .vp-shield { position: absolute; inset: 0; cursor: pointer; background: transparent; }

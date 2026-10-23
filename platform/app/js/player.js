@@ -4,6 +4,24 @@ import { h } from './ui.js';
 
 const ORIGIN = 'https://www.youtube-nocookie.com';
 
+// النصُّ المصاحبُ من صنعنا لا من إطار يوتيوب (ملاحظة ٤٧٢): إطارُ يوتيوب
+//   مغلقٌ لا نملك فيه موضعَ النصِّ ولا عددَ سطوره ولا تقطيعَه، فيجمع
+//   ستةَ أسطرٍ فوق الكعبة. فصرنا نجلب نصَّه الموقوتَ كلمةً كلمةً أثناء
+//   المزامنة، ونعرضه نحن في مستطيلٍ تحت شريط الصوت: جملةً جملةً،
+//   موسَّطةً، والكلمةُ المنطوقةُ مضيئة.
+const CAP_BASE = String(window.HS_CONFIG?.feedUrl || '').replace(/feed\.json$/, 'captions/');
+const capCache = new Map();
+function loadCaptions(videoId) {
+  if (!CAP_BASE) return Promise.resolve(null);
+  if (!capCache.has(videoId)) {
+    capCache.set(videoId, fetch(CAP_BASE + encodeURIComponent(videoId) + '.json', { cache: 'no-cache' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => (Array.isArray(d?.cues) && d.cues.length ? d : null))
+      .catch(() => null));
+  }
+  return capCache.get(videoId);
+}
+
 // مشغّل واحد يعمل في الصفحة: تشغيل مقطع يوقف ما سواه فلا تختلط الأصوات (ملاحظة ٤٠)
 const running = new Set();
 function stopOthers(me) {
@@ -17,8 +35,6 @@ const fmt = s => {
   const m = Math.floor(s / 60), r = s % 60;
   return `${m}:${String(r).padStart(2, '0')}`;
 };
-// تسمية بالعربية والإنجليزية (الموقع عالمي — ملاحظة ٣٤)
-const two = (ar, en) => h('span.bi', h('span', ar), h('span.en', en));
 
 // ترجمةُ يوتيوب المصاحبةُ تُفتَح بنفسها على اللغة المختارة، فلا يبحث
 //   المشاهدُ عن زرِّ CC (ملاحظة ٤٣٨). وهي آليّةٌ من يوتيوب لا من المشروع،
@@ -53,6 +69,40 @@ export function videoPlayer({ videoId, title, subtitle, captions = true, ccLang 
     'aria-label': `${ar} — ${en}`, title: `${ar} — ${en}`, onclick: fn }, svg(name));
 
   let iframe = null, playing = false, duration = 0, current = 0, seeking = false, volume = 80;
+  // نصُّنا المصاحب: يُجلَب مرةً واحدةً، فإن وُجد أطفأنا نصَّ يوتيوب
+  let cap = null, capWords = [], capIndex = -1, capFrame = 0, timeAt = 0;
+  const capLoad = captions ? loadCaptions(videoId) : Promise.resolve(null);
+  const capBox = h('div.vp-cap', { hidden: true, dir: 'auto', 'aria-live': 'off' });
+  // الزمنُ بين رسالتين من يوتيوب يُقدَّر محليًّا، فتسير الإضاءةُ مع
+  //   الصوت بلا تقطيع
+  const nowTime = () => (playing && timeAt ? current + (performance.now() - timeAt) / 1000 : current);
+
+  function showCue(i) {
+    capIndex = i;
+    const cue = i >= 0 ? cap.cues[i] : null;
+    capWords = [];
+    if (!cue) { capBox.replaceChildren(); capBox.hidden = true; return; }
+    capBox.hidden = false;
+    capBox.replaceChildren(...cue.w.map(([t, text]) => {
+      const sp = h('span.vp-w', text);
+      capWords.push([t, sp]);
+      return sp;
+    }));
+  }
+  function paintCap() {
+    capFrame = 0;
+    if (!cap || !wrap.isConnected) return;
+    const t = nowTime();
+    let i = -1;
+    for (let k = 0; k < cap.cues.length; k++) {
+      if (cap.cues[k].t <= t + 0.15) i = k; else break;
+    }
+    if (i >= 0 && t > cap.cues[i].e + 1.2) i = -1;
+    if (i !== capIndex) showCue(i);
+    for (const [wt, sp] of capWords) sp.classList.toggle('on', t + 0.12 >= wt);
+    if (playing) capFrame = requestAnimationFrame(paintCap);
+  }
+  const capTick = () => { if (cap && !capFrame) capFrame = requestAnimationFrame(paintCap); };
 
   const send = (func, args = []) => {
     try { iframe?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func, args }), ORIGIN); } catch { /* الإطار لم يجهز */ }
@@ -61,11 +111,17 @@ export function videoPlayer({ videoId, title, subtitle, captions = true, ccLang 
     try { iframe?.contentWindow?.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), ORIGIN); } catch { /* */ }
   };
 
-  function mount(autoplay) {
+  async function mount(autoplay) {
     if (iframe) return;
-    const cc = captions
+    // ننتظر نصَّنا قليلًا: فإن حضر أطفأنا نصَّ يوتيوب، وإلّا أبقيناه
+    //   فلا يُحرَم المشاهدُ من نصٍّ لأجل بطء الشبكة
+    if (captions && !cap) {
+      cap = await Promise.race([capLoad, new Promise(r => setTimeout(() => r(null), 1200))]);
+      if (iframe) return;
+    }
+    const cc = captions && !cap
       ? `&cc_load_policy=1${ccLang ? `&cc_lang_pref=${encodeURIComponent(ccLang)}` : ''}`
-      : '';
+      : '&cc_load_policy=0';
     const src = `${ORIGIN}/embed/${encodeURIComponent(videoId)}?enablejsapi=1&widgetid=1&controls=0&disablekb=1&modestbranding=1`
       + `&rel=0&iv_load_policy=3&playsinline=1&fs=0&autoplay=${autoplay ? 1 : 0}${cc}&origin=${encodeURIComponent(location.origin)}`;
     iframe = h('iframe', { src, title, allow: 'autoplay; encrypted-media; picture-in-picture', referrerpolicy: 'strict-origin-when-cross-origin' });
@@ -99,7 +155,11 @@ export function videoPlayer({ videoId, title, subtitle, captions = true, ccLang 
   const vol = h('input.vp-range.vp-vol', { type: 'range', min: '0', max: '100', value: String(volume), step: '1', 'aria-label': 'الصوت — Volume' });
 
   seek.addEventListener('input', () => { seeking = true; timeLabel.textContent = `${fmt(Number(seek.value))} / ${fmt(duration)}`; });
-  seek.addEventListener('change', () => { seeking = false; if (iframe) send('seekTo', [Number(seek.value), true]); });
+  seek.addEventListener('change', () => {
+    seeking = false;
+    if (iframe) send('seekTo', [Number(seek.value), true]);
+    current = Number(seek.value); timeAt = performance.now(); capTick();
+  });
   vol.addEventListener('input', () => { volume = Number(vol.value); send('setVolume', [volume]); });
 
   // النقر على الفيديو يشغّل ويوقف فقط — ولا ينقل إلى أي مكان
@@ -117,17 +177,9 @@ export function videoPlayer({ videoId, title, subtitle, captions = true, ccLang 
   const rows = h('div.vp-rows',
     h('div.vp-row', seek, timeLabel),
     h('div.vp-row.vp-volrow', vol, muteBtn));
-  // بيانٌ أنَّ الترجمةَ المصاحبةَ من يوتيوب آليّةً لا من المشروع
-  //   (ملاحظة ٤٣٨) — فهي تُخطئ، والمعتمَدُ ترجمةُ الفريق
-  const ccNote = captions
-    // ما يُعرَض ليس ترجمةً للخطبة، وإنما نقلٌ آليٌّ لكلام المترجم بصوته
-    //   (ملاحظة ٤٦٥)
-    ? h('p.vp-cc', two('النصُّ المصاحبُ نقلٌ آليٌّ من يوتيوب لكلام المترجم، قد يقع فيه '
-        + 'الخطأ، وليس نصًّا معتمَدًا من المشروع.',
-        'The on-screen text is YouTube’s automatic transcript of the interpreter’s '
-        + 'speech; it may contain errors and is not an approved text.'))
-    : null;
-  const wrap = h('div.player', frame, bar, rows, ccNote);
+  // المستطيلُ تحت شريط الصوت لا فوق الفيديو، فلا يحجب الكعبةَ ولا
+  //   الخطيب، وتجده العينُ في موضعٍ ثابت (ملاحظة ٤٧٢)
+  const wrap = h('div.player', frame, bar, rows, capBox);
 
   function setState(s) {
     const was = playing;
@@ -136,6 +188,8 @@ export function videoPlayer({ videoId, title, subtitle, captions = true, ccLang 
     playBtn.replaceChildren(svg(playing ? 'pause' : 'play'));
     playBtn.setAttribute('aria-label', playing ? 'إيقاف — Pause' : 'تشغيل — Play');
     playBtn.title = playBtn.getAttribute('aria-label');
+    if (playing) capTick();
+    else if (capFrame) { cancelAnimationFrame(capFrame); capFrame = 0; }
     if (s === 0) { send('seekTo', [0, true]); send('pauseVideo'); }   // عند الانتهاء: لا مقاطع مقترحة
   }
 
@@ -146,14 +200,22 @@ export function videoPlayer({ videoId, title, subtitle, captions = true, ccLang 
     if (!info) return;
     if (typeof info.duration === 'number' && info.duration > 0) { duration = info.duration; seek.max = String(Math.floor(duration)); }
     if (typeof info.currentTime === 'number') {
-      current = info.currentTime;
+      current = info.currentTime; timeAt = performance.now();
       if (!seeking) { seek.value = String(Math.floor(current)); timeLabel.textContent = `${fmt(current)} / ${fmt(duration)}`; }
+      capTick();
     }
     if (typeof info.playerState === 'number') setState(info.playerState);
     if (typeof info.volume === 'number' && !vol.matches(':active')) { /* نُبقي اختيار المستخدم */ }
   }
   window.addEventListener('message', onMessage);
-  const tick = setInterval(() => { if (!wrap.isConnected) { clearInterval(tick); running.delete(wrap); window.removeEventListener('message', onMessage); return; } listen(); }, 1000);
+  const tick = setInterval(() => {
+    if (!wrap.isConnected) {
+      clearInterval(tick); running.delete(wrap); window.removeEventListener('message', onMessage);
+      if (capFrame) { cancelAnimationFrame(capFrame); capFrame = 0; }
+      return;
+    }
+    listen();
+  }, 1000);
 
   wrap.pauseNow = () => { if (iframe && playing) send('pauseVideo'); };
   running.add(wrap);
