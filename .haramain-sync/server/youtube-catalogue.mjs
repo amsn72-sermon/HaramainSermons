@@ -19,14 +19,27 @@ export function classifyOfficialVideo(video,catalogue){
  const dateParts=date.label.match(/(\d{2})-(\d{2})-(\d{4})/);
  const order=dateParts?[dateParts[3],dateParts[2],dateParts[1]].join('-'):date.year?date.year+'-00-00':'';
  const groupTitle=specific?.title||title;
- return {id:'youtube:'+video.id,videoId:video.id,title,originalTitle:title,groupTitle,playlistId:specific?.id||null,venue,kind,date:null,dateLabel:date.label,dateSource,year:date.year,calendar:date.calendar,sourceTime:order,liveStatus:video.liveStatus||null,source:'youtube',needsClassification:venue==='unclassified'||lang.code==='unknown'||kind==='other',translations:[{...lang,videoId:video.id,url:'https://www.youtube.com/watch?v='+video.id,liveStatus:video.liveStatus||null}]};
+ return {id:'youtube:'+video.id,videoId:video.id,title,originalTitle:title,groupTitle,playlistId:specific?.id||null,venue,kind,date:null,dateLabel:date.label,dateSource,year:date.year,calendar:date.calendar,sourceTime:order,liveStatus:video.liveStatus||null,source:'youtube',needsClassification:venue==='unclassified'||lang.code==='unknown'||kind==='other',translations:[{...lang,videoId:video.id,url:'https://www.youtube.com/watch?v='+video.id,liveStatus:video.liveStatus||null,rank:Number.isInteger(video.channelRank)?video.channelRank:9,duration:Number(video.duration)||0,channel:video.ownerChannel||null}]};
 }
 export function groupVideos(records){const byVideo=new Map();for(const r of records)for(const t of r.translations||[])if(t.videoId&&!byVideo.has(t.videoId))byVideo.set(t.videoId,{r,t});
  const groups=new Map();for(const {r,t} of byVideo.values()){
   const dated=!!r.year;const key=r.venue==='unclassified'?(r.playlistId?'playlist:'+r.playlistId:r.id):r.kind==='ramadan'&&r.playlistId?'playlist:'+r.playlistId:dated?[r.venue,r.kind,r.calendar,r.dateLabel].join('|'):r.id;
   let g=groups.get(key);if(!g){g={...r,id:key,title:r.groupTitle||r.title,translations:[]};groups.set(key,g);}
-  g.translations.push({...t,code:t.code+':'+t.videoId});
-  if(t.code==='ar')g.title=r.originalTitle||r.title;
+  // لغةٌ واحدةٌ لكلِّ خطبةٍ ولو بُثَّت على أكثر من قناة: يُؤخَذ
+  //   مقطعُ القناة الأعلى رتبةً، فإن استوتا فالأطولُ مدّةً — فالأقصرُ
+  //   غالبًا بثٌّ انقطع. والمردودُ يُحفَظ «بديلًا» لا يُعرَض (ملاحظة ٤٦٧)
+  const entry={...t,code:t.code+':'+t.videoId};
+  const at=g.translations.findIndex(x=>String(x.code).split(':')[0]===t.code);
+  if(at<0){g.translations.push(entry);}
+  else{
+   const cur=g.translations[at];
+   const better=(entry.rank??9)!==(cur.rank??9)?(entry.rank??9)<(cur.rank??9)
+     :(entry.duration||0)>(cur.duration||0);
+   g.alternates=g.alternates||[];
+   if(better){g.alternates.push(cur);g.translations[at]=entry;}
+   else g.alternates.push(entry);
+  }
+  if(t.code==='ar'&&g.translations.some(x=>x.videoId===t.videoId))g.title=r.originalTitle||r.title;
   if(t.liveStatus==='is_upcoming'||t.liveStatus==='is_live')g.liveStatus=t.liveStatus;
  }
  return [...groups.values()].sort((a,b)=>(b.sourceTime||'').localeCompare(a.sourceTime||''));
@@ -39,5 +52,5 @@ export function youtubeFeed(catalogue,additional=[]){
  const active=new Set(current.map(g=>g.id));const archive=groups.filter(g=>!active.has(g.id));
  const ids=[...current,...archive].flatMap(g=>g.translations.map(t=>t.videoId));
  if(ids.length!==new Set(ids).size)throw Error('Duplicate YouTube IDs');
- return {schemaVersion:1,connection:groups.length?'connected':'awaiting_source',sourceUrl:catalogue.source,lastSuccessfulSync:catalogue.updatedAt,syncError:catalogue.streamsError||null,historyPending:0,historyIssues:0,storage:'persistent',pollSeconds:60,syncIntervalMinutes:15,current,archive,catalogueInfo:{videoCount:ids.length,playlistCount:catalogue.playlistCount,groups:groups.length,unclassified:official.filter(r=>r.needsClassification).length,failedPlaylists:catalogue.failedPlaylists?.length||0,streamsCheckedAt:catalogue.streamsCheckedAt,source:catalogue.source}};
+ return {schemaVersion:1,connection:groups.length?'connected':'awaiting_source',sourceUrl:catalogue.source,lastSuccessfulSync:catalogue.updatedAt,syncError:catalogue.streamsError||null,historyPending:0,historyIssues:0,storage:'persistent',pollSeconds:60,syncIntervalMinutes:15,current,archive,catalogueInfo:{videoCount:ids.length,alternates:[...current,...archive].reduce((n,g)=>n+(g.alternates?.length||0),0),channels:(catalogue.channels||[]).length,playlistCount:catalogue.playlistCount,groups:groups.length,unclassified:official.filter(r=>r.needsClassification).length,failedPlaylists:catalogue.failedPlaylists?.length||0,streamsCheckedAt:catalogue.streamsCheckedAt,source:catalogue.source}};
 }
