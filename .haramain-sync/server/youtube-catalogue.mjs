@@ -14,7 +14,14 @@ export function classifyOfficialVideo(video,catalogue){
  const lang=languageFor(tail)||lists.filter(p=>!kindFor(p.title)).map(p=>languageFor(p.title)).find(Boolean)||(/^خطبة|^برنامج المجالس/.test(title)?legacy.languages[0]:null)||{code:'unknown',language:'لغة غير محددة',englishName:''};
  let date=dateFromTitle(title),dateSource='video';
  const listDate=dateFromTitle(specific?.title||'');
- if((!date.year||date.label.startsWith('عام '))&&listDate.year){date=listDate;dateSource='playlist';}
+ // تاريخُ القائمة هو الفيصل متى كان تامًّا، فالقائمةُ خطبةٌ واحدةٌ بعينها،
+ //   وعناوينُ المقاطع تختلف صياغتُها بين القنوات واللغات: منها
+ //   «[ 05/12/1448 AH ]» بترتيبٍ شهرٌ/يوم، فيُقرأ الشهرُ يومًا فتنقسم
+ //   الخطبةُ الواحدةُ مجموعتين وتُعرَض إحداهما ويُحجَب سائرُ لغاتها
+ //   (ملاحظة ٤٦٧)
+ const exact=d=>/^\d{2}-\d{2}-\d{4}/.test(d.label||'');
+ if(exact(listDate)){if(date.label!==listDate.label){date=listDate;dateSource='playlist';}}
+ else if((!date.year||date.label.startsWith('عام '))&&listDate.year){date=listDate;dateSource='playlist';}
  if(!date.year&&video.releaseTimestamp){const parts=Object.fromEntries(new Intl.DateTimeFormat('en-u-ca-islamic-umalqura',{year:'numeric',month:'2-digit',day:'2-digit',timeZone:'Asia/Riyadh'}).formatToParts(new Date(video.releaseTimestamp*1000)).map(p=>[p.type,p.value]));date={label:parts.day+'-'+parts.month+'-'+parts.year+'هـ (موعد البث)',year:parts.year,calendar:'hijri'};dateSource='scheduled';}
  const dateParts=date.label.match(/(\d{2})-(\d{2})-(\d{4})/);
  const order=dateParts?[dateParts[3],dateParts[2],dateParts[1]].join('-'):date.year?date.year+'-00-00':'';
