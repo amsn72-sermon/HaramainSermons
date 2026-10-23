@@ -2,6 +2,20 @@ import legacy from './channel-seed.mjs';
 import {dateFromTitle} from './video-date.mjs';
 const normalize=v=>String(v||'').normalize('NFKC').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').toLowerCase();
 const aliases={ar:['العربية','arabic'],ur:['اردو','urdu'],fa:['فارسی','persian'],ms:['melayu','malay'],id:['indonesia'],ru:['русский','russian'],tr:['türkçe','turkish'],bn:['বাংলা','bengali'],es:['español','spanish'],pt:['português','portuguese'],ps:['البشتو','پښتو'],km:['الكمبودية','ខ្មែរ'],jula:['جولا','jola'],ku:['كرمانجي','الكردية'],ar:['العربية','عربي','arabic']};
+// عباراتٌ ثابتةٌ في شاشة البثِّ وتصميمه، لا تدلُّ على لغة المقطع
+const BOILER=[/المملكة\s*العربية\s*السعودية/g,/kingdom\s*of\s*saudi\s*arabia/gi,
+ /القران\s*الكريم/g,/الحرمين/g,/المسجد\s*الحرام/g,/المسجد\s*النبوي/g,
+ /الهيئة\s*العامة/g,/مباشر/g,/خطبة\s*الجمعة/g,/friday\s*sermon/gi,
+ /grand\s*mosque/gi,/holy\s*mosque/gi,/saudi/gi,/arabia/gi];
+// لغةُ المقطع من بوسترِه، فاسمُها مكتوبٌ في تصميم الهيئة (ملاحظة ٤٧١).
+//   وتُحذَف أوّلًا العباراتُ الثابتة، فإنَّ في «المملكة العربية السعودية»
+//   لفظَ «العربية» ولا يدلُّ على لغة المقطع.
+export function posterLanguage(text){
+ if(!text)return null;
+ let t=' '+String(text).normalize('NFKC').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي')+' ';
+ for(const re of BOILER)t=t.replace(re,' ');
+ return languageFor(t)||null;
+}
 export function languageFor(value){const text=normalize(value);return legacy.languages.find(l=>[l.language,l.englishName,...(aliases[l.code]||[])].some(name=>text.includes(normalize(name))));}
 function venueFor(value){const t=normalize(value);if(/عرف|araf|arefat|carafo/.test(t))return 'arafah';if(/المسجد النبوي|مسجدالنبي|مسجد نبوي|مسجد نبوی|المدين[هة]|مدين[هة]|madina|medina|prophet|profeta|nabawi|nabav|nebevi|nebevi|пророка|masallacin annabi|মসজিদে নববী|مسجد نبوی/.test(t))return 'madinah';if(/المسجد الحرام|مسجدالحرام|مسجد الحرام|مك[هة]|makkah|mecca|meca|mecque|haram|харама|харам|sagrada|masallaci mai alfarma|হারাম|禁寺/.test(t))return 'makkah';return null;}
 function kindFor(value){const t=normalize(value);return /عرف|araf|arefat|carafo/.test(t)?'arafah':/رمضان|ramadan|ramazan/.test(t)?'ramadan':/عيد|eid|adha|fitr|宰牲节/.test(t)?'eid':/جمع[هة]|friday|viernes|sexta-feira|jumaat|jumat|vendredi|cuma|пятнич|主麻/.test(t)?'friday':/درس|دروس|علمي|مجالس|محاضر|lesson|lecture/.test(t)?'lesson':null;}
@@ -11,11 +25,8 @@ export function classifyOfficialVideo(video,catalogue){
  const title=String(video.title||'');const kind=kindFor(specific?.title)||kindFor(title)||'other';
  const venue=kind==='arafah'?'arafah':kind==='ramadan'?venueFor(specific?.title)||'unclassified':venueFor(title)||venueFor(specific?.title)||'unclassified';
  const tail=title.includes('(')?title.slice(title.lastIndexOf('(')):title;
- // لغةُ صوت المقطع عند يوتيوب تُستأنَس بها إذا خلا العنوانُ من اسم اللغة
- //   (ملاحظة ٤٧١) — وما عيَّنته الإدارةُ في المنصة فوق هذا كلِّه
- const spoken=video.audioLang
-   ? legacy.languages.find(l=>l.code===String(video.audioLang).split('-')[0]) : null;
- const lang=languageFor(tail)||lists.filter(p=>!kindFor(p.title)).map(p=>languageFor(p.title)).find(Boolean)||spoken||(/^خطبة|^برنامج المجالس/.test(title)?legacy.languages[0]:null)||{code:'unknown',language:'لغة غير محددة',englishName:''};
+ const painted=posterLanguage(video.posterText);
+ const lang=languageFor(tail)||lists.filter(p=>!kindFor(p.title)).map(p=>languageFor(p.title)).find(Boolean)||painted||(/^خطبة|^برنامج المجالس/.test(title)?legacy.languages[0]:null)||{code:'unknown',language:'لغة غير محددة',englishName:''};
  let date=dateFromTitle(title),dateSource='video';
  const listDate=dateFromTitle(specific?.title||'');
  // تاريخُ القائمة هو الفيصل متى كان تامًّا، فالقائمةُ خطبةٌ واحدةٌ بعينها،
@@ -30,7 +41,7 @@ export function classifyOfficialVideo(video,catalogue){
  const dateParts=date.label.match(/(\d{2})-(\d{2})-(\d{4})/);
  const order=dateParts?[dateParts[3],dateParts[2],dateParts[1]].join('-'):date.year?date.year+'-00-00':'';
  const groupTitle=specific?.title||title;
- return {id:'youtube:'+video.id,videoId:video.id,title,originalTitle:title,groupTitle,playlistId:specific?.id||null,venue,kind,date:null,dateLabel:date.label,dateSource,year:date.year,calendar:date.calendar,sourceTime:order,liveStatus:video.liveStatus||null,source:'youtube',needsClassification:venue==='unclassified'||lang.code==='unknown'||kind==='other',translations:[{...lang,videoId:video.id,url:'https://www.youtube.com/watch?v='+video.id,liveStatus:video.liveStatus||null,rank:Number.isInteger(video.channelRank)?video.channelRank:9,duration:Number(video.duration)||0,channel:video.ownerChannel||null,cc:video.capState==='ok'||null}]};
+ return {id:'youtube:'+video.id,videoId:video.id,title,originalTitle:title,groupTitle,playlistId:specific?.id||null,venue,kind,date:null,dateLabel:date.label,dateSource,year:date.year,calendar:date.calendar,sourceTime:order,liveStatus:video.liveStatus||null,source:'youtube',needsClassification:venue==='unclassified'||lang.code==='unknown'||kind==='other',translations:[{...lang,videoId:video.id,url:'https://www.youtube.com/watch?v='+video.id,liveStatus:video.liveStatus||null,rank:Number.isInteger(video.channelRank)?video.channelRank:9,duration:Number(video.duration)||0,channel:video.ownerChannel||null}]};
 }
 export function groupVideos(records){const byVideo=new Map();for(const r of records)for(const t of r.translations||[])if(t.videoId&&!byVideo.has(t.videoId))byVideo.set(t.videoId,{r,t});
  const groups=new Map();for(const {r,t} of byVideo.values()){
