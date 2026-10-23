@@ -29,7 +29,10 @@ export function groupVideos(records){const byVideo=new Map();for(const r of reco
   //   مقطعُ القناة الأعلى رتبةً، فإن استوتا فالأطولُ مدّةً — فالأقصرُ
   //   غالبًا بثٌّ انقطع. والمردودُ يُحفَظ «بديلًا» لا يُعرَض (ملاحظة ٤٦٧)
   const entry={...t,code:t.code+':'+t.videoId};
-  const at=g.translations.findIndex(x=>String(x.code).split(':')[0]===t.code);
+  // وما لم تُعرَف لغتُه لا يُرجَّح عليه شيء، فقد تكون حلقاتٍ متعدّدةً
+  //   في قائمةٍ واحدة، فتُعرَض كلُّها
+  const at=t.code==='unknown'?-1
+    :g.translations.findIndex(x=>String(x.code).split(':')[0]===t.code);
   if(at<0){g.translations.push(entry);}
   else{
    const cur=g.translations[at];
