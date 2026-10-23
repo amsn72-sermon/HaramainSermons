@@ -38,16 +38,16 @@ jobs:
           #   تعارضُ دمجٍ أصلًا. وكان `pull --rebase` يصطدم بتعارضٍ في
           #   الملفَّين في كلِّ محاولةٍ فتفشل الدورةُ والأرشيفُ سليم.
           out="$RUNNER_TEMP/haramain-out"
-          mkdir -p "$out"
+          rm -rf "$out"; mkdir -p "$out"
           cp .haramain-sync/youtube-catalogue.json "$out/youtube-catalogue.json"
-          cp archive/feed.json "$out/feed.json"
+          cp -R archive "$out/archive"
           for attempt in 1 2 3 4 5; do
             git fetch origin main
             git reset --hard FETCH_HEAD
-            mkdir -p .haramain-sync archive
+            mkdir -p .haramain-sync
             cp "$out/youtube-catalogue.json" .haramain-sync/youtube-catalogue.json
-            cp "$out/feed.json" archive/feed.json
-            git add .haramain-sync/youtube-catalogue.json archive/feed.json
+            cp -R "$out/archive/." archive/
+            git add .haramain-sync/youtube-catalogue.json archive
             if git diff --cached --quiet; then
               echo 'الأرشيف كما هو؛ لا جديد يُدفَع'; exit 0
             fi
