@@ -86,6 +86,22 @@ def cues_from_json3(raw):
  flush()
  return cues
 
+# يوتيوب يردُّ طلبَ بيانات المقطع الكاملة الآتيةَ من خوادم البناء أحيانًا،
+#   وواجهاتُ مشغِّله تختلف في ذلك، فتُجرَّب واحدةً بعد أخرى (ملاحظة ٤٧١)
+CLIENTS=[c for c in os.environ.get('HS_PLAYER_CLIENTS','default,tv,android_vr,web_safari,ios').split(',') if c]
+
+GOOD_CLIENT=[None]   # أوّلُ واجهةٍ نجحت تُعتمَد لبقيّة الدورة
+
+def video_info(vid):
+ last=None
+ order=([GOOD_CLIENT[0]]+[c for c in CLIENTS if c!=GOOD_CLIENT[0]]) if GOOD_CLIENT[0] else list(CLIENTS)
+ for client in order:
+  try:
+   info=extract('https://www.youtube.com/watch?v='+vid,flat=False,client=client)
+   GOOD_CLIENT[0]=client;return info
+  except Exception as e:last=e
+ raise last if last else RuntimeError('no client')
+
 def caption_track(info):
  """المسارُ الموافقُ للغة الصوت: اليدويُّ أوّلًا ثم الآليّ."""
  lang=(info.get('language') or '').split('-')[0]
@@ -110,14 +126,21 @@ def enrich(output,now):
   if (v.get('capTries') or 0)>=CAP_TRIES:continue
   pool.append((v.get('firstSeen') or '',vid))
  pool.sort(reverse=True)
- done=0;got=0
+ done=0;got=0;failed=0;why=None;burned=[]
  for _,vid in pool[:ENRICH_MAX]:
   v=output['videos'][vid]
   v['capTries']=(v.get('capTries') or 0)+1
   try:
-   info=extract('https://www.youtube.com/watch?v='+vid,flat=False)
-  except Exception:
-   v['capState']='error';continue
+   info=video_info(vid)
+  except Exception as e:
+   v['capState']='error';why=why or (type(e).__name__+': '+str(e))[:200]
+   failed+=1;burned.append(v)
+   # إن رُدَّت المحاولاتُ الأولى كلُّها فالحجبُ عامٌّ لا عيبٌ في المقطع:
+   #   لا نُضيّع بقيّةَ الدورة، ولا نُحمِّل المقاطعَ محاولاتٍ لا ذنبَ لها
+   if done==0 and failed>=3:
+    for b in burned:b['capTries']=max(0,(b.get('capTries') or 1)-1);b.pop('capState',None)
+    break
+   continue
   done+=1
   if info.get('language'):v['audioLang']=info['language']
   key,url=caption_track(info)
@@ -126,20 +149,21 @@ def enrich(output,now):
   try:
    with urllib.request.urlopen(url,timeout=30) as r:raw=r.read().decode('utf-8','replace')
    cues=cues_from_json3(raw)
-  except Exception:
-   v['capState']='error';continue
+  except Exception as e:
+   v['capState']='error';why=why or ('caption: '+str(e))[:200];continue
   if not cues:
    v['capState']='none';continue
   CAPTIONS.mkdir(parents=True,exist_ok=True)
   (CAPTIONS/(vid+'.json')).write_text(json.dumps(
     {'v':1,'lang':key,'videoId':vid,'cues':cues},ensure_ascii=False,separators=(',',':')))
   v['capState']='ok';v['captionsAt']=now;got+=1
- return {'asked':done,'captions':got,'pool':len(pool)}
+ return {'asked':done,'captions':got,'pool':len(pool),'why':why}
 
-def extract(url,limit=None,flat=True):
+def extract(url,limit=None,flat=True,client=None):
  opts={'quiet':True,'logger':Quiet(),'skip_download':True,'socket_timeout':25,'retries':2,'extractor_retries':2}
  if flat:opts['extract_flat']='in_playlist'
  else:opts.update({'writesubtitles':False,'writeautomaticsub':False,'noplaylist':True})
+ if client and client!='default':opts['extractor_args']={'youtube':{'player_client':[client]}}
  if limit:opts['playlistend']=limit
  with yt_dlp.YoutubeDL(opts) as ydl:return ydl.extract_info(url,download=False)
 
@@ -221,7 +245,7 @@ def update(path,cache=None,full=False):
  if not output['videos']:raise ValueError('Empty channel listing; previous archive retained')
  # إثراءُ المقاطع الحديثة لا يُفشِل الدورةَ إن تعثَّر، فالأرشيفُ أهمُّ منه
  try:extra=enrich(output,now) if not cache else {'asked':0,'captions':0,'pool':0}
- except Exception:extra={'asked':0,'captions':0,'pool':0,'error':True}
+ except Exception as e:extra={'asked':0,'captions':0,'pool':0,'why':(type(e).__name__+': '+str(e))[:200]}
  output.update({'version':now,'updatedAt':now,'playlistCount':total_lists,'checkedCount':checked,'failedPlaylists':errors})
  path.parent.mkdir(parents=True,exist_ok=True)
  tmp=path.with_suffix('.tmp');tmp.write_text(json.dumps(output,ensure_ascii=False,separators=(',',':')));tmp.replace(path)
