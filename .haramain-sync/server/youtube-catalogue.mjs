@@ -11,7 +11,11 @@ export function classifyOfficialVideo(video,catalogue){
  const title=String(video.title||'');const kind=kindFor(specific?.title)||kindFor(title)||'other';
  const venue=kind==='arafah'?'arafah':kind==='ramadan'?venueFor(specific?.title)||'unclassified':venueFor(title)||venueFor(specific?.title)||'unclassified';
  const tail=title.includes('(')?title.slice(title.lastIndexOf('(')):title;
- const lang=languageFor(tail)||lists.filter(p=>!kindFor(p.title)).map(p=>languageFor(p.title)).find(Boolean)||(/^خطبة|^برنامج المجالس/.test(title)?legacy.languages[0]:null)||{code:'unknown',language:'لغة غير محددة',englishName:''};
+ // لغةُ صوت المقطع عند يوتيوب تُستأنَس بها إذا خلا العنوانُ من اسم اللغة
+ //   (ملاحظة ٤٧١) — وما عيَّنته الإدارةُ في المنصة فوق هذا كلِّه
+ const spoken=video.audioLang
+   ? legacy.languages.find(l=>l.code===String(video.audioLang).split('-')[0]) : null;
+ const lang=languageFor(tail)||lists.filter(p=>!kindFor(p.title)).map(p=>languageFor(p.title)).find(Boolean)||spoken||(/^خطبة|^برنامج المجالس/.test(title)?legacy.languages[0]:null)||{code:'unknown',language:'لغة غير محددة',englishName:''};
  let date=dateFromTitle(title),dateSource='video';
  const listDate=dateFromTitle(specific?.title||'');
  // تاريخُ القائمة هو الفيصل متى كان تامًّا، فالقائمةُ خطبةٌ واحدةٌ بعينها،
@@ -26,7 +30,7 @@ export function classifyOfficialVideo(video,catalogue){
  const dateParts=date.label.match(/(\d{2})-(\d{2})-(\d{4})/);
  const order=dateParts?[dateParts[3],dateParts[2],dateParts[1]].join('-'):date.year?date.year+'-00-00':'';
  const groupTitle=specific?.title||title;
- return {id:'youtube:'+video.id,videoId:video.id,title,originalTitle:title,groupTitle,playlistId:specific?.id||null,venue,kind,date:null,dateLabel:date.label,dateSource,year:date.year,calendar:date.calendar,sourceTime:order,liveStatus:video.liveStatus||null,source:'youtube',needsClassification:venue==='unclassified'||lang.code==='unknown'||kind==='other',translations:[{...lang,videoId:video.id,url:'https://www.youtube.com/watch?v='+video.id,liveStatus:video.liveStatus||null,rank:Number.isInteger(video.channelRank)?video.channelRank:9,duration:Number(video.duration)||0,channel:video.ownerChannel||null}]};
+ return {id:'youtube:'+video.id,videoId:video.id,title,originalTitle:title,groupTitle,playlistId:specific?.id||null,venue,kind,date:null,dateLabel:date.label,dateSource,year:date.year,calendar:date.calendar,sourceTime:order,liveStatus:video.liveStatus||null,source:'youtube',needsClassification:venue==='unclassified'||lang.code==='unknown'||kind==='other',translations:[{...lang,videoId:video.id,url:'https://www.youtube.com/watch?v='+video.id,liveStatus:video.liveStatus||null,rank:Number.isInteger(video.channelRank)?video.channelRank:9,duration:Number(video.duration)||0,channel:video.ownerChannel||null,cc:video.capState==='ok'||null}]};
 }
 export function groupVideos(records){const byVideo=new Map();for(const r of records)for(const t of r.translations||[])if(t.videoId&&!byVideo.has(t.videoId))byVideo.set(t.videoId,{r,t});
  const groups=new Map();for(const {r,t} of byVideo.values()){
