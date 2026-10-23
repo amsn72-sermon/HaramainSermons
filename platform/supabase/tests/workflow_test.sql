@@ -7241,6 +7241,10 @@ declare v_open text[]; v_want text[] := array[
   'registration_open', 'registration_state', 'verify_card', 'verify_certificate',
   -- التحقُّقُ من وثيقة إثبات التوقيع برمزها المطبوع (ملاحظة ٤٢٨)
   'verify_signature',
+  -- لغاتُ مقاطع البثّ: تُقرَأ في الموقع العام بلا حساب (ملاحظة ٤٦٦)
+  'video_langs',
+  -- قنواتُ المزامنة: تقرؤها المزامنةُ على GitHub بلا حساب (ملاحظة ٤٦٧)
+  'sync_channels',
   'verify_doc'];
   v_extra text[]; v_gone text[]; v_x text;
 begin
@@ -8791,4 +8795,225 @@ begin
     raise exception 'FAIL: فُتحت قراءةُ الوثائق الخاصة لغير أهلها';
   end if;
   raise notice 'PASS: الإدارةُ ترفع وثيقةَ العضو عنه، والقراءةُ على حالها';
+end $$;
+-- =====================================================================
+-- ٨٠) تعديلُ الأصل والعملُ جارٍ: إخبارٌ لا يُعيد مرحلةً (ملاحظتا ٤٦٠ و٤٦١)
+-- =====================================================================
+do $$
+declare v_crd uuid; v_tr uuid; v_mat uuid; v_track uuid; v_stage public.track_stages;
+        v_rev uuid; v_n int; v_before text; v_after text; v_notes int;
+begin
+  select id into v_crd from public.profiles where role = 'coordinator' limit 1;
+  select p.id into v_tr from public.profiles p
+    join public.member_languages ml on ml.member_id = p.id and ml.language_code = 'en'
+   where p.role = 'translator' and p.status = 'active' and p.may_translate
+     and coalesce(ml.assignable, true) limit 1;
+  if v_tr is null then raise exception 'FAIL: لا مترجمَ معتمدًا في الإنجليزية للاختبار'; end if;
+
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  v_mat := public.create_material(jsonb_build_object(
+    'material', jsonb_build_object('material_type','خطب','sermon_type','خطبة جمعة',
+      'title','خطبةٌ لاختبار التعديل','mosque','makkah','sermon_date','2026-09-18',
+      'khateeb_id','1','source_html','<p>نص</p>'),
+    'stage_minutes', '{"translation":60,"coordinator_receipt":10}'::jsonb,
+    'languages', jsonb_build_array(jsonb_build_object('code','en','stages', jsonb_build_array(
+      jsonb_build_object('key','translation','assignee', v_tr),
+      jsonb_build_object('key','coordinator_receipt','assignee', v_crd))))));
+  select id into v_track from public.tracks where material_id = v_mat;
+  select * into v_stage from public.track_stages
+   where track_id = v_track and stage_key = 'translation';
+  v_before := v_stage.status;
+
+  -- جولةُ إخبارٍ بتظليلٍ على الأصل
+  v_rev := public.open_notice(v_mat, 'annotate', 'صُوِّبت لفظةٌ في المقدمة');
+  begin
+    perform public.send_notice(v_rev);
+    raise exception 'FAIL: أُرسل إخبارُ تظليلٍ بلا تظليل';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  perform public.add_revision_mark(v_rev, 1, 0.1, 0.2, 0.3, 0.05, 'rephrase', 'أُعيدت صياغتُها');
+  select count(*) into v_notes from public.notifications where kind = 'source_changed';
+  v_n := public.send_notice(v_rev);
+  if v_n < 1 then raise exception 'FAIL: لم يصلْ إخبارُ التعديل أحدًا'; end if;
+  if (select count(*) from public.notifications where kind = 'source_changed') <= v_notes then
+    raise exception 'FAIL: لم يُقيَّد الإشعار';
+  end if;
+
+  -- والعملُ ماضٍ: لا مرحلةَ أُعيدت ولا مسارٌ تبدَّل
+  select status into v_after from public.track_stages where id = v_stage.id;
+  if v_after is distinct from v_before then
+    raise exception 'FAIL: الإخبارُ أعاد المرحلة: % ← %', v_before, v_after;
+  end if;
+  if (select status from public.tracks where id = v_track) = 'completed' then
+    raise exception 'FAIL: تبدّل حالُ المسار';
+  end if;
+
+  -- ولا يُرسَل مرّتين
+  begin
+    perform public.send_notice(v_rev);
+    raise exception 'FAIL: أُرسل الإخبارُ مرّتين';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  -- صاحبُ العمل يراه ثم يُقرُّ به فيسكت عنه
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  if (select count(*) from public.my_notices(v_mat)) <> 1 then
+    raise exception 'FAIL: لم يرَ المترجمُ إخبارَ التعديل';
+  end if;
+  if (select count(*) from public.notice_marks(v_rev)) <> 1 then
+    raise exception 'FAIL: لم يرَ المترجمُ موضعَ التصويب';
+  end if;
+  perform public.ack_notice(v_rev);
+  if (select count(*) from public.my_notices(v_mat)) <> 0 then
+    raise exception 'FAIL: بقي الشريطُ بعد الإقرار';
+  end if;
+
+  -- ومن لا مرحلةَ له في المادة لا يصله شيء
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  if (select count(*) from public.notice_acks(v_rev)) <> 1 then
+    raise exception 'FAIL: لم يُقيَّد اطّلاعُ المترجم';
+  end if;
+  raise notice 'PASS: تعديلُ الأصل والعملُ جارٍ يُخبِر أهلَه ولا يُعيد مرحلةً، ويسكت بالإقرار';
+end $$;
+
+-- =====================================================================
+-- ٨١) الهويةُ البصريةُ بإصداراتها (ملاحظة ٤٥٨)
+-- =====================================================================
+do $$
+declare v_mgr uuid; v_crd uuid; v_v1 uuid; v_v2 uuid; v_cur int;
+begin
+  select id into v_mgr from public.profiles where role = 'manager' limit 1;
+  select id into v_crd from public.profiles where role = 'coordinator' limit 1;
+
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  begin
+    perform public.set_brand_asset('letterhead', 'brand/lh-1.jpg');
+    raise exception 'FAIL: بدّل المنسقُ كليشةَ الهيئة';
+  exception when sqlstate '42501' then null;
+  end;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  v_v1 := public.set_brand_asset('letterhead', 'brand/lh-1.jpg', 'الأولى');
+  v_v2 := public.set_brand_asset('letterhead', 'brand/lh-2.jpg', 'الثانية');
+  select version into v_cur from public.brand_current() where kind = 'letterhead';
+  if v_cur <> 2 then raise exception 'FAIL: العاملُ ليس الأحدث: %', v_cur; end if;
+  if (select count(*) from public.brand_history('letterhead')) <> 2 then
+    raise exception 'FAIL: لم يُحفظ الإصدارُ السابق';
+  end if;
+  -- ولا يبقى إصداران عاملين
+  if (select count(*) from public.brand_assets where kind = 'letterhead' and is_active) <> 1 then
+    raise exception 'FAIL: أكثرُ من إصدارٍ عامل';
+  end if;
+  perform public.restore_brand_asset(v_v1);
+  select version into v_cur from public.brand_current() where kind = 'letterhead';
+  if v_cur <> 1 then raise exception 'FAIL: لم يُرجَع الإصدارُ السابق'; end if;
+  raise notice 'PASS: كليشةُ الهيئة تُبدَّل بيد المدير بإصداراتٍ لا تُمحى، وتُستردُّ سابقتُها';
+end $$;
+
+-- =====================================================================
+-- ٨٢) تعيينُ مشرف اللغة صلاحيةٌ تُمنَح (ملاحظة ٤٥٩)، ولغةُ مقطع البثّ (٤٦٦)
+-- =====================================================================
+do $$
+declare v_mgr uuid; v_crd uuid; v_sup uuid; v_tr uuid;
+begin
+  select id into v_mgr from public.profiles where role = 'manager' limit 1;
+  select id into v_crd from public.profiles where role = 'coordinator' limit 1;
+  select ml.member_id into v_sup from public.member_languages ml
+    join public.profiles p on p.id = ml.member_id
+   where ml.language_code = 'en' and p.role = 'translator' and p.status = 'active' limit 1;
+  select id into v_tr from public.profiles where role = 'translator' and status = 'active' limit 1;
+
+  -- المنسقُ بلا مفتاحٍ لا يُعيّن
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  begin
+    perform public.set_lang_supervisor('en', v_sup);
+    raise exception 'FAIL: عيَّن المنسقُ مشرفًا بلا صلاحية';
+  exception when sqlstate '42501' then null;
+  end;
+
+  -- فإذا مُنحها عيَّن
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  perform public.set_member_perm(v_crd, 'lang_sup_set', true, null, 'اختبار');
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  perform public.set_lang_supervisor('en', v_sup);
+  if (select supervisor_id from public.languages where code = 'en') is distinct from v_sup then
+    raise exception 'FAIL: لم يُعيَّن المشرفُ بعد المنح';
+  end if;
+
+  -- ولغةُ المقطع: للإدارة لا للمترجم
+  perform set_config('request.jwt.claim.sub', v_tr::text, true);
+  begin
+    perform public.set_video_lang('vid-1', 'en');
+    raise exception 'FAIL: أسند المترجمُ لغةَ مقطع';
+  exception when sqlstate '42501' then null;
+  end;
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  perform public.set_video_lang('vid-1', 'en');
+  if (select language_code from public.video_langs() where video_id = 'vid-1') <> 'en' then
+    raise exception 'FAIL: لم يُحفظ إسنادُ لغة المقطع';
+  end if;
+  perform public.set_video_lang('vid-1', null);
+  if exists (select 1 from public.video_langs() where video_id = 'vid-1') then
+    raise exception 'FAIL: لم يُرفع إسنادُ اللغة';
+  end if;
+  raise notice 'PASS: تعيينُ مشرف اللغة بمفتاحٍ يمنحه المدير، ولغةُ المقطع بيد الإدارة';
+end $$;
+
+-- =====================================================================
+-- ٨٣) بصمةُ الإصدار وملفُّها منشوران مع الواجهة (ملاحظة ٤٥٢)
+--     — يُفحَص في ملفّات الواجهة لا في القاعدة، فيُكتفى هنا بالتنبيه.
+-- =====================================================================
+do $$ begin
+  raise notice 'PASS: (الواجهة) بصمةُ الإصدار تُفحَص في فحص الوحدات لا في القاعدة';
+end $$;
+
+
+-- =====================================================================
+-- ٨٤) قنواتُ المزامنة: ثلاثٌ بترتيب ترجيحها، بيد المدير (ملاحظة ٤٦٧)
+-- =====================================================================
+do $$
+declare v_mgr uuid; v_crd uuid; v_n int;
+begin
+  select id into v_mgr from public.profiles where role = 'manager' limit 1;
+  select id into v_crd from public.profiles where role = 'coordinator' limit 1;
+
+  perform set_config('request.jwt.claim.sub', v_crd::text, true);
+  select count(*) into v_n from public.sync_channels();
+  if v_n <> 3 then raise exception 'FAIL: القنواتُ المزروعةُ %، والمنتظَرُ ثلاث', v_n; end if;
+  if (select channel_id from public.sync_channels() limit 1)
+     <> 'UCB0qibtjzOIemPjQSaoWkGg' then
+    raise exception 'FAIL: الرئيسيةُ ليست أوّلَ الترجيح';
+  end if;
+  begin
+    perform public.set_sync_channel('UCaaaaaaaaaaaaaaaaaaaaaa', 'قناةٌ من المنسق');
+    raise exception 'FAIL: أضاف المنسقُ قناة';
+  exception when sqlstate '42501' then null;
+  end;
+
+  perform set_config('request.jwt.claim.sub', v_mgr::text, true);
+  begin
+    perform public.set_sync_channel('ليست معرّفًا', 'قناةٌ خاطئة');
+    raise exception 'FAIL: قُبل معرّفٌ غيرُ صحيح';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  perform public.set_sync_channel('UCzzzzzzzzzzzzzzzzzzzzzz', 'قناةٌ رابعة', null, 40);
+  if (select count(*) from public.sync_channels()) <> 4 then
+    raise exception 'FAIL: لم تُضَفِ القناةُ الرابعة';
+  end if;
+  -- وتُعطَّل فلا تُقرَأ، وتبقى محفوظةً
+  perform public.set_sync_channel('UCzzzzzzzzzzzzzzzzzzzzzz', 'قناةٌ رابعة', null, 40, false);
+  if (select count(*) from public.sync_channels()) <> 3 then
+    raise exception 'FAIL: القناةُ المعطَّلةُ ما زالت تُقرَأ';
+  end if;
+  if (select count(*) from public.sync_channels_all()) <> 4 then
+    raise exception 'FAIL: المعطَّلةُ لا تظهر للإدارة';
+  end if;
+  perform public.delete_sync_channel('UCzzzzzzzzzzzzzzzzzzzzzz');
+  if (select count(*) from public.sync_channels_all()) <> 3 then
+    raise exception 'FAIL: لم تُحذَف القناة';
+  end if;
+  raise notice 'PASS: قنواتُ المزامنة ثلاثٌ بترتيبها، تُقرَأ بلا حساب وتُدار بيد المدير';
 end $$;

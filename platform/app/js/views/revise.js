@@ -8,6 +8,10 @@ import { pdfViewer, MARK_KINDS } from '../pdfview.js';
 
 const REV_SELECT = '*,marks:revision_marks(*),by:profiles!material_revisions_created_by_fkey(full_name),source:material_sources(path,version,note)';
 
+// جولةُ «إخبار»: تعديلٌ والعملُ جارٍ، لا تُعيد مرحلةً ولا تُبطل عملًا
+//   (ملاحظتا ٤٦٠ و٤٦١)
+export const isNotice = rev => !!(rev && rev.is_notice);
+
 export const kindTag = k => h('span.kind-tag', { 'data-kind': k }, MARK_KINDS[k] || k);
 
 // آخر جولة تعديل مفتوحة على الخطبة، بتحديداتها — هذه التي يراها المترجم
@@ -42,6 +46,72 @@ export function revisionCard(rev) {
     rev.marks?.length ? h('ol.marks', rev.marks.map(m =>
       h('li', kindTag(m.kind), h('span', `صفحة ${m.page}`), m.note && h('span', ` — ${m.note}`)))) : null,
     h('p.small.muted', `${rev.by?.full_name || ''} · ${fmtDateTime(rev.created_at)}`));
+}
+
+// ---------------------------------------------------------------------
+// تعديلٌ على الأصل والعملُ جارٍ (ملاحظتا ٤٦٠ و٤٦١)
+//
+//   لا يُعيد مرحلةً ولا يُبطل عملًا: يُظلَّل الموضعُ أو تُرفَع نسخةٌ
+//   جديدةٌ من الأصل، ثم يُرسَل فيصل أهلَ المادة في شاشاتهم.
+// ---------------------------------------------------------------------
+export async function noticeDialog(material, onDone) {
+  const modes = [
+    ['annotate', 'تظليلٌ على الأصل وتعليقٌ في موضعه'],
+    ['new_source', 'نسخةٌ جديدةٌ من الأصل أرسلها الخطيب'],
+    ['note', 'ملاحظةٌ نصّيةٌ عامّة']
+  ];
+  const mode = h('select', { 'aria-label': 'نوع التعديل' },
+    modes.map(([v, l]) => h('option', { value: v }, l)));
+  const note = h('textarea', { rows: 2, 'aria-label': 'بيان التعديل',
+    placeholder: 'ما الذي تغيّر؟ اكتبْه ليعرفه المترجمُ بلا مقابلةٍ بين نسختين' });
+  const file = h('input', { type: 'file', accept: 'application/pdf',
+    'aria-label': 'الأصل الجديد' });
+  const fileRow = h('label.field', 'ملفُّ الأصل الجديد (PDF)', file);
+  fileRow.hidden = true;
+  mode.onchange = () => { fileRow.hidden = mode.value !== 'new_source'; };
+
+  const res = await dialog({
+    title: `تعديلٌ على أصل «${material.title}»`,
+    body: h('div.stack',
+      h('p.small.muted', 'هذا لمن كان عملُه جاريًا: يصلهم التعديلُ في شاشاتهم ولا '
+        + 'تُعاد مرحلةٌ إلى أحدٍ ولا يُبطَل ما كُتب. وإن أردتَ إعادةَ المراحل '
+        + 'فمن «إعادةِ التنشيط» في الأرشيف.'),
+      h('label.field', 'نوعُ التعديل', mode),
+      fileRow,
+      h('label.field', 'بيانُ التعديل', note)),
+    buttons: [
+      { label: 'تابِعْ', kind: 'primary',
+        validate: () => {
+          if (mode.value === 'note' && note.value.trim().length < 3) return 'اكتبْ بيانَ التعديل';
+          if (mode.value === 'new_source' && !file.files?.[0]) return 'اخترْ ملفَّ الأصل الجديد';
+          return true;
+        },
+        value: () => ({ mode: mode.value, note: note.value.trim(), f: file.files?.[0] || null }) },
+      { label: 'إلغاء', value: null }
+    ]
+  });
+  if (!res) return;
+
+  try {
+    let src = null;
+    if (res.mode === 'new_source' && res.f) {
+      const path = `${material.id}/source-${Date.now()}.pdf`;
+      await storage.upload('sources', path, res.f);
+      src = await db.rpc('add_source_version', { p_material: material.id, p_path: path,
+        p_note: res.note || 'نسخةٌ جديدةٌ من الأصل' });
+    }
+    const rev = await db.rpc('open_notice', { p_material: material.id, p_mode: res.mode,
+      p_note: res.note || null, p_source: src });
+    if (res.mode === 'annotate') {
+      toast('ظلِّلْ مواضعَ التعديل ثم أرسِلْه.', 'ok');
+      onDone && onDone('annotate', rev);
+      return rev;
+    }
+    const n = await db.rpc('send_notice', { p_revision: rev });
+    toast(n ? `وصل التعديلُ ${n} من أهل العمل.` : 'لا أحدَ بيده مرحلةٌ مفتوحةٌ الآن.', 'ok');
+    onDone && onDone(res.mode, rev);
+    return rev;
+  } catch (e) { toast(e.message, 'bad'); return null; }
 }
 
 // ---------------------------------------------------------------------
@@ -133,12 +203,32 @@ export async function render(ctx) {
     viewer && viewer.setMarks(rev.marks || []);
     draw();
     drawState();
-    fill(headRow, h('a.btn.sm', { href: '/app/archive' }, 'رجوع'),
-      isAdmin() ? closeBtn() : null,
-      isAdmin() ? h('button.btn.sm.primary', { type: 'button', onclick: () => {
+    drawAcks();
+    fill(headRow, ...headBtns());
+  }
+
+  // أزرارُ الرأس: للإخبار زرُّ إرساله، ولإعادة التنشيط ما كان
+  function headBtns() {
+    const back = h('a.btn.sm', { href: '/app/archive' }, 'رجوع');
+    if (!isAdmin()) return [back];
+    if (isNotice(rev)) {
+      const send = h('button.btn.sm.primary', { type: 'button' },
+        rev.notified_at ? '↻ أرسِلْه مرّةً أخرى' : '✉ أرسِلِ التعديلَ إلى أهل العمل');
+      send.disabled = !!rev.notified_at;
+      send.onclick = () => busy(send, async () => {
+        try {
+          const n = await db.rpc('send_notice', { p_revision: rev.id });
+          toast(n ? `وصل التعديلُ ${n} من أهل العمل.` : 'لا أحدَ بيده مرحلةٌ مفتوحةٌ الآن.', 'ok');
+          await refresh();
+        } catch (e) { toast(e.message, 'bad'); }
+      });
+      return [back, send];
+    }
+    return [back, closeBtn(),
+      h('button.btn.sm.primary', { type: 'button', onclick: () => {
         toast('التحديدات محفوظة ويراها المترجمون الآن.', 'ok');
         ctx.navigate('/app/archive');
-      } }, 'إرسال التحديد إلى المترجمين') : null);
+      } }, 'إرسال التحديد إلى المترجمين')];
   }
   function draw() {
     list.replaceChildren(rev.marks?.length
@@ -153,6 +243,14 @@ export async function render(ctx) {
 
   const state_ = h('div');
   function drawState() {
+    if (isNotice(rev)) {
+      state_.replaceChildren(h('div.policy-state', { class: rev.notified_at ? 'signed' : 'unsigned' },
+        rev.notified_at
+          ? `أُرسل هذا التعديلُ في ${fmtDateTime(rev.notified_at)} — يراه أهلُ العمل في شاشاتهم`
+            + ' حتى يُقرُّوا باطّلاعهم، والعملُ ماضٍ لم تُعدْ مرحلةٌ إلى أحد.'
+          : 'لم يُرسَلْ بعد: ظلِّلْ مواضعَ التعديل على الأصل، ثم اضغطْ «أرسِلِ التعديل».'));
+      return;
+    }
     state_.replaceChildren(rev.closed_at
       ? h('div.policy-state.unsigned',
           `أُغلقت هذه الجولة في ${fmtDateTime(rev.closed_at)} — لا يراها المترجمون. أعِد فتحها ليروا التحديدات.`)
@@ -203,19 +301,32 @@ export async function render(ctx) {
     viewerBox.replaceChildren(h('p.muted', 'هذه الخطبة أصلها نص مكتوب لا ملف PDF — استخدم الملاحظة النصية.'));
   }
   draw(); drawState();
-  fill(headRow, h('a.btn.sm', { href: '/app/archive' }, 'رجوع'),
-    isAdmin() ? closeBtn() : null,
-    isAdmin() ? h('button.btn.sm.primary', { type: 'button', onclick: () => {
-      toast('التحديدات محفوظة ويراها المترجمون الآن.', 'ok');
-      ctx.navigate('/app/archive');
-    } }, 'إرسال التحديد إلى المترجمين') : null);
+  fill(headRow, ...headBtns());
+
+  // من أقرَّ باطّلاعه: يراه المنسقُ فيعرف من بلغه التعديل
+  const acksBox = h('div');
+  async function drawAcks() {
+    if (!isNotice(rev) || !rev.notified_at || !isAdmin()) return acksBox.replaceChildren();
+    let rows = [];
+    try { rows = await db.rpc('notice_acks', { p_revision: rev.id }) || []; } catch { rows = []; }
+    acksBox.replaceChildren(h('div.card.stack',
+      h('b', `من اطّلع على التعديل (${rows.length})`),
+      rows.length
+        ? h('ul.small.tight', rows.map(r =>
+            h('li', r.full_name, h('span.muted', ` — ${fmtDateTime(r.acked_at)}`))))
+        : h('p.small.muted', 'لم يُقرَّ أحدٌ بعد.')));
+  }
+  drawAcks();
 
   return h('div',
     h('div.page-head',
-      h('div.grow', h('div.eyebrow', `تحديد التعديل على الأصل — الجولة ${rev.round}`),
+      h('div.grow', h('div.eyebrow', isNotice(rev)
+        ? `تعديلٌ على الأصل والعملُ جارٍ — الجولة ${rev.round}`
+        : `تحديد التعديل على الأصل — الجولة ${rev.round}`),
         h('h1', `${heading(material)} (${material.title})`)),
       headRow),
     state_,
     h('p.small.muted', 'اسحب بالمؤشر على موضع التعديل في الأصل، ثم اختر نوعه. يُحفظ كل تحديد فور اختياره، ويراه المترجم فوق الأصل نفسه ما دامت الجولة مفتوحة.'),
+    acksBox,
     h('div.workspace', h('div.ws-col', viewerBox), h('div.ws-col', h('h3', 'التعديلات المحدَّدة'), list)));
 }

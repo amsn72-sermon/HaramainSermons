@@ -1,5 +1,5 @@
 // الحالة المشتركة: المستخدم الحالي والبيانات المرجعية
-import { auth, db } from './sb.js';
+import { auth, db, storage } from './sb.js';
 import { POLICY_KEY, POLICY_VERSION } from './policy.js';
 
 export const state = {
@@ -9,6 +9,7 @@ export const state = {
   khateebs: [],
   loadedRef: false,
   cardStyle: null,        // خطُّ بطاقة البيانات من الكليشة الأصل (ملاحظة ٤٣٦)
+  brand: null,            // كليشةُ الهيئة وشعارُها العاملان (ملاحظة ٤٥٨)
   supervisedLangs: [],    // لغاتٌ العضو مشرفُها (ملاحظة ٤٤٠)
   policySigned: false,   // وقّع العضو نسخة سياسة السرية الحالية
   policyLoaded: false,
@@ -81,7 +82,9 @@ export const assigneeName = a => {
   return a.full_name || '';
 };
 
-export const STATUS_LABEL = { pending: 'بانتظار التفعيل', active: 'مفعّل', disabled: 'معطّل' };
+// «موقَفٌ عن العمل» أبينُ من «معطّل»، فالحالُ تُعرَف من لفظها (ملاحظة ٤٤٩)
+export const STATUS_LABEL = { pending: 'بانتظار التفعيل', active: 'مفعّل',
+  disabled: 'موقَفٌ عن العمل' };
 export const TRACK_STATUS = {
   awaiting_receipt: ['بانتظار الاستلام', 'warn'],
   in_progress: ['قيد التنفيذ', 'gold'],
@@ -241,6 +244,18 @@ export async function loadReference(force = false) {
       const c = rows && rows[0] && rows[0].tpl && rows[0].tpl.card;
       state.cardStyle = c ? { font: c.font || '', size: Number(c.size) || 11 } : null;
     } catch { state.cardStyle = null; }
+    // كليشةُ الهيئة وشعارُها: إصدارُهما العاملُ من القاعدة، فإن بُدِّلا
+    //   رسميًّا سرى الجديدُ على ما يُطبَع بعده (ملاحظة ٤٥٨)
+    try {
+      const rows = await db.rpc('brand_current') || [];
+      const out = {};
+      for (const r of rows) {
+        let url = null;
+        try { url = await storage.signedUrl('brand', r.path, 3600); } catch { url = null; }
+        if (url) out[r.kind] = { version: r.version, url };
+      }
+      state.brand = Object.keys(out).length ? out : null;
+    } catch { state.brand = null; }
     // لغاتٌ هو مشرفُها: تفتح له لوحةَ المتابعة وتوزيعَ لغته (ملاحظة ٤٤٠)
     try { state.supervisedLangs = await db.rpc('my_supervised_langs') || []; }
     catch { state.supervisedLangs = []; }

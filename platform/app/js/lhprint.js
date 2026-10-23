@@ -4,6 +4,7 @@
 //
 //   المحتوى يُكتَب تدفُّقًا واحدًا، ثم يُقاس فيُقطَع عند آخر سطرٍ يكتمل
 //   في الصفحة، ولكلِّ صفحةٍ كليشتُها ورقمُها. ولا يُخزَّن منه ملف.
+import { state } from './store.js';
 import { PAGE, BOX, LETTERHEAD, FONT_FACE_CSS, NASKH_STACK,
          flowStarts, fontsSettled, settledHeight } from './page.js';
 
@@ -45,7 +46,10 @@ export const DOC_CSS = `
   .doc td.qr-cell span { font-size: 6.5pt; color: #6b6257; direction: ltr;
                          display: block; letter-spacing: .2px; }
   .doc table.roster { font-size: 9pt; }
-  .doc table.roster td, .doc table.roster th { padding: 1mm 1.4mm; }`;
+  .doc table.roster td, .doc table.roster th { padding: 1mm 1.4mm; }
+  /* جداولُ الكشف تتلاحق بلا فراغٍ بينها، ورأسُها يتكرّر (ملاحظة ٤٦٢) */
+  .doc table.roster + table.roster { margin-top: 0; }
+  .doc tr, .doc td, .doc th { break-inside: avoid; page-break-inside: avoid; }`;
 
 // ما وُسِم بـ«keep» لا يُقطَع بين صفحتين: إن وقع القطعُ في وسطه نزل
 //   كلُّه إلى الصفحة التالية — ما لم يكن أطولَ من الصفحة أصلًا.
@@ -124,7 +128,9 @@ ${DOC_CSS}
     const total = paged.total;
     const starts = keepWhole(flow, paged.starts, boxPx);
 
-    const lhUrl = new URL(LETTERHEAD, location.origin).href;
+    // الكليشةُ العاملةُ: إصدارُ الهيئة المعتمَد إن بُدِّل (ملاحظة ٤٥٨)
+    const lhUrl = (state.brand && state.brand.letterhead && state.brand.letterhead.url)
+      || new URL(LETTERHEAD, location.origin).href;
     const pages = d.getElementById('pages');
     pages.append(...starts.map((start, i) => {
       const img = d.createElement('img');

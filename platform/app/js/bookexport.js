@@ -1,5 +1,6 @@
 // تصدير مجمَّع على هيئة كتاب: غلافٌ وفهرسٌ وخطبٌ مرقَّمة على كليشة الهيئة (ملاحظة ١٥٢)
 //   يُبنى في نافذة مستقلة كما تُبنى ورقة الطباعة، ثم يُطبع أو يُحفظ PDF.
+import { state } from './store.js';
 import { PAGE, LETTERHEAD, cardColumns, heading, docVerifyUrl,
   DOC_STAMP_CSS, docStampNode, BOX, flowStarts, fontsSettled, settledHeight } from './page.js';
 import { sanitize } from './sanitize.js';
@@ -98,7 +99,8 @@ ${DOC_STAMP_CSS(P.side)}
   d.title = meta.title;
 
   const el = (tag, cls, text) => { const x = d.createElement(tag); if (cls) x.className = cls; if (text != null) x.textContent = text; return x; };
-  const lhUrl = new URL(LETTERHEAD, location.origin).href;
+  const lhUrl = (state.brand && state.brand.letterhead && state.brand.letterhead.url)
+    || new URL(LETTERHEAD, location.origin).href;
   const sheet = () => { const s = el('div', 'sheet'); const img = el('img', 'lh'); img.alt = ''; img.src = lhUrl; s.append(img); return s; };
 
   // بطاقة بيانات العمل داخل الكتاب

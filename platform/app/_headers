@@ -49,3 +49,8 @@
 
 /vendor/pdfjs/pdf.worker.min.mjs
   Content-Type: text/javascript; charset=utf-8
+
+# بصمةُ الإصدار تُقرأ من المصدر دائمًا (ملاحظة ٤٥٢)
+/version.json
+  Cache-Control: no-store
+  Content-Type: application/json; charset=utf-8

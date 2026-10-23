@@ -69,6 +69,26 @@ const FONTS = {
 };
 export const fontOf = code => FONTS[code] || FONTS.def;
 
+// ـــ خطوطٌ يختارها المصمِّم فتعلو خطَّ اللغة (ملاحظة ٤٥٤). والقائمةُ من
+//   خطوط المنصة وما يُعتمَد في الطباعة، فلا يختلف المعروضُ عن المطبوع.
+export const BOOK_FONTS = [
+  ['', 'خطُّ اللغة (الأصل)'],
+  ['"Haramain Naskh","Noto Naskh Arabic",serif', 'نسخ (مرفقٌ بالمنصة)'],
+  ['"Noto Naskh Arabic","Amiri",serif', 'نسخ — Noto'],
+  ['"Amiri","Noto Naskh Arabic",serif', 'أميري'],
+  ['"Traditional Arabic","Noto Naskh Arabic",serif', 'Traditional Arabic'],
+  ['"Haramain Arabic",sans-serif', 'خطُّ المنصة'],
+  ['"EB Garamond",Garamond,Georgia,serif', 'EB Garamond'],
+  ['"PT Serif",Georgia,serif', 'PT Serif'],
+  ['Georgia,serif', 'Georgia']
+];
+
+// خطُّ القالب: عامٌّ له، ولكلِّ صفحةٍ أن تخالفه
+export const fontStack = (tpl, slot = null) => {
+  const sl = slot && tpl && tpl[slot] ? tpl[slot] : null;
+  return (sl && sl.font) || (tpl && tpl.font) || '';
+};
+
 // القالبُ الافتراضي: الورقُ العاجيُّ والرايةُ الخضراء (ملاحظتا ٣١٠ و٣٣٦)
 export const DEFAULT_TPL = () => ({
   size: 'book',
@@ -104,8 +124,62 @@ export const slotOf = (tpl, key) => {
   if (!Array.isArray(s.shapes)) s.shapes = [];
   if (!s.band || typeof s.band !== 'object') s.band = { on: false, h: 10, color: '#174a38' };
   if (!s.wm || typeof s.wm !== 'object') s.wm = { src: null, size: 50, opacity: 8 };
+  // ما رُفع من عناصر الصفحة الثابتة — يُحفَظ في القالب ويُستردُّ (ملاحظة ٤٥٣)
+  if (!s.hidden || typeof s.hidden !== 'object') s.hidden = {};
   return s;
 };
+
+// ـــ العناصرُ الثابتةُ التي تُرفَع وتُعاد، لكلِّ صفحةٍ ما يخصُّها
+//   (ملاحظة ٤٥٣). والمفتاحُ القديمُ — إن كان — يبقى معمولًا به، فما
+//   أُطفئ قبلُ يبقى مطفأً.
+export const HIDEABLE = {
+  cover:    [['title', 'كتلةُ العنوان'], ['banner', 'الراية'], ['foot', 'سطرا الذيل'],
+             ['pattern', 'النقشُ الباهت'], ['coverbg', 'صورةُ الغلاف']],
+  front:    [['bsm', 'البسملة']],
+  colophon: [['colo', 'كتلةُ الحقوق'], ['coloqr', 'باركودُ الحقوق']],
+  divider:  [['title', 'كتلةُ العنوان'], ['banner', 'الراية'], ['stamp', 'ختمُ التاريخ']],
+  inner:    [['head', 'ترويسةُ الصفحة'], ['band', 'شريطُ البسملة'],
+             ['ornament', 'زخرفةُ الذيل'], ['foot', 'رقمُ الصفحة'], ['kh', 'سطرُ «الخطبة الأولى»']],
+  back:     [['blurb', 'نبذةُ الظهر'], ['banner', 'الراية'], ['foot', 'سطرا الذيل'],
+             ['pattern', 'النقشُ الباهت'], ['coverbg', 'صورةُ الظهر']]
+};
+
+// المفاتيحُ القديمةُ التي كانت تُطفئ العنصرَ قبل استحداث «المرفوعات»
+const LEGACY = {
+  'cover.foot': 'foot', 'cover.pattern': 'pattern',
+  'divider.stamp': 'stamp',
+  'inner.head': 'head', 'inner.foot': 'foot', 'inner.band': 'band',
+  'inner.ornament': 'ornament',
+  'back.foot': 'foot', 'back.pattern': 'pattern'
+};
+
+export function isOff(tpl, slot, key) {
+  const s = (tpl && tpl[slot]) || {};
+  if (s.hidden && s.hidden[key]) return true;
+  const legacy = LEGACY[`${slot}.${key}`];
+  if (legacy && s[legacy] === false) return true;
+  // الرايةُ والخلفيةُ لهما مقاديرُهما القديمة
+  if (key === 'banner') {
+    if (slot === 'cover') return !(Number(s.bannerW) > 0);
+    if (slot === 'divider') return s.banner === false;
+    if (slot === 'back') return s.mark === false;
+  }
+  if (key === 'coverbg') return !s.bg;
+  return false;
+}
+
+export function setOff(tpl, slot, key, off) {
+  const s = slotOf(tpl, slot);
+  s.hidden[key] = !!off;
+  const legacy = LEGACY[`${slot}.${key}`];
+  if (legacy) s[legacy] = !off;
+  if (key === 'banner') {
+    if (slot === 'cover' && !off && !(Number(s.bannerW) > 0)) s.bannerW = 30;
+    if (slot === 'divider') s.banner = !off;
+    if (slot === 'back') s.mark = !off;
+  }
+  return s;
+}
 
 // ---------------------------------------------------------------------
 // نافذةُ الإصدار: اللغةُ والمسجدُ والمقاسُ والقالب، ثم معاينة (٣١١)
@@ -119,9 +193,26 @@ export async function bookDialog(year, section) {
   let saved = [];
   try { saved = await db.rpc('book_templates_list') || []; } catch { saved = []; }
   const pickOf = () => saved.find(r => String(r.id) === tplSel.value) || null;
+  // قائمةُ القوالب لا تحمل تصميمَها، فيُقرأ تصميمُ كلِّ قالبٍ عند اختياره
+  //   — وكان يُغفَل فيخرج الكتابُ بالتصميم الافتراضيِّ أبدًا (ملاحظة ٤٥٦)
+  const tplCache = new Map();
+  const fullTpl = async id => {
+    if (!id) return null;
+    if (tplCache.has(id)) return tplCache.get(id);
+    let got = null;
+    try {
+      const r = await db.rpc('book_template_get', { p_id: id });
+      got = (Array.isArray(r) ? r[0] : r) || null;
+    } catch { got = null; }
+    tplCache.set(id, got);
+    return got;
+  };
   let tpl = DEFAULT_TPL();
   const first = saved.find(r => r.h_year === year) || saved.find(r => r.is_default) || saved[0];
-  if (first && first.tpl) tpl = mergeTpl(tpl, first.tpl);
+  if (first) {
+    const got = await fullTpl(first.id);
+    if (got && got.tpl) { tpl = mergeTpl(tpl, got.tpl); tpl.name = got.name; }
+  }
 
   const lang = h('select', { 'aria-label': 'اللغة' },
     langs.map(l => h('option', { value: l.language_code },
@@ -146,9 +237,10 @@ export async function bookDialog(year, section) {
       ? saved.map(r => h('option', { value: r.id, selected: first && r.id === first.id },
           `${r.name}${r.is_default ? ' ★' : ''}${r.h_year ? ` — ${ARY(r.h_year)}هـ` : ''}`))
       : [h('option', { value: '' }, 'القالبُ الافتراضي')]);
-  tplSel.onchange = () => {
+  tplSel.onchange = async () => {
     const r = pickOf();
-    tpl = mergeTpl(DEFAULT_TPL(), r?.tpl || {});
+    const got = r ? await fullTpl(r.id) : null;
+    tpl = mergeTpl(DEFAULT_TPL(), got?.tpl || {});
     if (r) tpl.name = r.name;
     size.value = tpl.size || 'book';
   };
@@ -189,7 +281,11 @@ export async function bookDialog(year, section) {
   if (!rows.length) return toast('لا خطبَ بهذه التصفية.', 'bad');
 
   const chosen = pickOf();
-  if (chosen) { tpl = mergeTpl(DEFAULT_TPL(), chosen.tpl || {}); tpl.name = chosen.name; }
+  if (chosen) {
+    const got = await fullTpl(chosen.id);
+    tpl = mergeTpl(DEFAULT_TPL(), got?.tpl || {});
+    tpl.name = chosen.name;
+  }
   tpl = { ...tpl, size: res.size, intro: res.intro };
   if (res.fmt === 'docx') return bookWord(rows, { year, ...res, tpl });
   if (!buildBook(rows, { year, ...res, tpl })) {
@@ -418,8 +514,8 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
     // ـــ ١) الغلاف (ملاحظتا ٣٠٩ و٣٣٦)
     const cv = sheet('cover-sheet front');
     const c = el('div', 'cover');
-    if (tpl.cover.pattern) c.append(el('div', 'cover-pat'));
-    if (tpl.cover.bg) {
+    if (!isOff(tpl, 'cover', 'pattern') && tpl.cover.pattern) c.append(el('div', 'cover-pat'));
+    if (tpl.cover.bg && !isOff(tpl, 'cover', 'coverbg')) {
       const bg = img(tpl.cover.bg, 'cover-bg');
       bg.style.opacity = String(Math.max(0, Math.min(100, tpl.cover.fade)) / 100);
       c.append(bg);
@@ -434,19 +530,21 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
     }
     c.append(marks);
     // الرايةُ المزخرفةُ معلّقةٌ من رأس الغلاف، على نسق صفحات العنوان
-    if (Number(tpl.cover.bannerW) > 0) {
+    if (!isOff(tpl, 'cover', 'banner') && Number(tpl.cover.bannerW) > 0) {
       const cban = el('div', 'cover-banner');
       cban.innerHTML = pennantSvg(tpl.cover.ink, tpl.cover.gold);
       c.append(cban);
     }
-    const mid = el('div', 'cover-mid');
-    mid.append(el('h1', 'ct', esc(title)));
-    mid.append(el('div', 'crule'));
-    mid.append(el('div', 'cs', esc(`لخُطب ${rowsMosque(rows)} المترجمة`)));
-    mid.append(el('div', 'cs2', esc(`إلى ${langName(lang)}`)));
-    mid.append(el('div', 'cy', esc(`لعام ${ARY(year)}هـ`)));
-    c.append(mid);
-    if (tpl.cover.foot !== false) {
+    if (!isOff(tpl, 'cover', 'title')) {
+      const mid = el('div', 'cover-mid');
+      mid.append(el('h1', 'ct', esc(title)));
+      mid.append(el('div', 'crule'));
+      mid.append(el('div', 'cs', esc(`لخُطب ${rowsMosque(rows)} المترجمة`)));
+      mid.append(el('div', 'cs2', esc(`إلى ${langName(lang)}`)));
+      mid.append(el('div', 'cy', esc(`لعام ${ARY(year)}هـ`)));
+      c.append(mid);
+    }
+    if (!isOff(tpl, 'cover', 'foot')) {
       const foot = el('div', 'cover-foot');
       foot.innerHTML = '<span>الهيئةُ العامة للعناية بشؤون المسجد الحرام والمسجد النبوي</span>'
         + '<span>مشروعُ خادم الحرمين الشريفين لترجمة خطب الحرمين — بتنفيذ جامعة أمِّ القرى</span>';
@@ -457,13 +555,16 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
 
     // ـــ ٢) صفحةُ البسملة — صورةُ الهيئة لا رسمًا تقريبيًّا (ملاحظة ٣٣٥)
     const bs = sheet('plain-sheet front');
-    const bd = el('div', 'basmala');
-    bd.append(img(BASMALA_IMG, 'bsm'));
-    bs.append(bd);
+    if (!isOff(tpl, 'front', 'bsm')) {
+      const bd = el('div', 'basmala');
+      bd.append(img(BASMALA_IMG, 'bsm'));
+      bs.append(bd);
+    }
     decorate(el, img, bs, tpl.front);
 
     // ـــ ٣) صفحةُ الحقوق
     const co = sheet('plain-sheet front');
+    const coOff = isOff(tpl, 'colophon', 'colo');
     const cob = el('div', 'colo');
     cob.innerHTML = `<h2>${esc(title)}</h2>`
       + `<p>لخُطب ${esc(rowsMosque(rows))} المترجمة إلى ${esc(langName(lang))}`
@@ -475,12 +576,14 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
              + 'المطبوع في ذيل صفحتها.')}`
       + `<br>عددُ الخطب: ${esc(AR(rows.length))}`
       + ` · أُصدر في ${esc(fmtHijri(new Date().toISOString().slice(0, 10)))}</div>`;
-    const qr = d.createElement('img');
-    qr.className = 'colo-qr';
-    qr.src = qrDataUri(`https://haramainsermons.com/verify?doc=${encodeURIComponent(
-      rows[0]?.doc_no || '')}`, { margin: 1, dark: tpl.inner.ink });
-    cob.append(qr);
-    co.append(cob);
+    if (!isOff(tpl, 'colophon', 'coloqr')) {
+      const qr = d.createElement('img');
+      qr.className = 'colo-qr';
+      qr.src = qrDataUri(`https://haramainsermons.com/verify?doc=${encodeURIComponent(
+        rows[0]?.doc_no || '')}`, { margin: 1, dark: tpl.inner.ink });
+      cob.append(qr);
+    }
+    if (!coOff) co.append(cob);
     decorate(el, img, co, tpl.colophon);
 
     // ـــ ٤) المقدمة (تُدرَج إن كُتبت)
@@ -519,28 +622,28 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
       // صفحةُ العنوان (ملاحظتا ٣٠٩ و٣٣٦)
       const ds = sheet('div-sheet');
       const dv = el('div', 'divider');
-      if (tpl.divider.banner) {
+      if (!isOff(tpl, 'divider', 'banner') && tpl.divider.banner) {
         const bn = el('div', 'banner');
         bn.innerHTML = pennantSvg(tpl.divider.ink, tpl.cover.gold);
         dv.append(bn);
       }
       if (tpl.divider.ghost && tpl.cover.bg) dv.append(img(tpl.cover.bg, 'div-ghost'));
-      const stamp = tpl.divider.stamp === false ? null : el('div', 'div-stamp');
+      const stamp = isOff(tpl, 'divider', 'stamp') ? null : el('div', 'div-stamp');
       if (stamp) {
       stamp.innerHTML = `<div>${esc(r.sermon_type || 'خطبة الجمعة')}</div>`
         + `<div>${esc(r.hijri_text || (r.sermon_date ? fmtHijri(r.sermon_date) : ''))}</div>`
         + (r.sermon_date ? `<div>الموافق ${esc(gregLine(r.sermon_date))}</div>` : '');
         dv.append(stamp);
       }
-      const dm = el('div', 'div-mid');
-      dm.innerHTML = '<div class="dl">موضـوع الخطبة:</div>'
+      const dm = isOff(tpl, 'divider', 'title') ? null : el('div', 'div-mid');
+      if (dm) dm.innerHTML = '<div class="dl">موضـوع الخطبة:</div>'
         + `<div class="dt">${esc(r.title)}</div>`
         + (r.khateeb ? '<div class="dl2">لفضيـلة الشيـخ</div>'
             + `<div class="dn">${esc(r.khateeb)}</div>` : '')
         + '<div class="drule"></div>'
         + `<div class="dmeta">${esc(MOSQUE[r.mosque] || '')}`
         + `${r.mosque ? ' · ' : ''}${esc(langName(lang))}</div>`;
-      dv.append(dm);
+      if (dm) dv.append(dm);
       ds.append(dv);
       decorate(el, img, ds, tpl.divider);
 
@@ -548,14 +651,16 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
       sheetOfSermon[i] = pagesOut.length;      // أوّلُ صفحةِ متنٍ تُنشأ بعدها
       const parts = splitKhutbas(r.body_html || '');
       const blocks = [];
-      if (tpl.inner.band) {
+      if (!isOff(tpl, 'inner', 'band') && tpl.inner.band) {
         // المسارُ مطلقٌ: نافذةُ المعاينة لا أصلَ لها تُسنِد إليه النسبيّ
         blocks.push({ kind: 'band', h: mm2px(17), keep: mm2px(10),
           html: `<div class="sbd"><img src="${abs(BASMALA_BAND)}" alt=""></div>` });
       }
       parts.forEach((part, k) => {
-        blocks.push({ kind: 'head', keep: mm2px(16),
-          html: `<h2 class="kh2">(${k === 0 ? 'الخطبةُ الأولى' : 'الخطبةُ الثانية'})</h2>` });
+        if (!isOff(tpl, 'inner', 'kh')) {
+          blocks.push({ kind: 'head', keep: mm2px(16),
+            html: `<h2 class="kh2">(${k === 0 ? 'الخطبةُ الأولى' : 'الخطبةُ الثانية'})</h2>` });
+        }
         for (const p of part) blocks.push({ html: `<p class="bp">${p.html}</p>` });
       });
       if (!blocks.length || !parts.length) {
@@ -601,28 +706,28 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
     if (bk.on !== false) {
       const bcv = sheet('cover-sheet back-sheet front');
       const b = el('div', 'back');
-      if (bk.pattern) b.append(el('div', 'cover-pat'));
-      if (bk.bg) {
+      if (!isOff(tpl, 'back', 'pattern') && bk.pattern) b.append(el('div', 'cover-pat'));
+      if (bk.bg && !isOff(tpl, 'back', 'coverbg')) {
         const bg = img(bk.bg, 'cover-bg');
         bg.style.opacity = String(Math.max(0, Math.min(100, bk.fade ?? 16)) / 100);
         b.append(bg);
       }
-      if (bk.mark !== false) {
+      if (!isOff(tpl, 'back', 'banner')) {
         const bm = el('div', 'back-mark');
         bm.innerHTML = pennantSvg(bk.ink || tpl.cover.ink, bk.gold || tpl.cover.gold);
         b.append(bm);
       }
-      const bmid = el('div', 'back-mid');
-      if (String(bk.blurb || '').trim()) {
+      const bmid = isOff(tpl, 'back', 'blurb') ? null : el('div', 'back-mid');
+      if (bmid && String(bk.blurb || '').trim()) {
         bmid.append(el('p', 'back-blurb',
           esc(String(bk.blurb)).replace(/\n/g, '<br>')));
-      } else {
+      } else if (bmid) {
         bmid.append(el('p', 'back-blurb', esc(
           `${title} — لخُطب ${rowsMosque(rows)} المترجمة إلى ${langName(lang)} `
           + `لعام ${ARY(year)}هـ.`)));
       }
-      b.append(bmid);
-      if (bk.foot !== false) {
+      if (bmid) b.append(bmid);
+      if (!isOff(tpl, 'back', 'foot')) {
         const bf = el('div', 'back-foot');
         bf.innerHTML = '<span>الهيئةُ العامة للعناية بشؤون المسجد الحرام والمسجد النبوي</span>'
           + '<span>مشروعُ خادم الحرمين الشريفين لترجمة خطب الحرمين</span>'
@@ -643,17 +748,20 @@ export function buildBook(rows, { year, lang, title, intro, tpl }) {
     pagesOut.forEach((s, i) => {
       if (s.classList.contains('front')) return;   // الغلافُ والبسملةُ والحقوق
       folio[i] = ++n;
-      if (tpl.inner.foot && !s.classList.contains('div-sheet')) {
+      if (!isOff(tpl, 'inner', 'foot') && tpl.inner.foot
+          && !s.classList.contains('div-sheet')) {
         const box = el('div', 'pageno');
         box.innerHTML = `<span class="pno">${AR(folio[i])}</span>`;
         s.append(box);
       }
-      if (tpl.inner.ornament && !s.classList.contains('div-sheet')) {
+      if (!isOff(tpl, 'inner', 'ornament') && tpl.inner.ornament
+          && !s.classList.contains('div-sheet')) {
         const orn = el('div', 'foot-orn');
         orn.innerHTML = footOrnamentSvg(tpl.inner.gold);
         s.append(orn);
       }
-      if (tpl.inner.head && !s.classList.contains('div-sheet')) {
+      if (!isOff(tpl, 'inner', 'head') && tpl.inner.head
+          && !s.classList.contains('div-sheet')) {
         const hd = el('div', 'runhead');
         hd.innerHTML = `<span>${esc(title)}</span>`
           + `<span>${esc(`لعام ${ARY(year)}هـ`)}</span>`;
@@ -814,7 +922,13 @@ function bookCss(S, M, winW, winH, F, tpl) {
   * { box-sizing: border-box; }
   html, body { margin: 0; background: #fff; color: ${ink};
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
-    font-family: ${F.stack}; }
+    font-family: ${fontStack(tpl) || F.stack}; }
+  /* خطُّ كلِّ صفحةٍ إن خالف خطَّ القالب (ملاحظة ٤٥٤) */
+  ${['cover', 'front', 'colophon', 'divider', 'inner', 'back']
+      .filter(k => fontStack(tpl, k))
+      .map(k => `.${k === 'inner' ? 'win' : k === 'divider' ? 'divider'
+        : k === 'cover' ? 'cover' : k === 'back' ? 'back' : k === 'colophon' ? 'colo' : 'basmala'}`
+        + ` { font-family: ${fontStack(tpl, k)}; }`).join('\n  ')}
   .sheet { position: relative; width: ${S.w}mm; height: ${S.h}mm; overflow: hidden;
     background: ${tpl.inner.paper}; }
   .sheet + .sheet { break-before: page; page-break-before: always; }

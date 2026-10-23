@@ -114,6 +114,18 @@ export async function proofFor(memberId, version = null) {
 // ---------------------------------------------------------------------
 // كشفُ الموقِّعين: نصُّ الميثاق ثم جدولُ من اختير (ملاحظة ٤٢٩)
 // ---------------------------------------------------------------------
+// الكشفُ يُقطَّع جداولَ صغيرةً كلٌّ برأسه، وكلُّ جدولٍ كتلةٌ لا تُقطَع:
+//   فلا ينقسم صفُّ عضوٍ على صفحتين، ويتكرّر الرأسُ في كلِّ صفحة
+//   (ملاحظة ٤٦٢)
+const chunk = (rows, n) => {
+  const out = [];
+  rows.forEach((r, i) => {
+    if (i % n === 0) out.push([]);
+    out[out.length - 1].push({ r, i });
+  });
+  return out;
+};
+
 export function rosterHtml(rows, { version = POLICY_VERSION, note = '' } = {}) {
   const n = rows.length;
   const signed = rows.filter(r => r.signed).length;
@@ -122,14 +134,14 @@ ${charterHtml(version)}
 <h2>كشفُ التوقيع على الميثاق</h2>
 <p class="note">${esc(note || `عددُ من في الكشف ${AR(n)}، وقَّع منهم ${AR(signed)}.`)}
   وتاريخُ الكشف ${esc(fmtDate(new Date()))}.</p>
-<table class="roster">
+${chunk(rows, 14).map(part => `<table class="roster keep">
   <thead><tr>
     <th style="width:9mm">م</th><th>العضو</th><th style="width:26mm">رقمُ الهوية</th>
     <th style="width:20mm">الحال</th><th style="width:16mm">النسخة</th>
     <th style="width:32mm">تاريخُ التوقيع</th><th style="width:20mm">التحقُّق</th>
   </tr></thead>
   <tbody>
-    ${rows.map((r, i) => {
+    ${part.map(({ r, i }) => {
       // باركودُ كلِّ عضوٍ في صفِّه، يُفتَح به إثباتُه وحدَه (ملاحظة ٤٣٢)
       const q = r.signed && r.proof_code
         ? qrDataUri(signVerifyUrl(r.proof_code), { margin: 0, dark: '#1d2b3a' }) : null;
@@ -146,7 +158,7 @@ ${charterHtml(version)}
     </tr>`;
     }).join('')}
   </tbody>
-</table>
+</table>`).join('')}
 <p class="note">هذا الكشفُ بيانٌ بمن وقَّع على الميثاق المعروض أعلاه وتاريخِ توقيعه.
   ويُمسَح باركودُ كلِّ صفٍّ فيُفتَح إثباتُ صاحبه وحدَه. وتفصيلُ التوقيع —
   عنوانُ الشبكة والجهازُ وبصمةُ النصِّ — في وثيقة إثباته الخاصّة.</p>

@@ -191,6 +191,33 @@ export async function workspace(ctx) {
   const m = t.material;
   const events = await db.select('track_events', { select: '*,actor:profiles(full_name)', track_id: `eq.${t.id}`, order: 'created_at.asc' });
   const rev = await openRevision(m.id).catch(() => null);   // تعديل مطلوب على أصل الخطبة (ملاحظة ٢٨)
+  // إخبارٌ بتعديلٍ على الأصل والعملُ جارٍ: شريطٌ لا يزول حتى يُقَرَّ به
+  //   (ملاحظتا ٤٦٠ و٤٦١)
+  let notices = [];
+  try { notices = await db.rpc('my_notices', { p_material: m.id }) || []; } catch { notices = []; }
+  const noticeBar = () => {
+    if (!notices.length) return null;
+    const n = notices[0];
+    const ackBtn = h('button.btn.sm.primary', { type: 'button' }, 'اطّلعتُ');
+    ackBtn.onclick = () => busy(ackBtn, async () => {
+      try {
+        for (const x of notices) await db.rpc('ack_notice', { p_revision: x.id });
+        toast('قُيِّد اطّلاعُك.', 'ok');
+        ctx.navigate(location.pathname, { replace: true });
+      } catch (e) { toast(e.message, 'bad'); }
+    });
+    return h('div.card.notice-bar', { role: 'alert' },
+      h('div.row.between.wrap',
+        h('b', '⚠ وردَ تعديلٌ على الأصل'),
+        h('span.small.muted', `${n.by_name || ''} · ${fmtDateTime(n.sent_at)}`)),
+      h('p', { style: { margin: '6px 0' } },
+        n.mode === 'new_source' ? 'رُفعت نسخةٌ جديدةٌ من أصل الخطبة.'
+          : n.mode === 'annotate' ? `ظُلِّل ${n.marks} موضعًا على الأصل — انظرْها فوقه.`
+          : 'ملاحظةٌ من المنسق على الأصل.'),
+      n.note ? h('p', h('b', 'البيان: '), n.note) : null,
+      h('p.small.muted', 'عملُك ماضٍ ولم تُعدْ مرحلةٌ إلى أحد — إنما صحِّحْ ما يلزم ثم أتمَّ.'),
+      h('div.row', ackBtn));
+  };
   const cur = currentStage(t);
   const curDef = cur && state.stages.find(s => s.key === cur.stage_key);
   const me = state.profile.id;
@@ -604,6 +631,7 @@ export async function workspace(ctx) {
           ['الأهمية', PRIORITY[m.priority]], ['الإنجاز', progressBar(t)]].filter(([, v]) => v).map(([k, v]) => h('div', h('div.small.muted', k), h('div', v)))),
       m.instructions && h('p', { style: { marginTop: '12px' } }, h('b', 'تعليمات الترجمة: '), m.instructions),
       lateSummary(t)),
+    noticeBar(),
     rev ? h('div', { style: { marginTop: '16px' } }, revisionCard(rev)) : null,
     h('details.card', h('summary', h('b', 'المسار والمراحل')), h('div', { style: { marginTop: '12px' } }, stageStrip(t))),
     wsBlock(),

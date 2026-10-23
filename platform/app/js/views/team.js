@@ -1001,20 +1001,34 @@ export async function render(ctx, opts = {}) {
     } catch (err) { toast(err.message, 'bad'); }
   }
 
-  // التعطيلُ يسبقه تنبيهٌ ويُسجَّل سببُه (ملاحظة ٤٠٣)
+  // الإيقافُ والتفعيلُ لا يقعان بزلّة إصبع: تنبيهٌ يبيّن الأثر، ثم كتابةُ
+  //   اسم العضو تأكيدًا (ملاحظتا ٤٠٣ و٤٥٠)
+  const nameOk = (el, m) => {
+    const said = el.value.trim().replace(/\s+/g, ' ');
+    return said && m.full_name.trim().replace(/\s+/g, ' ') === said;
+  };
+
   async function disableDialog(btn, m) {
-    const why = h('input', { 'aria-label': 'سبب التعطيل',
+    const why = h('input', { 'aria-label': 'سبب الإيقاف',
       placeholder: 'انتهاءُ التكليف، أو انقطاعٌ عن العمل…' });
+    const name = h('input', { 'aria-label': 'اسم العضو للتأكيد',
+      autocomplete: 'off', spellcheck: 'false', placeholder: m.full_name });
     const res = await dialog({
-      title: `تعطيلُ حساب ${m.full_name}`,
+      title: `إيقافُ ${m.full_name} عن العمل`,
       body: h('div.stack',
         h('div.form-errors', { role: 'alert' },
-          h('b', 'لن يدخلَ المنصةَ بعد التعطيل.'),
-          h('p.small', 'سجلُّه محفوظٌ، ويُعاد تفعيلُه متى شئت.')),
-        h('label.field', 'سببُ التعطيل', why)),
+          h('b', 'ماذا يقع إذا أوقفتَه؟'),
+          h('ul.small.tight',
+            h('li', 'لا يدخل المنصةَ بعدها، وتُغلق شاشاتُه كلُّها.'),
+            h('li', 'ما بيده من مراحلَ يبقى مُسنَدًا إليه حتى تنقله إلى غيره.'),
+            h('li', 'سجلُّه وأعمالُه ومستحقّاتُه محفوظةٌ لا تُمَسّ، ويُعاد متى شئت.'))),
+        h('label.field', 'سببُ الإيقاف', why),
+        h('label.field', 'اكتبِ اسمَ العضو تأكيدًا',
+          h('small', m.full_name), name)),
       buttons: [
-        { label: 'عطِّلْ', kind: 'danger',
-          validate: () => (why.value.trim().length >= 3 ? true : 'اكتبْ سببَ التعطيل'),
+        { label: 'أوقِفْه عن العمل', kind: 'danger',
+          validate: () => (why.value.trim().length < 3 ? 'اكتبْ سببَ الإيقاف'
+            : !nameOk(name, m) ? 'اكتبِ اسمَ العضو كما هو مكتوبٌ أعلاه' : true),
           value: () => why.value.trim() },
         { label: 'إلغاء', value: null }
       ]
@@ -1023,11 +1037,37 @@ export async function render(ctx, opts = {}) {
     return setDisabled(btn, m, true, res);
   }
 
+  async function enableDialog(btn, m) {
+    const name = h('input', { 'aria-label': 'اسم العضو للتأكيد',
+      autocomplete: 'off', spellcheck: 'false', placeholder: m.full_name });
+    const ok = await dialog({
+      title: `تفعيلُ ${m.full_name}`,
+      body: h('div.stack',
+        h('div.form-errors', { role: 'alert' },
+          h('b', 'ماذا يقع إذا فعَّلتَه؟'),
+          h('ul.small.tight',
+            h('li', 'يعود إلى الدخول بحسابه وصلاحيّاتِه كما كانت.'),
+            h('li', 'ويعود إليه ما كان مُسنَدًا إليه من مراحل.'))),
+        m.disabled_reason
+          ? h('p.small.muted', 'سببُ إيقافه كان: ', h('b', m.disabled_reason)) : null,
+        h('label.field', 'اكتبِ اسمَ العضو تأكيدًا',
+          h('small', m.full_name), name)),
+      buttons: [
+        { label: 'فعِّلْه', kind: 'primary',
+          validate: () => (nameOk(name, m) ? true : 'اكتبِ اسمَ العضو كما هو مكتوبٌ أعلاه'),
+          value: () => true },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!ok) return;
+    return setDisabled(btn, m, false);
+  }
+
   async function setDisabled(btn, m, off, why = null) {
     await busy(btn, async () => {
       try {
         await db.rpc('set_member_disabled', { p_member: m.id, p_off: off, p_why: why });
-        toast(off ? `عُطّل حساب ${m.full_name}.` : `فُعّل حساب ${m.full_name}.`, 'ok');
+        toast(off ? `أُوقف ${m.full_name} عن العمل.` : `فُعّل حساب ${m.full_name}.`, 'ok');
         reload();
       } catch (err) { toast(err.message, 'bad'); }
     });
@@ -1185,16 +1225,25 @@ export async function render(ctx, opts = {}) {
       .filter(m => !CITY_SPLIT || !cityTab || m.city === cityTab)
       .filter(m => !filterLang.value || langsOf(m).includes(filterLang.value))
       .filter(m => !filterStatus.value || m.status === filterStatus.value)
-      .filter(m => !q.value.trim() || m.full_name.includes(q.value.trim()) || m.email.includes(q.value.trim()));
+      .filter(m => !q.value.trim() || m.full_name.includes(q.value.trim()) || m.email.includes(q.value.trim()))
+      // الموقَفون وغيرُ المفعَّلين في ذيل القائمة، فلا يزاحمون من هم على
+      //   رأس العمل (ملاحظة ٤٥١)
+      .sort((a, b) => (a.status === 'active' ? 0 : 1) - (b.status === 'active' ? 0 : 1));
     table.replaceChildren(list.length ? h('div.table-wrap', h('table.responsive',
       h('thead', h('tr', ['الاسم', 'الدور', 'اللغات', showPerf ? 'التقييم' : 'رقم العضوية', 'السرية', 'الوسوم', ''].map(t => h('th', t)))),
       h('tbody', list.map(m => h('tr',
+        // صفُّ الموقَف يُوسَم وسمًا ظاهرًا، فلا يُظَنُّ عاملًا (ملاحظة ٤٤٩)
+        { class: m.status === 'active' ? '' : 'row-off' },
         // الاسمُ نفسُه يفتح الملفَّ: لا يُبحَث عن زرٍّ في طرف الصفّ (ملاحظة ٣٠١)
         h('td', { 'data-label': 'الاسم' },
           canManage(m)
             ? h('button.name-link', { type: 'button', title: 'افتحْ ملفَّه',
                 onclick: () => edit(m) }, m.full_name)
             : h('b', m.full_name),
+          m.status === 'active' ? null
+            : h('span.badge.bad.off-tag',
+                { title: m.disabled_reason ? `سببُ الإيقاف: ${m.disabled_reason}` : null },
+                'موقَفٌ عن العمل'),
           h('span.sub', { dir: 'ltr' }, m.email)),
         h('td', { 'data-label': 'الدور' }, roleLabel(m),
           m.admin_title ? h('div.small.muted', 'بصلاحية منسق') : null,
@@ -1231,10 +1280,12 @@ export async function render(ctx, opts = {}) {
           // خطٌّ يفصل أيقوناتِ العمل عن التعطيل والحذف (ملاحظة ٤٠٣)
           h('span.row-sep', { 'aria-hidden': 'true' }),
           m.status === 'active'
-            ? actIcon('power', 'تعطيل', b => disableDialog(b, m), 'on',
-                'الحسابُ مفعَّل — اضغطْ لتعطيله')
-            : actIcon('power', 'تفعيل', b => setDisabled(b, m, false), 'off',
-                m.disabled_reason ? `معطَّل: ${m.disabled_reason}` : 'الحسابُ معطَّل'),
+            ? actIcon('power', 'إيقافٌ عن العمل', b => disableDialog(b, m), 'on',
+                'الحسابُ مفعَّل — اضغطْ لإيقافه')
+            // والموقَفُ يُعاد بزرٍّ مكتوبٍ لا بأيقونةٍ تُلتمَس (ملاحظة ٤٤٩)
+            : h('button.btn.xs.primary.act-on', { type: 'button',
+                title: m.disabled_reason ? `موقَف: ${m.disabled_reason}` : 'الحسابُ موقَف',
+                onclick: e => enableDialog(e.currentTarget, m) }, '⏻ تفعيلُه'),
           can('delete_member')
             ? actIcon('trash', 'حذف', () => removeMember(m), 'danger',
                 'حذفٌ لا يُستدرك') : null)))))))

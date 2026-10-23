@@ -469,7 +469,19 @@ export async function render(ctx) {
 
   function showDetails(m) {
     details.replaceChildren(h('div.card',
-      h('div.row', h('h3', { style: { flex: 1 } }, `تفاصيل: ${m.title}`), h('button.btn.sm', { onclick: () => details.replaceChildren() }, 'إغلاق')),
+      h('div.row', h('h3', { style: { flex: 1 } }, `تفاصيل: ${m.title}`),
+        // تعديلٌ على الأصل والعملُ جارٍ: إخبارٌ لا إعادةَ مراحل (ملاحظتا ٤٦٠ و٤٦١)
+        isAdmin() && m.tracks.some(t => t.status !== 'completed')
+          ? h('button.btn.sm', { type: 'button', title: 'يصل أهلَ العمل في شاشاتهم بلا إعادة مرحلة',
+              onclick: async () => {
+                const { noticeDialog } = await import('./revise.js');
+                await noticeDialog(m, (mode, rev) => {
+                  if (mode === 'annotate' && rev) ctx.navigate(`/app/revise/${m.id}`);
+                  else reload();
+                });
+              } }, '✎ تعديلٌ على الأصل')
+          : null,
+        h('button.btn.sm', { onclick: () => details.replaceChildren() }, 'إغلاق')),
       h('p.muted.small', [MOSQUE_ANY[m.mosque], m.khateeb?.name, m.sermon_date && fmtSermonDate(m.sermon_date), PRIORITY[m.priority]].filter(Boolean).join(' · ')),
       h('div.stack', m.tracks.map(t => h('div.stack', { style: { gap: '8px' } },
         h('div.row', h('b', langName(t.language_code)), statusBadge(t), lateSummary(t), h('span', { style: { flex: 1 } }),
@@ -543,11 +555,67 @@ export async function render(ctx) {
     })();
   }
 
+  // ـــ نقصُ لغات البثّ (ملاحظة ٤٦٨)
+  //
+  //   الخطبةُ تُبثُّ على ثلاث قنواتٍ وتُدمَج عندنا. فإن نقصت لغاتُها عمّا
+  //   اعتادته أخواتُها لم يُترَك ذلك حتى يراه الناس: يُرفَع للإدارة في
+  //   صدر لوحة المتابعة، فيُدرَك في ساعته.
+  const streamCard = h('div');
+  if (isAdmin()) {
+    (async () => {
+      try {
+        const cfg = window.HS_CONFIG || {};
+        if (!cfg.feedUrl) return;
+        const feed = await fetch(cfg.feedUrl, { cache: 'no-cache' })
+          .then(r => (r.ok ? r.json() : null)).catch(() => null);
+        if (!feed) return;
+        const all = [...(feed.current || []), ...(feed.archive || [])];
+        const fridays = all.filter(g => g.kind === 'friday' && g.year);
+        const langsOfGroup = g => new Set((g.translations || [])
+          .map(t => String(t.code || '').split(':')[0]).filter(Boolean)).size;
+        // المعهودُ: أكثرُ ما بلغته خطبُ المسجد نفسِه في آخر ثماني خطب
+        const usual = venue => {
+          const n = fridays.filter(g => g.venue === venue).slice(0, 8).map(langsOfGroup);
+          return n.length ? Math.max(...n) : 0;
+        };
+        const rows = (feed.current || [])
+          .filter(g => g.kind === 'friday' && g.year)
+          .map(g => ({ g, have: langsOfGroup(g), want: usual(g.venue),
+            alts: (g.alternates || []).length }))
+          .filter(r => r.want > 0 && r.have < r.want);
+        if (!rows.length) return;
+        streamCard.replaceChildren(h('section.card.stack.backup-card.warn',
+          h('div.row.between.wrap',
+            h('b', '⚠ نقصٌ في لغات البثّ'),
+            h('span.badge.warn', String(rows.length))),
+          h('p.small.muted', 'هذه خطبٌ لغاتُها أقلُّ مما اعتادته أخواتُها. وأكثرُ ما '
+            + 'يقع ذلك حين لا تُرفَع بعضُ اللغات على قنوات البثّ أو يتأخّر رفعُها — '
+            + 'فراجِعْ قوائمَ القنوات، وإن كان المقطعُ موجودًا ولم تُعرَف لغتُه '
+            + 'فأسنِدْها بيدك من صفحة البثّ.'),
+          h('div.table-wrap', h('table.responsive',
+            h('thead', h('tr', ['الخطبة', 'الموجود', 'المعهود'].map(t => h('th', t)))),
+            h('tbody', rows.map(r => h('tr',
+              h('td', { 'data-label': 'الخطبة' }, h('b', r.g.title || ''),
+                h('div.small.muted', [MOSQUE_ANY[r.g.venue] || '', r.g.dateLabel || '']
+                  .filter(Boolean).join(' · '))),
+              h('td', { 'data-label': 'الموجود' }, `${r.have} لغة`,
+                r.alts ? h('div.small.muted', `و${r.alts} بديلًا محفوظًا`) : null),
+              h('td', { 'data-label': 'المعهود' }, `${r.want} لغة`)))))),
+          h('div.row.wrap', { style: { gap: '6px' } },
+            h('a.btn.sm', { href: '/app/channels' }, 'قنواتُ البثّ'),
+            h('a.btn.sm.ghost', { href: (window.HS_CONFIG?.publicHost
+              ? `https://${window.HS_CONFIG.publicHost}/` : '/'), target: '_blank',
+              rel: 'noopener' }, 'صفحةُ البثّ'))));
+      } catch { /* لا تمنع الشاشة */ }
+    })();
+  }
+
   return h('div',
     h('div.page-head', h('div.grow', h('div.eyebrow', 'متابعة التنفيذ'), h('h1', 'لوحة أعمال الترجمة'),
       h('p.muted', 'من الإسناد إلى قبول المنسق، ثم اعتماد المدير والنشر.')),
       chipBox,
       h('a.btn.primary', { href: '/app/new' }, '＋ إضافة مادة')),
+    streamCard,
     reviewCard,
     backupCard,
     out);

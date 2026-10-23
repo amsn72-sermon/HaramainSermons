@@ -152,6 +152,7 @@ export function staffShell(view, path) {
   const settingsGroup = group('الإعدادات', [
     link('/app/languages', 'اللغات'),
     link('/app/khateebs', 'الخطباء'),
+    isManager() ? link('/app/channels', 'قنوات البثّ') : null,
     link('/app/workflow', 'إعداد سير العمل')]);
 
   const mineGroup = (extra = []) => group('حسابي',

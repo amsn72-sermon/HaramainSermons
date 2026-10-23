@@ -5,9 +5,10 @@
 //   وزرٌّ واحدٌ «+ قالب جديد» يسأل عن النوع ثم يفتح محرِّرَه.
 import { h, fill, toast, busy, dialog, confirm, emptyState, fmtDate } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { isManager, can } from '../store.js';
-import { LH_DEFAULT, normLh, uploadLhImage, CARD_FONTS } from '../letterhead.js';
-import { PAGE, BOX, LETTERHEAD } from '../page.js';
+import { isManager, can, state, loadReference } from '../store.js';
+import { LH_DEFAULT, normLh, uploadLhImage, CARD_FONTS,
+         brandLetterhead } from '../letterhead.js';
+import { PAGE, BOX } from '../page.js';
 import { unifiedPanel } from '../unipanel.js';
 
 const mayDesign = () => isManager() || can('arch_design') || can('arch_edit');
@@ -51,19 +52,27 @@ export async function render() {
       h('h3', 'قوالبُ المجمَّع السنوي'),
       books.length ? h('div.stack', ...books.map(card))
         : h('p.small.muted', 'لا قالبَ بعد.'),
-      h('h3', 'كليشاتُ الخطبة المفردة'),
+      h('div.row.between.wrap',
+        h('h3', 'كليشاتُ الخطبة المفردة'),
+        mayDesign()
+          ? h('button.btn.sm', { type: 'button', onclick: () => lhEditor(null) },
+              '＋ كليشةٌ جديدة') : null),
       h('div.card.row.between.wrap.tpl-row',
         h('div.stack', { style: { gap: '2px' } },
           h('b', 'كليشةُ الهيئة', h('span.badge.ok', 'الأصل')),
-          h('span.small.muted', 'مرفقةٌ بالمنصة ولا تُعدَّل')),
-        h('div.row')),
+          h('span.small.muted', 'هويةُ الجهة: لا تُعدَّل، وتُنسَخ فتُعدَّل النسخة')),
+        // الأصلُ لا يُمَسّ، ومن أراد تغييرَ هوامشه نسخه (ملاحظة ٤٥٧)
+        h('div.row', mayDesign()
+          ? h('button.btn.sm', { type: 'button',
+              onclick: () => lhEditor(null, { copy: true }) }, '⧉ نسخةٌ منها')
+          : null)),
       lhs.length ? h('div.stack', ...lhs.map(card))
         : h('p.small.muted', 'ولا كليشةَ أخرى بعد.'));
   }
 
   // ـــ محرِّرُ الكليشة: صورةٌ تملأ الصفحةَ وهوامشُ الكتابة عليها
-  async function lhEditor(id) {
-    let name = '';
+  async function lhEditor(id, { copy = false } = {}) {
+    let name = copy ? 'نسخةٌ من كليشة الهيئة' : '';
     let tpl = LH_DEFAULT();
     let isDefault = false;
     if (id) {
@@ -103,8 +112,8 @@ export async function render() {
       const img = sheet.querySelector('.lh-bg');
       if (tpl.bg) {
         try { img.src = await storage.signedUrl('brand', tpl.bg, 1800); }
-        catch { img.src = LETTERHEAD; }
-      } else img.src = LETTERHEAD;
+        catch { img.src = brandLetterhead(); }
+      } else img.src = brandLetterhead();
       const p = tpl.page;
       const pc = v => `${(v / PAGE.h) * 100}%`;
       const side = `${(p.side / PAGE.w) * 100}%`;
@@ -213,7 +222,94 @@ export async function render() {
     lhEditor(null);
   }
 
+  // -------------------------------------------------------------------
+  // هويةُ الهيئة: الكليشةُ الأصلُ وشعارُها، بإصداراتهما (ملاحظة ٤٥٨)
+  //
+  //   إن بدّلت الهيئةُ كليشتَها رسميًّا بُدِّلت من هنا، فتسري الجديدةُ
+  //   على كلِّ ما يُطبَع بعدها. ولا يُمحى إصدارٌ سابق: فما صدر على
+  //   إصدارٍ يُعاد على إصداره.
+  // -------------------------------------------------------------------
+  const brandCard = h('div.card.stack');
+  async function drawBrand() {
+    if (!isManager()) return;
+    let lhHist = [], logoHist = [];
+    try { lhHist = await db.rpc('brand_history', { p_kind: 'letterhead' }) || []; } catch { /* */ }
+    try { logoHist = await db.rpc('brand_history', { p_kind: 'logo' }) || []; } catch { /* */ }
+
+    const upload = (kind, label) => {
+      const f = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp',
+        'aria-label': label });
+      const b = h('button.btn.sm.primary', { type: 'button' }, '⤒ اعتمِدْ إصدارًا جديدًا');
+      const why = h('input', { 'aria-label': 'بيانُ التبديل',
+        placeholder: 'قرارُ الهيئة رقم… أو تاريخُ الاعتماد' });
+      b.onclick = () => busy(b, async () => {
+        const file = f.files?.[0];
+        if (!file) return toast('اخترِ الصورةَ أولًا.', 'bad');
+        const ok = await confirm(`تبديلُ ${label}`,
+          'يسري الجديدُ على كلِّ ما يُطبَع بعد اليوم. وما طُبع قبلَه يبقى على '
+          + 'إصداره، ويُعاد كما صدر. والإصدارُ السابقُ محفوظٌ يُستردُّ متى شئت.',
+          'بدِّلْه', 'danger');
+        if (!ok) return;
+        try {
+          const path = await uploadLhImage(file);
+          await db.rpc('set_brand_asset', { p_kind: kind, p_path: path,
+            p_note: why.value.trim() || null });
+          toast('اعتُمد الإصدارُ الجديد.', 'ok');
+          await loadReference(true);
+          drawBrand();
+        } catch (e) { toast(e.message, 'bad'); }
+      });
+      return h('div.stack', { style: { gap: '6px' } },
+        h('label.field', `ارفعْ ${label}`, f),
+        h('label.field', 'بيانُ التبديل (اختياري)', why),
+        h('div.row', b));
+    };
+
+    const histRow = r => {
+      const back = r.is_active ? null
+        : h('button.btn.xs', { type: 'button' }, '↩ أعِدْه');
+      if (back) back.onclick = () => busy(back, async () => {
+        if (!await confirm('إعادةُ إصدارٍ سابق',
+          `يعود الإصدارُ ${r.version} ليكون المعمولَ به فيما يُطبَع بعد اليوم.`,
+          'أعِدْه', 'danger')) return;
+        try {
+          await db.rpc('restore_brand_asset', { p_id: r.id });
+          toast('أُعيد الإصدار.', 'ok');
+          await loadReference(true);
+          drawBrand();
+        } catch (e) { toast(e.message, 'bad'); }
+      });
+      return h('div.row.between.wrap.tpl-row',
+        h('div.stack', { style: { gap: '2px' } },
+          h('b', `الإصدارُ ${r.version}`,
+            r.is_active ? h('span.badge.ok', 'العامل') : null),
+          h('span.small.muted', [r.note, r.by_name, r.created_at ? fmtDate(r.created_at) : null]
+            .filter(Boolean).join(' · ') || '—')),
+        h('div.row', back));
+    };
+
+    fill(brandCard,
+      h('div.row.between.wrap',
+        h('h3', 'هويةُ الهيئة — الكليشةُ والشعار'),
+        state.brand?.letterhead
+          ? h('span.badge', `الكليشةُ: الإصدارُ ${state.brand.letterhead.version}`)
+          : h('span.badge', 'الكليشةُ المرفقةُ بالمنصة')),
+      h('p.small.muted', 'هذا موضعُ التبديل إن غيّرت الهيئةُ كليشتَها أو شعارَها رسميًّا. '
+        + 'تسري الجديدةُ على ما يُطبَع بعدها، وتبقى الإصداراتُ السابقةُ محفوظةً، '
+        + 'وكلُّ خطبةٍ ووثيقةٍ موسومةٌ بإصدارها فتُعاد كما صدرت.'),
+      h('div.uni-grid',
+        h('fieldset.stack', h('legend', 'كليشةُ الصفحة'),
+          upload('letterhead', 'كليشةً جديدة'),
+          lhHist.length ? h('div.stack', lhHist.map(histRow))
+            : h('p.small.muted', 'لم تُبدَّل بعد — المرفقةُ بالمنصة هي العاملة.')),
+        h('fieldset.stack', h('legend', 'الشعار'),
+          upload('logo', 'شعارًا جديدًا'),
+          logoHist.length ? h('div.stack', logoHist.map(histRow))
+            : h('p.small.muted', 'لم يُبدَّل بعد.'))));
+  }
+
   await load();
+  drawBrand();
 
   return h('div',
     h('div.page-head',
@@ -225,7 +321,8 @@ export async function render() {
         h('p.muted', 'قوالبُ المجمَّع السنويِّ وكليشاتُ الخطبة المفردة. '
           + 'يُختار منها عند التصدير، وكليشةُ الهيئة هي الأصل.'))),
     box,
-    list);
+    list,
+    brandCard);
 }
 
 export default render;

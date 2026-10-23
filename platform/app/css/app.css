@@ -221,7 +221,10 @@ td .sub { display: block; color: var(--muted); font-size: .82rem; }
    الصفحة 210×297مم، والكتابة داخل صندوق: أعلى 38 أسفل 32 جانبان 20 (انظر page.js).
    --pt نقطة طباعة واحدة بمقياس عرض الصفحة، فتطابق الأحجامُ الطباعةَ. */
 .a4 { position: relative; width: 100%; aspect-ratio: 210 / 297; container-type: inline-size; background: #fff; color: #111; box-shadow: 0 2px 14px rgb(0 0 0 / 35%); border-radius: 2px; overflow: hidden; }
-.lh-page::before { content: ''; position: absolute; inset: 0; background: url('/assets/letterhead.jpg') center / 100% 100% no-repeat; pointer-events: none; }
+.lh-page::before { content: ''; position: absolute; inset: 0;
+  /* الكليشةُ العاملة: تُضبَط عند الدخول، والمرفقةُ أصلٌ لها (ملاحظة ٤٥٨) */
+  background: var(--lh-img, url('/assets/letterhead.jpg')) center / 100% 100% no-repeat;
+  pointer-events: none; }
 /* نافذةُ الكتابة هي نافذةُ التصدير بعينها: أعلى 38، وأسفلُها 32 للكليشة
    + 8 لشريط رقم الصفحة + 9 فسحةَ أمان = 49 (انظر BOX في page.js).
    فما يُوازنه المستخدمُ على الشاشة هو ما يخرج في PDF (ملاحظة ٤٢٣). */
@@ -395,7 +398,10 @@ dialog .dlg-foot { display: flex; gap: 8px; justify-content: flex-start; padding
 .vp-row { display: grid; grid-template-columns: 1fr 84px; gap: 8px; align-items: center; }
 .vp-volrow .vp-btn { width: 28px; height: 28px; border: 0; background: transparent; justify-self: center; }
 .vp-range { width: 100%; accent-color: var(--gold); height: 20px; }
-.vp-time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .82rem; white-space: nowrap; text-align: center; }
+.vp-time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .82rem;
+  white-space: nowrap; text-align: center;
+  /* الزمنُ لاتينيُّ الاتجاه ولو كانت الصفحةُ عربية (ملاحظة ٤٦٤) */
+  direction: ltr; unicode-bidi: isolate; }
 .vp-slot { margin-top: 10px; }
 /* في الأعمدة الضيقة نكتفي بالعربية على الأزرار حتى لا تتكدّس */
 .public .card { container-type: inline-size; }
@@ -2060,8 +2066,10 @@ tr.row-edited td { background: color-mix(in srgb, var(--accent) 7%, transparent)
 .bd-head { position: absolute; top: 6%; inset-inline: 10%; display: flex;
   justify-content: space-between; font-size: 3.6cqw; padding-bottom: 1%; direction: rtl; }
 .bd-win { position: absolute; top: 13%; inset-inline: 10%; bottom: 14%; overflow: hidden; }
-.bd-band { width: 100%; height: 9%; object-fit: cover; display: block; border-radius: 2px;
-  margin-bottom: 4%; }
+/* شريطُ البسملة في نافذة الكتابة — اسمٌ خاصٌّ به لئلا يتداخل مع
+   الشريط الملوَّن المضاف من الأدوات (ملاحظة ٤٥٥) */
+.bd-bsmband { width: 100%; height: 9%; object-fit: cover; display: block;
+  border-radius: 2px; margin-bottom: 4%; }
 .bd-kh { text-align: center; font-size: 5cqw; font-weight: 700; margin-bottom: 4%; }
 .bd-line { height: 2px; border-radius: 1px; opacity: .35; margin-bottom: 5%; }
 .bd-orn { position: absolute; bottom: 8%; inset-inline: 22%; }
@@ -2329,3 +2337,18 @@ ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: 3px; }
 .uni-wrap.bare > * { width: 100%; }
 .uni-wrap.bare .uni-bar { grid-auto-flow: row;
   grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); }
+
+/* ------------------------------------------------------------------
+   الحسابُ الموقَف عن العمل: يُعرَف من نظرةٍ (ملاحظتا ٤٤٩ و٤٥١)
+------------------------------------------------------------------- */
+tr.row-off > td { opacity: .72; }
+tr.row-off { background: color-mix(in srgb, var(--bad, #b4453c) 6%, transparent); }
+tr.row-off .name-link, tr.row-off > td:first-child b { text-decoration: line-through;
+  text-decoration-thickness: 1px; }
+.off-tag { margin-inline-start: 6px; vertical-align: middle; }
+.row-acts .act-on { white-space: nowrap; }
+
+/* شريطُ «وردَ تعديلٌ على الأصل» في شاشة العمل (ملاحظتا ٤٦٠ و٤٦١) */
+.notice-bar { border-color: #b4453c; border-inline-start: 4px solid #b4453c;
+  background: color-mix(in srgb, #b4453c 8%, transparent); margin-bottom: 16px; }
+.notice-bar b { color: #b4453c; }

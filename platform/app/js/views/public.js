@@ -1,13 +1,39 @@
 // الموقع العام: البث المباشر لخطب الحرمين الشريفين (أحدث خطبة) وأرشيف الخطب والمجالس العلمية.
 // المصدر قناة الخطب على يوتيوب، والعرض بمشغّل المنصة لا بمشغّل يوتيوب (ملاحظات ٢١-٢٦، ٣٢-٣٥).
 import { h, emptyState, fmtDateTime } from '../ui.js';
-import { state, MOSQUE, CITY } from '../store.js';
+import { state, isAdmin, MOSQUE, CITY } from '../store.js';
 import { brand, themeToggle, footer } from './shell.js';
 import { videoPlayer } from '../player.js';
 
 const cfg = window.HS_CONFIG;
 // الموقع العام للمستفيدين وحدهم؛ رابط المنصة يُزوَّد به الفريق مباشرة (ملاحظة ٦٢)
-const langCode = t => String(t.code || '').split(':')[0];
+// ـــ لغةُ المقطع (ملاحظة ٤٦٦)
+//
+//   تأتي من عنوان القائمة في القناة، فإن أعيا العنوانُ المزامنةَ جاءت
+//   خاويةً أو «غيرَ محدَّدة». فتُقرأ أوّلًا من إسناد المنسق في المنصة،
+//   ثمَّ من رمز المقطع، وما كان أصلًا للخطبة بلا لغةٍ فهو العربيةُ
+//   بحكم الأصل — ولا تُعرَض على الزائر عبارةُ «غير محددة» أبدًا.
+const VLANG = new Map();                 // معرّفُ المقطع ← رمزُ اللغة
+export async function loadVideoLangs() {
+  if (VLANG.size) return VLANG;
+  try {
+    const { db } = await import('../sb.js');
+    for (const r of (await db.rpc('video_langs')) || []) VLANG.set(r.video_id, r.language_code);
+  } catch { /* تبقى اللغاتُ من العنوان */ }
+  return VLANG;
+}
+const vidOf = t => t.videoId || String(t.code || '').split(':')[1] || '';
+const UNKNOWN = /غير\s*(محدد|معروف)|unknown|unspecified|undefined/i;
+const langCode = t => {
+  const vid = vidOf(t);
+  if (vid && VLANG.has(vid)) return VLANG.get(vid);
+  const raw = String(t.code || '').split(':')[0].trim().toLowerCase();
+  if (raw && raw !== 'xx' && raw !== 'und' && !UNKNOWN.test(raw)) return raw;
+  // أصلُ الخطبة في المجموعة: مقطعُها هو مقطعُ الخطبة نفسِه
+  if (t.isOriginal || /original/i.test(t.englishName || '')) return 'ar';
+  if (UNKNOWN.test(String(t.language || ''))) return '';
+  return '';
+};
 const two = (ar, en) => h('span.bi', h('span', ar), h('span.en', en));
 
 // اسم اللغة بالعربية وبلغتها — القائمة مكتوبة باللغتين
@@ -20,8 +46,19 @@ const NATIVE = {
   vi: 'Tiếng Việt', fil: 'Filipino', so: 'Soomaali', yo: 'Yorùbá', ig: 'Igbo', pl: 'Polski',
   uk: 'Українська', ro: 'Română', el: 'Ελληνικά', he: 'עברית', hu: 'Magyar', cs: 'Čeština'
 };
-const nameAr = t => state.languages.find(l => l.code === langCode(t))?.name_ar || (langCode(t) === 'ar' ? 'العربية' : t.language);
-const nativeOf = t => NATIVE[langCode(t)] || (langCode(t) === 'ar' ? 'العربية' : (t.englishName || '').replace(/^Original\s+/i, ''));
+const nameAr = t => {
+  const c = langCode(t);
+  if (c) return state.languages.find(l => l.code === c)?.name_ar
+    || (c === 'ar' ? 'العربية' : t.language);
+  // لا لغةَ معروفة: يُعرَض المقطعُ بلا وسمٍ مبهم (ملاحظة ٤٦٦)
+  const nm = String(t.language || '').trim();
+  return nm && !UNKNOWN.test(nm) ? nm : 'المقطعُ المنشور';
+};
+const nativeOf = t => {
+  const c = langCode(t);
+  if (!c) return '';
+  return NATIVE[c] || (c === 'ar' ? 'العربية' : (t.englishName || '').replace(/^Original\s+/i, ''));
+};
 const bilingual = t => { const a = nameAr(t), n = nativeOf(t); return n && n !== a ? `${a} — ${n}` : a; };
 
 // ------- تصنيف الخطبة إلى الحرمين اعتمادًا على تسمية القناة على يوتيوب -------
@@ -98,7 +135,11 @@ export function toWeeks(records) {
 }
 
 export async function render(ctx) {
-  const feed = await fetch(cfg.feedUrl, { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).catch(() => null);
+  // إسنادُ المنسق للغات المقاطع يُقرأ مع التغذية (ملاحظة ٤٦٦)
+  const [feed] = await Promise.all([
+    fetch(cfg.feedUrl, { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).catch(() => null),
+    loadVideoLangs()
+  ]);
   const all = groupRecords([...(feed?.current || []), ...(feed?.archive || [])]);
   const sermons = all.filter(r => r.sermon && r.venue !== 'other');
   const lessons = all.filter(r => !r.sermon);
@@ -135,6 +176,32 @@ export async function render(ctx) {
   const panel = h('div');
   const tabBar = h('div.tabs', { role: 'tablist' });
 
+  // ـــ إسنادُ لغةِ مقطعٍ لم تُعرَف لغتُه — للإدارة وحدَها (ملاحظة ٤٦٦)
+  function assignBox(list, sel) {
+    if (!isAdmin()) return null;
+    const unknown = list.filter(t => !langCode(t));
+    if (!unknown.length) return null;
+    const pick = h('select', { 'aria-label': 'اللغة' },
+      h('option', { value: '' }, '— اخترِ اللغة —'),
+      (state.languages || []).filter(l => l.is_active)
+        .map(l => h('option', { value: l.code }, l.name_ar)));
+    const save = h('button.btn.xs.primary', { type: 'button' }, 'أسنِدْها');
+    save.onclick = async () => {
+      if (!pick.value) return;
+      save.disabled = true;
+      try {
+        const { db } = await import('../sb.js');
+        const t = unknown[Math.min(Number(sel.value) || 0, unknown.length - 1)]
+          || unknown[0];
+        await db.rpc('set_video_lang', { p_video: vidOf(t), p_lang: pick.value });
+        VLANG.set(vidOf(t), pick.value);
+        location.reload();
+      } catch (e) { save.disabled = false; console.warn(e); }
+    };
+    return h('div.row.wrap.assign-lang', { style: { gap: '6px', marginTop: '8px' } },
+      h('span.small.muted', `مقطعٌ لم تُعرَف لغتُه (${unknown.length})`), pick, save);
+  }
+
   // بطاقة خطبة: قائمة لغات منسدلة باللغتين + مشغّل المنصة
   function sermonCard(rec, prefer = '') {
     const list = rec.translations || [];
@@ -155,7 +222,10 @@ export async function render(ctx) {
       h('h3', rec.title),
       h('p.small.muted', rec.dateLabel || ''),
       h('label.field.lang-pick', two(`لغة الخطبة (${list.length})`, 'Language'), sel),
-      box);
+      box,
+      // بابُ المنسق: يُسنِد لغةَ مقطعٍ أعيا العنوانُ المنصةَ، فيُحفَظ
+      //   الإسنادُ ولا يُعاد (ملاحظة ٤٦٦)
+      assignBox(list, sel));
   }
 
   // صفّ أسبوع: للخطب مربّعان ثابتان (مكة يمينًا والمدينة يسارًا)،
@@ -276,7 +346,11 @@ function withArabicFirst(rec) {
 }
 
 export async function arafah() {
-  const feed = await fetch(cfg.feedUrl, { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).catch(() => null);
+  // إسنادُ المنسق للغات المقاطع يُقرأ مع التغذية (ملاحظة ٤٦٦)
+  const [feed] = await Promise.all([
+    fetch(cfg.feedUrl, { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).catch(() => null),
+    loadVideoLangs()
+  ]);
   // من ١٤٤٦هـ فصاعدًا: الخطب الأقدم قليلة ومبتورة على القناة (ملاحظة ٥٤)
   const FIRST_YEAR = 1446;
   const list = groupRecords([...(feed?.current || []), ...(feed?.archive || [])])

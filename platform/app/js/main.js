@@ -1,4 +1,5 @@
 import { auth, configured, db } from './sb.js';
+import { BUILD } from './version.js';
 import { h, toast } from './ui.js';
 import { state, loadProfile, loadReference, loadPolicyState, loadCircularState, loadMfaState, isAdmin, isManager, isActive, isSupervisor, isWatcher, can, isTeamLead } from './store.js';
 import { staffShell } from './views/shell.js';
@@ -46,6 +47,8 @@ const routes = [
   ['/app/attend', () => import('./views/attend.js'), true],
   ['/app/languages', () => import('./views/languages.js'), true, true],
   ['/app/khateebs', () => import('./views/khateebs.js'), true, true],
+  // قنواتُ مزامنة البثّ — لمدير المشروع (ملاحظة ٤٦٧)
+  ['/app/channels', () => import('./views/channels.js'), true, 'manager'],
   ['/app/workflow', () => import('./views/workflow.js'), true, true],
   ['/app/archive', () => import('./views/archive.js'), true, 'reports'],
   ['/app/circulars', () => import('./views/circulars.js'), true],
@@ -163,6 +166,12 @@ async function render() {
     // الموقع العام يعمل من أرشيف يوتيوب وحده: تعذُّر الوصول إلى الخادم لا يمنع عرضه
     if (route.needsAuth) await loadReference();
     else await loadReference().catch(() => {});
+    // الكليشةُ العاملةُ في معاينة المحرر كما في الطباعة (ملاحظة ٤٥٨)
+    try {
+      const lhUrl = state.brand && state.brand.letterhead && state.brand.letterhead.url;
+      document.documentElement.style.setProperty('--lh-img',
+        lhUrl ? `url('${lhUrl}')` : '');
+    } catch { /* تبقى المرفقةُ بالمنصة */ }
     if (route.needsAuth) {
       if (!auth.session) return navigate('/login?next=' + encodeURIComponent(path), { replace: true });
       if (!state.profile) await loadProfile();
@@ -254,3 +263,31 @@ else if (fromEmail?.type === 'signup') { history.replaceState(null, '', '/app');
 if (auth.session) idleStart();
 render();
 export { render };
+
+
+// ـــ بصمةُ الإصدار (ملاحظة ٤٥٢)
+//
+//   تُقرأ بصمةُ المنشور كلَّ ربع ساعةٍ وعند عودة الصفحة إلى الواجهة،
+//   فإن خالفت ما حُمِّل أُعيد تحميلُ الصفحة مرّةً واحدةً بعلامةٍ في
+//   مسارها، فيأتي الجديدُ كلُّه معًا ولا يجتمع قديمٌ بجديد.
+(() => {
+  const KEY = 'hs-build-reloaded';
+  const check = async () => {
+    try {
+      const r = await fetch('/version.json', { cache: 'no-store' });
+      if (!r.ok) return;
+      const live = String((await r.json()).build || '');
+      if (!live || live === BUILD) { sessionStorage.removeItem(KEY); return; }
+      if (sessionStorage.getItem(KEY) === live) return;   // أُعيد التحميلُ مرّةً
+      sessionStorage.setItem(KEY, live);
+      const u = new URL(location.href);
+      u.searchParams.set('b', live);
+      location.replace(u.toString());
+    } catch { /* الشبكةُ لا تمنع العمل */ }
+  };
+  setTimeout(check, 4000);
+  setInterval(check, 15 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') check();
+  });
+})();

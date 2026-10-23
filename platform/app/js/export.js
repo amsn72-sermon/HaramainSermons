@@ -180,7 +180,9 @@ export async function docxBlob(items, { name = 'خطب' } = {}) {
   if (!items || !items.length) throw new Error('لا خطبَ للتصدير');
   const docx = await loadDocx();
   const { Document, Packer, Paragraph, ImageRun, Header, HorizontalPositionRelativeFrom, VerticalPositionRelativeFrom } = docx;
-  const img = await fetch(LETTERHEAD).then(r => { if (!r.ok) throw new Error('تعذّر تحميل الكليشة'); return r.arrayBuffer(); });
+  const { brandLetterhead } = await import('./letterhead.js');
+  const img = await fetch(brandLetterhead())
+    .then(r => { if (!r.ok) throw new Error('تعذّر تحميل الكليشة'); return r.arrayBuffer(); });
   const letterhead = () => new Paragraph({ children: [new ImageRun({
     type: 'jpg', data: img, transformation: { width: PX(PAGE.w), height: PX(PAGE.h) },
     floating: { horizontalPosition: { relative: HorizontalPositionRelativeFrom.PAGE, offset: 0 },
@@ -306,7 +308,9 @@ ${DOC_STAMP_CSS(P.side)}
       { doc: d, boxPx, total: await settledHeight(flow) });
 
     const pages = d.getElementById('pages');
-    const lhUrl = lh && lh.src ? lh.src : new URL(LETTERHEAD, location.origin).href;
+    const lhUrl = lh && lh.src ? lh.src
+      : ((state.brand && state.brand.letterhead && state.brand.letterhead.url)
+         || new URL(LETTERHEAD, location.origin).href);
     pages.append(...starts.map((start, i) => {
       const img = d.createElement('img'); img.className = 'lh'; img.alt = ''; img.src = lhUrl;
       const clone = flow.cloneNode(true);

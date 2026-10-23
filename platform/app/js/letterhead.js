@@ -5,6 +5,13 @@
 import { h, dialog, toast } from './ui.js';
 import { db, storage } from './sb.js';
 import { PAGE, LETTERHEAD } from './page.js';
+import { state } from './store.js';
+
+// كليشةُ الهيئة العاملة: إصدارُها المعتمَدُ إن بُدِّل، وإلا المرفقةُ
+//   بالمنصة (ملاحظة ٤٥٨)
+export const brandLetterhead = () =>
+  (state.brand && state.brand.letterhead && state.brand.letterhead.url)
+  || new URL(LETTERHEAD, location.origin).href;
 
 // خطُّ بطاقة البيانات وحجمُها يُضبطان في الكليشة، فيسريان على المحرر
 //   وعلى PDF وعلى ملفِّ Word جميعًا (ملاحظة ٤٣٦)
@@ -57,7 +64,7 @@ export async function lhForPrint(id) {
   const row = (Array.isArray(rows) ? rows[0] : rows) || null;
   if (!row) return null;
   const t = normLh(row.tpl);
-  let src = new URL(LETTERHEAD, location.origin).href;
+  let src = brandLetterhead();
   if (t.bg) {
     try { src = await storage.signedUrl('brand', t.bg, 1800); } catch { /* تبقى كليشةُ الهيئة */ }
   }
