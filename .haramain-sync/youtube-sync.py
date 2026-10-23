@@ -42,8 +42,104 @@ def channels():
   return out or list(CHANNELS)
  except Exception:return list(CHANNELS)
 
-def extract(url,limit=None):
- opts={'quiet':True,'logger':Quiet(),'extract_flat':'in_playlist','skip_download':True,'socket_timeout':25,'retries':2,'extractor_retries':2}
+# ـــ لغةُ المقطع ونصُّه المصاحب (ملاحظتا ٤٧١ و٤٧٢)
+#   عنوانُ المقطع قد لا يحمل اسمَ لغته، ويوتيوب يعرف لغةَ صوته.
+#   والنصُّ المصاحبُ لا يُولَّد أثناء البثّ، وإنما يُخزَّن بعد انتهائه،
+#   فيُجلَب في دورةٍ تالية. ونأخذ توقيتَ كلِّ كلمةٍ لا توقيتَ السطر،
+#   لتُضاءَ الكلمةُ مع نطقها.
+CAPTIONS=ROOT.parent/'archive'/'captions'
+ENRICH_MAX=int(os.environ.get('HS_ENRICH_MAX','24'))   # حدٌّ لزمن الدورة
+ENRICH_DAYS=int(os.environ.get('HS_ENRICH_DAYS','21')) # المقاطع الحديثة وحدَها
+CAP_TRIES=3                                            # ثم يُترَك المقطع
+# الجملةُ تنتهي بعلامة وقف، أو تطول فتُقطَع عند فاصلةٍ، أو يسكت القائل
+STOP='.؟?!۔।。'
+SOFT='،,;؛:'
+CUE_CHARS=72
+CUE_GAP=2.0
+
+def cues_from_json3(raw):
+ """يحوّل نصَّ يوتيوب إلى جملٍ، في كلِّ جملةٍ كلماتُها بتوقيتها."""
+ data=json.loads(raw)
+ words=[]
+ for ev in data.get('events') or []:
+  base=ev.get('tStartMs')
+  if base is None:continue
+  for seg in ev.get('segs') or []:
+   text=seg.get('utf8') or ''
+   if not text.strip():continue
+   words.append([round((base+(seg.get('tOffsetMs') or 0))/1000,2),text.strip()])
+ words.sort(key=lambda w:w[0])
+ cues=[];cur=[]
+ def flush():
+  if cur:cues.append({'t':cur[0][0],'e':round(cur[-1][0]+0.9,2),'w':[list(w) for w in cur]})
+  cur.clear()
+ for i,w in enumerate(words):
+  if cur and (w[0]-cur[-1][0])>CUE_GAP:flush()
+  cur.append(w)
+  text=' '.join(x[1] for x in cur)
+  last=cur[-1][1][-1:]
+  nxt=words[i+1][0] if i+1<len(words) else None
+  if last in STOP:flush()
+  elif len(text)>=CUE_CHARS and (last in SOFT or last in STOP):flush()
+  elif len(text)>=CUE_CHARS*1.5:flush()
+  elif nxt is not None and (nxt-w[0])>CUE_GAP:flush()
+ flush()
+ return cues
+
+def caption_track(info):
+ """المسارُ الموافقُ للغة الصوت: اليدويُّ أوّلًا ثم الآليّ."""
+ lang=(info.get('language') or '').split('-')[0]
+ for store in (info.get('subtitles') or {},info.get('automatic_captions') or {}):
+  keys=[k for k in store if k.split('-')[0]==lang] if lang else []
+  keys=keys or ([k for k in store if '-' not in k] if not lang else [])
+  for key in keys:
+   for fmt in store[key]:
+    if fmt.get('ext')=='json3' and fmt.get('url'):return key,fmt['url']
+ return None,None
+
+def enrich(output,now):
+ """يسأل يوتيوب عن المقاطع الحديثة: لغةُ صوتها ونصُّها المصاحب."""
+ cutoff=(datetime.datetime.now(datetime.timezone.utc)
+   -datetime.timedelta(days=ENRICH_DAYS)).isoformat()
+ pool=[]
+ for vid,v in output['videos'].items():
+  if v.get('lastSeen')!=now:continue
+  if v.get('liveStatus') in ('is_upcoming','is_live'):continue
+  if (v.get('firstSeen') or '')<cutoff and (v.get('streamsSeenAt') or '')<cutoff:continue
+  if v.get('capState')=='ok' and v.get('audioLang'):continue
+  if (v.get('capTries') or 0)>=CAP_TRIES:continue
+  pool.append((v.get('firstSeen') or '',vid))
+ pool.sort(reverse=True)
+ done=0;got=0
+ for _,vid in pool[:ENRICH_MAX]:
+  v=output['videos'][vid]
+  v['capTries']=(v.get('capTries') or 0)+1
+  try:
+   info=extract('https://www.youtube.com/watch?v='+vid,flat=False)
+  except Exception:
+   v['capState']='error';continue
+  done+=1
+  if info.get('language'):v['audioLang']=info['language']
+  key,url=caption_track(info)
+  if not url:
+   v['capState']='none';continue
+  try:
+   with urllib.request.urlopen(url,timeout=30) as r:raw=r.read().decode('utf-8','replace')
+   cues=cues_from_json3(raw)
+  except Exception:
+   v['capState']='error';continue
+  if not cues:
+   v['capState']='none';continue
+  CAPTIONS.mkdir(parents=True,exist_ok=True)
+  (CAPTIONS/(vid+'.json')).write_text(json.dumps(
+    {'v':1,'lang':key,'videoId':vid,'cues':cues},ensure_ascii=False,separators=(',',':')))
+  v['capState']='ok';v['captionsAt']=now;got+=1
+ return {'asked':done,'captions':got,'pool':len(pool)}
+
+def extract(url,limit=None,flat=True):
+ opts={'quiet':True,'logger':Quiet(),'skip_download':True,'socket_timeout':25,'retries':2,'extractor_retries':2}
+ if flat:opts['extract_flat']='in_playlist'
+ else:opts.update({'writesubtitles':False,'writeautomaticsub':False,'noplaylist':True})
  if limit:opts['playlistend']=limit
  with yt_dlp.YoutubeDL(opts) as ydl:return ydl.extract_info(url,download=False)
 
@@ -123,10 +219,13 @@ def update(path,cache=None,full=False):
 
  if not ok_any and not output.get('streamsCheckedAt'):raise ValueError('No successful YouTube refresh')
  if not output['videos']:raise ValueError('Empty channel listing; previous archive retained')
+ # إثراءُ المقاطع الحديثة لا يُفشِل الدورةَ إن تعثَّر، فالأرشيفُ أهمُّ منه
+ try:extra=enrich(output,now) if not cache else {'asked':0,'captions':0,'pool':0}
+ except Exception:extra={'asked':0,'captions':0,'pool':0,'error':True}
  output.update({'version':now,'updatedAt':now,'playlistCount':total_lists,'checkedCount':checked,'failedPlaylists':errors})
  path.parent.mkdir(parents=True,exist_ok=True)
  tmp=path.with_suffix('.tmp');tmp.write_text(json.dumps(output,ensure_ascii=False,separators=(',',':')));tmp.replace(path)
- print(json.dumps({'channels':len(chans),'playlists':total_lists,'checked':checked,'videos':len(output['videos']),'errors':len(errors),'streamsError':output.get('streamsError')}))
+ print(json.dumps({'channels':len(chans),'playlists':total_lists,'checked':checked,'videos':len(output['videos']),'errors':len(errors),'streamsError':output.get('streamsError'),'enrich':extra}))
 if __name__=='__main__':
  parser=argparse.ArgumentParser();parser.add_argument('--cache',type=Path);parser.add_argument('--output',type=Path,default=ROOT/'youtube-catalogue.json');parser.add_argument('--full',action='store_true');args=parser.parse_args()
  update(args.output,args.cache,args.full)
