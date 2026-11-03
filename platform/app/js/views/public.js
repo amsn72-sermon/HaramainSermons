@@ -205,7 +205,10 @@ export async function render(ctx) {
   // بطاقة خطبة: قائمة لغات منسدلة باللغتين + مشغّل المنصة
   function sermonCard(rec, prefer = '') {
     const list = rec.translations || [];
-    const at = Math.max(0, list.findIndex(t => langCode(t) === prefer));
+    // الأصلُ أن تُفتَح البطاقةُ على العربية متى وُجدت، فهي أصلُ الخطبة —
+  //   وكانت تُفتَح على أوّل مقطعٍ في الترتيب أيًّا كان
+  const want = prefer || 'ar';
+  const at = Math.max(0, list.findIndex(t => langCode(t) === want));
     const sel = h('select.lang-select', { 'aria-label': 'لغة الخطبة — Sermon language' },
       list.map((t, i) => h('option', { value: String(i), selected: i === at ? true : null }, bilingual(t))));
     const box = h('div.vp-slot');
@@ -334,11 +337,22 @@ export async function render(ctx) {
 // ---------------------------------------------------------------------
 const isArafah = r => r.kind === 'arafah' || /عرفة|عرفات|Arafah|Arafat/i.test(`${r.title || ''} ${r.groupTitle || ''}`);
 
-// قائمة عرفة على يوتيوب قد لا تتضمن الأصل العربي، فيُضاف أولًا من الإعدادات (ملاحظة ٤٧)
+// قائمة عرفة على يوتيوب قد لا تتضمن الأصل العربي، فيُضاف أولًا (ملاحظة ٤٧).
+//   وصار يُدار من المنصة لا من ملفِّ الإعدادات، فلا يُرفَع ملفٌّ كلَّ عام
+//   (ملاحظة ٤٧٦) — والإعداداتُ تبقى احتياطًا إن تعذَّر الاتصال.
+const ARAFAH = new Map();
+async function loadArafahOriginals() {
+  try {
+    const { db } = await import('../sb.js');
+    for (const r of await db.rpc('arafah_originals') || []) ARAFAH.set(String(r.year), r.video_id);
+  } catch { /* تبقى الإعدادات */ }
+}
+
 function withArabicFirst(rec) {
   const list = (rec.translations || []).slice();
   const hasAr = list.some(t => langCode(t) === 'ar');
-  const id = (cfg.arafahOriginal || {})[rec.year] || (cfg.arafahOriginal || {})[String(rec.year)];
+  const id = ARAFAH.get(String(rec.year))
+    || (cfg.arafahOriginal || {})[rec.year] || (cfg.arafahOriginal || {})[String(rec.year)];
   if (!hasAr && id) list.unshift({ code: `ar:${id}`, language: 'العربية', englishName: 'Arabic', videoId: id });
   // العربية أولًا دائمًا
   list.sort((a, b) => (langCode(a) === 'ar' ? -1 : 0) - (langCode(b) === 'ar' ? -1 : 0));
@@ -349,7 +363,8 @@ export async function arafah() {
   // إسنادُ المنسق للغات المقاطع يُقرأ مع التغذية (ملاحظة ٤٦٦)
   const [feed] = await Promise.all([
     fetch(cfg.feedUrl, { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).catch(() => null),
-    loadVideoLangs()
+    loadVideoLangs(),
+    loadArafahOriginals()
   ]);
   // من ١٤٤٦هـ فصاعدًا: الخطب الأقدم قليلة ومبتورة على القناة (ملاحظة ٥٤)
   const FIRST_YEAR = 1446;
@@ -409,7 +424,10 @@ export function langCountBadge(n, big = false) {
 // بطاقة خطبة عرفة: قائمة لغات منسدلة ومشغّل المنصة
 function arafahCard(rec, prefer = '') {
   const list = rec.translations || [];
-  const at = Math.max(0, list.findIndex(t => langCode(t) === prefer));
+  // الأصلُ أن تُفتَح البطاقةُ على العربية متى وُجدت، فهي أصلُ الخطبة —
+  //   وكانت تُفتَح على أوّل مقطعٍ في الترتيب أيًّا كان
+  const want = prefer || 'ar';
+  const at = Math.max(0, list.findIndex(t => langCode(t) === want));
   const sel = h('select.lang-select', { 'aria-label': 'لغة الخطبة — Sermon language' },
     list.map((t, i) => h('option', { value: String(i), selected: i === at ? true : null }, bilingual(t))));
   const box = h('div.vp-slot');

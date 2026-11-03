@@ -117,7 +117,9 @@ export const EVENT_LABEL = {
   assigned: 'إسناد المراحل وإرسال المادة', accepted: 'استلام المهمة وقبولها', edited: 'حفظ تعديل على الترجمة',
   audio_uploaded: 'رفع التسجيل الصوتي', completed: 'إتمام المرحلة', returned: 'إعادة للتعديل',
   published: 'النشر على الموقع العام', unpublished: 'إخفاء من الموقع العام',
-  reassigned: 'تغيير المسؤول', audio_approved: 'اعتماد التسجيل الصوتي'
+  reassigned: 'تغيير المسؤول', audio_approved: 'اعتماد التسجيل الصوتي',
+  stream_set: 'حفظ رابط بثِّ الترجمة', stream_cleared: 'مسح رابط بثِّ الترجمة',
+  audio_stage_moved: 'نقل مرحلة التسجيل الصوتي'
 };
 
 export const isAdmin = () => ['manager', 'coordinator'].includes(state.profile?.role) && state.profile?.status === 'active';
@@ -188,6 +190,15 @@ export async function loadProfile() {
   const uid = auth.user?.id || (await auth.loadUser())?.id;
   const rows = await db.select('profiles', { select: '*', id: `eq.${uid}` });
   state.profile = rows[0] || null;
+  // مفتاحُ بطاقته هو: صار في جدولٍ مستقلٍّ لئلّا يقرأه الزملاء من جدول
+  //   الأعضاء، فيُضمُّ إلى ملفِّه هنا ليُطبَع باركودُ بطاقته (فحصٌ أمنيّ ٠١٣٠)
+  if (state.profile) {
+    try {
+      const [k] = await db.select('member_card_keys',
+        { select: 'card_key', member_id: `eq.${uid}` });
+      state.profile.card_key = k?.card_key || null;
+    } catch { state.profile.card_key = null; }
+  }
   if (state.profile) await Promise.all([loadPerms(), loadRoleLabels()]);
   return state.profile;
 }

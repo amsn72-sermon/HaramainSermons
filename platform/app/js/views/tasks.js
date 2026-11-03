@@ -103,7 +103,10 @@ export async function list() {
     db.rpc('my_history').catch(() => []),
     db.rpc('my_glossary_tasks').catch(() => [])
   ]);
-  const tracks = all.map(sortStages).filter(t => myStages(t).length);
+  // ما حُذف إلى الأرشيف لا يُعرَض مهمةً ولو بقي في القاعدة ليُستردّ
+  //   (ملاحظة ٤٧٤)
+  const tracks = all.filter(t => !t.deleted_at && !t.material?.deleted_at)
+    .map(sortStages).filter(t => myStages(t).length);
   const now = tracks.filter(needsMe);
   const nowIds = new Set(now.map(t => t.id));
   const upcoming = (hist || []).filter(r => r.stage_status === 'waiting' && r.track_status !== 'completed' && !nowIds.has(r.track_id));
@@ -187,6 +190,13 @@ function audioSeconds(file) {
 export async function workspace(ctx) {
   const [t] = await db.select('tracks', { select: FULL, id: `eq.${ctx.params.id}` });
   if (!t) return emptyState('المهمة غير متاحة', 'أُغلقت بعد إتمام دورك فيها، أو لم تعد مسندة إليك. يبقى إنجازك في سجل أعمالك.', h('a.btn', { href: '/app/tasks' }, 'مهامي'));
+  // وما أُلغي إسنادُه لا يُفتَح للعمل، ويُبيَّن للعامل لمَ اختفى
+  //   (ملاحظة ٤٧٤)
+  if (t.deleted_at || t.material?.deleted_at) {
+    return emptyState('أُلغي هذا الإسناد',
+      'سُحبت هذه المادة من العمل، فلم تعد مطلوبةً منك. وما كتبتَه محفوظٌ عند الإدارة.',
+      h('a.btn', { href: '/app/tasks' }, 'مهامي'));
+  }
   sortStages(t);
   const m = t.material;
   const events = await db.select('track_events', { select: '*,actor:profiles(full_name)', track_id: `eq.${t.id}`, order: 'created_at.asc' });

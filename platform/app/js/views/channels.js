@@ -6,7 +6,7 @@
 //   هنا كلَّها وتدمج خطبَها، فلا يتعلّق البثُّ بذاكرة أحد.
 import { h, fill, toast, busy, dialog, confirm, fmtDateTime, emptyState } from '../ui.js';
 import { db } from '../sb.js';
-import { isManager } from '../store.js';
+import { isManager, isAdmin } from '../store.js';
 
 const ID_RE = /^UC[A-Za-z0-9_-]{22}$/;
 
@@ -114,6 +114,76 @@ export async function render(ctx) {
       acts);
   }
 
+  // ـــ الأصلُ العربيُّ لخطبة عرفة (ملاحظة ٤٧٦)
+  //   قائمةُ عرفة على يوتيوب لا تتضمَّن الخطبةَ العربيةَ الأصلية، فكانت
+  //   تُضاف في إعدادات الواجهة برفع ملفٍّ كلَّ عام. فصارت من هنا.
+  const arafahBox = h('div.stack');
+  // أصلُ عرفة للمنسق ومدير المشروع، وقنواتُ المزامنة لمدير المشروع وحدَه
+  const mayArafah = isAdmin();
+  const YT_ID = /(?:v=|\/live\/|\/shorts\/|\/embed\/|youtu\.be\/)([A-Za-z0-9_-]{11})(?:[?&/#]|$)|^[A-Za-z0-9_-]{11}$/;
+  async function drawArafah() {
+    let list = [];
+    try { list = await db.rpc('arafah_originals') || []; } catch { list = []; }
+    const row = r => h('div.card.row.between.wrap.tpl-row',
+      h('div.stack', { style: { gap: '2px' } },
+        h('b', `عام ${r.year}هـ`),
+        h('a.small', { href: `https://www.youtube.com/watch?v=${r.video_id}`,
+          target: '_blank', rel: 'noopener', dir: 'ltr' },
+          `youtube.com/watch?v=${r.video_id}`)),
+      mayArafah ? h('div.row', { style: { gap: '6px' } },
+        h('button.btn.sm', { type: 'button', onclick: () => editArafah(r) }, 'تعديل'),
+        h('button.btn.sm.danger', { type: 'button', onclick: e => busy(e.currentTarget, async () => {
+          if (!await confirm('مسحُ الأصل العربي',
+            `يُمسَح الأصلُ العربيُّ لعام ${r.year}هـ، فتُعرَض الترجماتُ وحدَها.`,
+            'امسحْه', 'danger')) return;
+          try { await db.rpc('set_arafah_original', { p_year: r.year, p_url: null }); drawArafah(); }
+          catch (e2) { toast(e2.message, 'bad'); }
+        }) }, 'مسح')) : null);
+    fill(arafahBox, h('div.stack',
+      h('div.page-head',
+        mayArafah ? h('div.row.wrap', { style: { marginInlineStart: 'auto', order: 2 } },
+          h('button.btn.sm.primary', { type: 'button', onclick: () => editArafah(null) },
+            '＋ أصلُ عامٍ جديد')) : null,
+        h('div.grow', h('h2', 'الأصلُ العربيُّ لخطبة عرفة'),
+          h('p.muted.small', 'قائمةُ عرفة على يوتيوب لا تتضمَّن الخطبةَ العربيةَ غالبًا، '
+            + 'فيُضاف أصلُها هنا لكلِّ عامٍ هجريّ، ويظهر أوّلَ اللغات في الموقع العام.'))),
+      list.length ? h('div.stack', list.map(row))
+        : emptyState('لا أصلَ مسجَّلًا', 'أضِفْ معرّفَ الخطبة العربية لعام عرفة.')));
+  }
+
+  async function editArafah(r) {
+    const year = h('input', { type: 'number', min: '1400', max: '1600',
+      value: String(r?.year || ''), 'aria-label': 'العام الهجري', placeholder: '1449' });
+    const url = h('input', { dir: 'ltr', value: r ? `https://www.youtube.com/watch?v=${r.video_id}` : '',
+      'aria-label': 'رابط الخطبة العربية', placeholder: 'https://www.youtube.com/watch?v=…' });
+    const err = h('p.err', { hidden: true });
+    const res = await dialog({
+      title: r ? `الأصلُ العربيُّ — عام ${r.year}هـ` : 'أصلُ خطبة عرفة',
+      body: h('div.stack',
+        h('label.field', 'العامُ الهجريّ', year),
+        h('label.field', 'رابطُ الخطبة العربية', url), err),
+      buttons: [
+        { label: 'حفظ', kind: 'primary',
+          validate: () => {
+            const y = Number(year.value);
+            const e = !(y >= 1400 && y <= 1600) ? 'اكتبِ العامَ الهجريَّ صحيحًا'
+              : !YT_ID.test(url.value.trim()) ? 'الرابطُ لا يحمل معرّفَ مقطعٍ صحيحًا' : '';
+            err.textContent = e; err.hidden = !e;
+            return !e;
+          },
+          value: () => ({ year: Number(year.value), url: url.value.trim() }) },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (!res) return;
+    try {
+      await db.rpc('set_arafah_original', { p_year: res.year, p_url: res.url });
+      toast('حُفظ الأصلُ العربيّ.', 'ok');
+      drawArafah();
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+  drawArafah();
+
   fill(box, rows.length
     ? h('div.stack', rows.map(card))
     : emptyState('لا قنواتٍ مسجَّلة', 'أضِفْ قناةً ليُقرأ منها البثّ.'));
@@ -128,6 +198,8 @@ export async function render(ctx) {
           + 'تُدمَج خطبُها بعنوان قائمتها، ويُؤخَذ لكلِّ لغةٍ مقطعٌ واحدٌ بترتيب '
           + 'الترجيح أدناه، فلا تتكرّر لغةٌ ولو بُثَّت على قناتين.'))),
     box,
+    h('hr', { style: { margin: '20px 0', border: 0, borderTop: '1px solid var(--line)' } }),
+    arafahBox,
     h('p.small.muted', { style: { marginTop: '12px' } },
       'تقرأ المزامنةُ هذه القائمةَ كلَّ ربع ساعة. وإن تعذّر الوصولُ إلى المنصة '
       + 'عملت بالقنوات الثلاث المحفورة في أصلها، فلا ينقطع البثّ.'));

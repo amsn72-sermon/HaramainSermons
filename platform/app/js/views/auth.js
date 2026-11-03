@@ -226,7 +226,9 @@ export async function pending() {
     try {
       const path = `${p.id}/iqama-${Date.now()}.${f.type.split('/')[1]}`;
       await storage.upload('private-docs', path, f);
-      await db.update('profile_private', { id: `eq.${p.id}` }, { iqama_path: path });
+      // الكتابةُ المباشرةُ في البيانات الخاصة أُغلقت، والدالّةُ تتحقَّق
+      //   من أنَّ المسار في مجلَّد صاحبه (فحصٌ أمنيّ ٠١٣٠)
+      await db.rpc('set_my_iqama', { p_path: path });
       status.textContent = 'صورة الإقامة مرفوعة.';
       toast('رُفعت الصورة.', 'ok');
     } catch (err) { toast(err.message, 'bad'); }

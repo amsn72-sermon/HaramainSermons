@@ -16,13 +16,18 @@ const px = mm => `${mm * SCALE}px`;
 const round = v => Math.round(v * 10) / 10;
 
 export async function render(ctx) {
-  const [members, priv, langRows, settingsRows, cardRows] = await Promise.all([
-    db.select('profiles', { select: 'id,full_name,role,status,member_no,email,track,card_key', order: 'full_name.asc' }),
+  const [members, priv, langRows, settingsRows, cardRows, keyRows] = await Promise.all([
+    db.select('profiles', { select: 'id,full_name,role,status,member_no,email,track', order: 'full_name.asc' }),
     db.select('profile_private', { select: 'id,photo_path' }).catch(() => []),
     db.select('member_languages', { select: 'member_id,language_code' }).catch(() => []),
     db.select('card_settings', { select: '*' }).catch(() => []),
-    db.select('member_cards', { select: '*' }).catch(() => [])
+    db.select('member_cards', { select: '*' }).catch(() => []),
+    // مفتاحُ التحقّق صار في جدولٍ مستقلٍّ: لصاحبه وللإدارة لا للزملاء
+    //   (فحصٌ أمنيّ ٠١٣٠)
+    db.select('member_card_keys', { select: 'member_id,card_key' }).catch(() => [])
   ]);
+  const keyOf = Object.fromEntries((keyRows || []).map(k => [k.member_id, k.card_key]));
+  for (const m of members) m.card_key = keyOf[m.id] || null;
   const photoOf = Object.fromEntries(priv.map(p => [p.id, p.photo_path]));
   const langsOf = {};
   for (const r of langRows) (langsOf[r.member_id] ||= []).push(r.language_code);

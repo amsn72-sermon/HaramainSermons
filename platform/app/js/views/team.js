@@ -5,7 +5,7 @@ import { state, isManager, ROLE_LABEL, STATUS_LABEL, roleName,
   TRACK_LABEL, trackOf, CITY, NO_FATWA, langName, stageName, roleLabel, ADMIN_TITLE,
   leadScope, can, LEAD_KIND } from '../store.js';
 import { POLICY_KEY, POLICY_VERSION } from '../policy.js';
-import { TEAM_FIELDS, teamRows, exportExcel, exportWord, exportPdf } from '../teamexport.js';
+import { allowedTeamFields, teamRows, exportExcel, exportWord, exportPdf } from '../teamexport.js';
 import { nationalitySelect } from '../nationalities.js';
 import { icon } from '../icons.js';
 
@@ -24,7 +24,9 @@ export async function render(ctx, opts = {}) {
   const track = group === 'field' ? 'field' : group === 'answers' ? 'answers' : 'translation';
   const [all, priv, perf, rateSum, signed, bank] = await Promise.all([
     db.select('profiles', { select: '*,member_languages(language_code,assignable,default_stage,priority)', order: 'created_at.desc' }),
-    db.select('profile_private', { select: '*' }),
+    // بقدر صلاحية السائل: الهويةُ لمن يملك مفتاحَها، فلا تصل متصفِّحَ
+    //   من لا يملكه (فحصٌ أمنيّ ٠١٣٣)
+    db.rpc('team_private').catch(() => db.select('profile_private', { select: '*' })),
     db.select('member_performance', { select: '*' }).catch(() => []),
     db.select('member_rating_summary', { select: '*' }).catch(() => []),
     db.select('policy_acceptances', { select: 'member_id,policy_version,signed_name,accepted_at', policy_key: `eq.${POLICY_KEY}` }).catch(() => []),
@@ -844,7 +846,7 @@ export async function render(ctx, opts = {}) {
     };
     allBox.onchange = () => { picked.clear(); if (allBox.checked) pool.forEach(m => picked.add(m.id)); drawMembers(); count(); };
 
-    const fieldBox = h('div.pick-list', TEAM_FIELDS.map(([k, label]) => {
+    const fieldBox = h('div.pick-list', allowedTeamFields().map(([k, label]) => {
       const cb = h('input', { type: 'checkbox', checked: fields.has(k) ? true : null });
       cb.onchange = () => { cb.checked ? fields.add(k) : fields.delete(k); count(); };
       return h('label.check', cb, h('span', label));
@@ -886,7 +888,7 @@ export async function render(ctx, opts = {}) {
       ]
     });
     if (!res) return;
-    const keys = TEAM_FIELDS.map(f => f[0]).filter(k => fields.has(k));
+    const keys = allowedTeamFields().map(f => f[0]).filter(k => fields.has(k));
     const rows = teamRows(pool.filter(m => picked.has(m.id)), keys, { privOf, signOf, bankOf, extraColumns: res.extraColumns });
     try {
       if (res.fmt === 'xlsx') exportExcel(rows, res.title);
@@ -1139,8 +1141,12 @@ export async function render(ctx, opts = {}) {
 
   // ـــ الهويةُ المعتمَدةُ والحسابُ المعتمَد: أيقونةٌ دائمةٌ أمام العضو،
   //   فما خرج من التدقيق لا يضيع بل يُفتَح من هنا متى شئت (ملاحظة ٣٩٣)
-  const idOk   = m => (privOf[m.id] || {}).iqama_status === 'approved';
-  const bankOk = m => !!(bankOf[m.id] || {}).verified_at;
+  //   ولا يُعرَض من المعتمَد إلا ما يملكه فاتحُ الشاشة: صورةُ الهوية
+  //   ورقمُها بمفتاح «الاطّلاع على صورة الهوية»، والحسابُ المصرفيُّ
+  //   وخطابُ بنكه بمفتاح «الاطّلاع على الحسابات المصرفية» — وكانت
+  //   تُعرَض لكلِّ من بلغ الشاشة (فحصٌ أمنيّ ٠١٣٠)
+  const idOk   = m => (privOf[m.id] || {}).iqama_status === 'approved' && can('docs_id_view');
+  const bankOk = m => !!(bankOf[m.id] || {}).verified_at && can('bank_view');
   const fileBtn = m => {
     if (!idOk(m) && !bankOk(m)) return null;
     const what = [idOk(m) ? 'الهوية' : null, bankOk(m) ? 'الحساب المصرفي' : null]

@@ -111,7 +111,7 @@ async function openNaming(done) {
 export async function render(ctx) {
   const fetched = await db.select('tracks', {
     select: 'id,language_code,translation_html,audio_path,completed_at,is_published,receipt_late_seconds,'
-      + 'deleted_at,doc_no,doc_no_at,stages:track_stages!track_stages_track_id_fkey'
+      + 'deleted_at,doc_no,doc_no_at,stream_video,stages:track_stages!track_stages_track_id_fkey'
       + '(stage_key,late_seconds,assignee:profiles(full_name)),material:materials(*,khateeb:khateebs(name))',
     status: 'eq.completed', order: 'completed_at.desc', limit: 1000
   });
@@ -122,9 +122,37 @@ export async function render(ctx) {
   let showTrash = false;
 
   // ----------------------------------------------------------------
+  // تصفُّحٌ بالتاريخ الهجري: السنةُ ثم أشهرُها ثم جُمَعُها (ملاحظة ٤٧٣)
+  //   وتاريخُ المادة هو الأصلُ لا تاريخُ الاعتماد، فالخطبةُ تُنسَب إلى
+  //   يومها لا إلى يوم تسليم ترجمتها.
+  // ----------------------------------------------------------------
+  const HIJ = new Intl.DateTimeFormat('en-u-ca-islamic-umalqura-nu-latn',
+    { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Asia/Riyadh' });
+  const MONTH_AR = ['محرم', 'صفر', 'ربيع الأول', 'ربيع الآخر', 'جمادى الأولى', 'جمادى الآخرة',
+    'رجب', 'شعبان', 'رمضان', 'شوال', 'ذو القعدة', 'ذو الحجة'];
+  const hijCache = new Map();
+  const hijOf = t => {
+    const src = t.material?.sermon_date || t.completed_at;
+    if (!src) return null;
+    if (hijCache.has(src)) return hijCache.get(src);
+    let out = null;
+    try {
+      const parts = Object.fromEntries(HIJ.formatToParts(
+        new Date(String(src).length > 10 ? src : src + 'T12:00:00')).map(x => [x.type, x.value]));
+      out = { y: String(Number(parts.year)), m: parts.month, d: parts.day,
+        key: `${Number(parts.year)}-${parts.month}-${parts.day}` };
+    } catch { out = null; }
+    hijCache.set(src, out);
+    return out;
+  };
+  const monthName = m => MONTH_AR[Number(m) - 1] || m;
+
+  // ----------------------------------------------------------------
   // المستوى الحالي والمرشّحات — محفوظة في العنوان ليُشارَك الرابط
   // ----------------------------------------------------------------
-  let level = { type: ctx.query.get('type') || '', sub: ctx.query.get('sub') || '' };
+  let level = { type: ctx.query.get('type') || '', sub: ctx.query.get('sub') || '',
+    by: ctx.query.get('by') === 'date' ? 'date' : 'type',
+    y: ctx.query.get('y') || '', mo: ctx.query.get('mo') || '', d: ctx.query.get('d') || '' };
   const q = h('input', { type: 'search', placeholder: 'العنوان أو الخطيب أو اللغة أو رقم التوثيق',
     'aria-label': 'البحث في الأرشيف' });
   const lang = h('select', { 'aria-label': 'اللغة' }, h('option', { value: '' }, 'كل اللغات'),
@@ -167,6 +195,19 @@ export async function render(ctx) {
   // النوع «*» يعني عرض الأعمال كلها في قائمة واحدة بلا تصفّح بالبطاقات
   const inLevel = list => list.filter(t => (!level.type || level.type === '*' || t.material.material_type === level.type)
     && (!level.sub || (t.material.sermon_type || 'غير محدد') === level.sub));
+  const inDate = list => list.filter(t => {
+    const p = hijOf(t);
+    if (!p) return !level.y;
+    return (!level.y || p.y === level.y) && (!level.mo || p.m === level.mo)
+      && (!level.d || p.key === level.d);
+  });
+  // ترتيبُ القائمة في عقدة اليوم: المسجدُ ثم اللغة، فلا تتداخل الجهتان
+  //   (ملاحظة ٤٧٧)
+  const MOSQUE_ORDER = { makkah: 0, madinah: 1, arafah: 2 };
+  const byVenueLang = list => list.slice().sort((a, b) =>
+    (MOSQUE_ORDER[a.material.mosque] ?? 9) - (MOSQUE_ORDER[b.material.mosque] ?? 9)
+    || String(a.material.title || '').localeCompare(String(b.material.title || ''), 'ar')
+    || langName(a.language_code).localeCompare(langName(b.language_code), 'ar'));
 
   const periodLabel = () => {
     if (mode.value === 'month' && month.value) {
@@ -533,6 +574,9 @@ export async function render(ctx) {
       h('span.arch-meta.small.muted', fmtDateTime(t.completed_at)),
       h('span.arch-badges',
         h('span.badge', { class: t.is_published ? 'ok' : '' }, t.is_published ? 'منشورة' : 'غير منشورة'),
+        // رابطُ بثِّ الترجمة على يوتيوب إن حُفظ (ملاحظة ٤٧٨)
+        t.stream_video ? h('a.badge.ok', { href: `https://www.youtube.com/watch?v=${t.stream_video}`,
+          target: '_blank', rel: 'noopener', title: 'بثُّ الترجمة على يوتيوب' }, '▶ بثّ') : null,
         late && h('span.badge.bad', 'تأخير')),
       h('span.arch-actions',
         iconBtn('word', 'تصدير Word على الكليشة', e => busy(e.currentTarget, () => downloadDocx(args).catch(err => toast(err.message, 'bad')))),
@@ -579,9 +623,13 @@ export async function render(ctx) {
   // ----------------------------------------------------------------
   // البطاقات: نوعُ عملٍ في كل بطاقة، وفيها عدده وآخر عمل ولغاته
   // ----------------------------------------------------------------
-  function tile({ key, label, emoji, items, onclick }) {
+  function tile({ key, label, emoji, items, onclick, dateBy }) {
     const langs = new Set(items.map(t => t.language_code));
-    const last = items.map(t => t.completed_at).filter(Boolean).sort().at(-1);
+    // في شجرة التاريخ يُؤرَّخ الباب بتاريخ المادة، لا بتاريخ الاعتماد
+    //   (ملاحظة ٤٧٣)
+    const last = items.map(t => (dateBy === 'material'
+      ? (t.material?.sermon_date || t.completed_at) : t.completed_at))
+      .filter(Boolean).sort().at(-1);
     return h('button.kpi.arch-tile', { type: 'button', key, onclick,
       'aria-label': `${label}: ${items.length} عملًا` },
       h('span.arch-tile-emoji', { 'aria-hidden': 'true' }, emoji),
@@ -591,16 +639,59 @@ export async function render(ctx) {
   }
 
   const go = (type, sub) => {
-    level = { type: type || '', sub: sub || '' };
+    level = { ...level, by: 'type', type: type || '', sub: sub || '', y: '', mo: '', d: '' };
+    push();
+  };
+  // الانتقالُ في شجرة التاريخ (ملاحظة ٤٧٣)
+  const goDate = (y, mo, d) => {
+    level = { ...level, by: 'date', type: '', sub: '', y: y || '', mo: mo || '', d: d || '' };
+    push();
+  };
+  function push() {
     const qs = new URLSearchParams();
+    if (level.by === 'date') {
+      qs.set('by', 'date');
+      if (level.y) qs.set('y', level.y);
+      if (level.mo) qs.set('mo', level.mo);
+      if (level.d) qs.set('d', level.d);
+    }
     if (level.type) qs.set('type', level.type);
     if (level.sub) qs.set('sub', level.sub);
     history.replaceState(null, '', '/app/archive' + (qs.toString() ? `?${qs}` : ''));
     draw();
     window.scrollTo(0, 0);
+  }
+
+  // تصفُّحٌ بالنوع أو بالتاريخ — والتاريخُ شجرةٌ هجرية (ملاحظة ٤٧٣)
+  const byTypeBtn = h('button.btn.sm', { type: 'button', onclick: () => go('', '') }, 'بالنوع');
+  const byDateBtn = h('button.btn.sm', { type: 'button', onclick: () => goDate('', '', '') }, 'بالتاريخ');
+  const browseBtns = h('div.row', { style: { gap: '4px' }, role: 'group',
+    'aria-label': 'طريقةُ التصفُّح' }, byTypeBtn, byDateBtn);
+  const syncBrowse = () => {
+    byTypeBtn.classList.toggle('primary', level.by !== 'date');
+    byDateBtn.classList.toggle('primary', level.by === 'date');
+    byTypeBtn.setAttribute('aria-pressed', String(level.by !== 'date'));
+    byDateBtn.setAttribute('aria-pressed', String(level.by === 'date'));
   };
 
   function crumbs() {
+    if (level.by === 'date') {
+      if (!level.y) return null;
+      return h('nav.arch-crumbs', { 'aria-label': 'المسار' },
+        h('button.btn.xs', { type: 'button', onclick: () => goDate('', '', '') }, '↩ كل السنوات'),
+        h('span.muted', '›'),
+        level.mo
+          ? h('button.btn.xs', { type: 'button', onclick: () => goDate(level.y, '', '') }, `${level.y}هـ`)
+          : h('b', `${level.y}هـ`),
+        level.mo ? h('span.muted', '›') : null,
+        level.mo
+          ? (level.d
+              ? h('button.btn.xs', { type: 'button', onclick: () => goDate(level.y, level.mo, '') }, monthName(level.mo))
+              : h('b', monthName(level.mo)))
+          : null,
+        level.d ? h('span.muted', '›') : null,
+        level.d ? h('b', `الجمعة ${level.d.split('-')[2]}`) : null);
+    }
     if (!level.type) return null;
     return h('nav.arch-crumbs', { 'aria-label': 'المسار' },
       h('button.btn.xs', { type: 'button', onclick: () => go('', '') }, '↩ كل الأنواع'),
@@ -613,8 +704,9 @@ export async function render(ctx) {
   }
 
   function draw() {
+    syncBrowse();
     const base = filtered();
-    const list = inLevel(base);
+    const list = level.by === 'date' ? byVenueLang(inDate(base)) : inLevel(base);
 
     const groupBy = (items, key) => {
       const m = new Map();
@@ -623,7 +715,44 @@ export async function render(ctx) {
     };
 
     let view;
-    if (!level.type) {
+    if (level.by === 'date') {
+      // شجرةُ التاريخ: السنةُ ← أشهرُها ← جُمَعُها ← أعمالُ اليوم
+      //   (ملاحظة ٤٧٣)
+      const dated = base.filter(t => hijOf(t));
+      if (!level.y) {
+        const byYear = groupBy(dated, t => hijOf(t).y);
+        const keys = [...byYear.keys()].sort((a, b) => Number(b) - Number(a));
+        view = keys.length
+          ? h('div.stack', h('div.kpis.arch-tiles', keys.map(k => tile({
+              key: k, label: `${k}هـ`, emoji: '🗓', items: byYear.get(k), dateBy: 'material',
+              onclick: () => goDate(k, '', '')
+            }))), h('p.small.muted', 'اختر السنة، ثم الشهر، ثم الجمعة — وفي كلِّ باب عدَدُ أعماله.'))
+          : emptyState('لا أعمال مؤرَّخة', 'وسّع المدة أو امسح البحث.');
+      } else if (!level.mo) {
+        const byMonth = groupBy(inDate(dated), t => hijOf(t).m);
+        const keys = [...byMonth.keys()].sort((a, b) => Number(a) - Number(b));
+        view = keys.length
+          ? h('div.kpis.arch-tiles', keys.map(k => tile({
+              key: k, label: monthName(k), emoji: '📆', items: byMonth.get(k), dateBy: 'material',
+              onclick: () => goDate(level.y, k, '')
+            })))
+          : emptyState('لا أعمال في هذه السنة', 'وسّع المدة أو امسح البحث.');
+      } else if (!level.d) {
+        const byDay = groupBy(inDate(dated), t => hijOf(t).key);
+        const keys = [...byDay.keys()].sort();
+        view = keys.length
+          ? h('div.kpis.arch-tiles', keys.map(k => tile({
+              key: k, label: `${Number(k.split('-')[2])} ${monthName(level.mo)}`,
+              emoji: '🕌', items: byDay.get(k), dateBy: 'material',
+              onclick: () => goDate(level.y, level.mo, k)
+            })))
+          : emptyState('لا أعمال في هذا الشهر', 'وسّع المدة أو امسح البحث.');
+      } else {
+        view = list.length
+          ? h('ol.archive', list.map((t, i) => rowEl(t, i + 1)))
+          : emptyState('لا أعمال في هذه الجمعة', 'وسّع المدة أو امسح البحث.');
+      }
+    } else if (!level.type) {
       // المستوى الأول: بطاقة لكل نوع عمل
       const byType = groupBy(base, t => t.material.material_type || 'أخرى');
       const order = [...MATERIAL_TYPES, 'أخرى'];
@@ -683,7 +812,7 @@ export async function render(ctx) {
     h('div.page-head', h('div.grow', h('div.eyebrow', 'الأرشيف'), h('h1', 'أرشيف أعمال الترجمة'),
       h('p.muted', 'كل عمل مكتمل برقم توثيقه، مرتَّبًا بأنواعه — تصفّحٌ بالبطاقات، وكشفٌ يُطبع ويُسلَّم.')),
       h('div.row', { style: { marginInlineStart: 'auto', order: 2 } },
-        namingLine(), h('span.badge.gold', `${rows.length} ترجمة نهائية`))),
+        browseBtns, namingLine(), h('span.badge.gold', `${rows.length} ترجمة نهائية`))),
     h('div.grid.arch-filters', { style: { marginBottom: '16px' } },
       h('label.field', 'البحث', q), h('label.field', 'اللغة', lang),
       h('label.field', 'الجهة', scope), h('label.field', 'المدة', mode),

@@ -4,7 +4,7 @@ import { PAGE, LETTERHEAD } from './page.js';
 import { buildXlsx, downloadBlob } from './xlsx.js';
 import { openSheetWindow, measureBlocks, flowBlocks, mm2px, sheetCss,
   winHeight, boxWidth } from './sheetflow.js';
-import { STATUS_LABEL, langName, roleName } from './store.js';
+import { STATUS_LABEL, langName, roleName, can } from './store.js';
 
 // توحيدُ أرقام الجوال في التصدير على الصيغة الدولية (ملاحظة ٢٥٥ ب)
 //   والمحفوظُ في قاعدة البيانات يبقى كما أدخله صاحبُه، فالتوحيدُ عرضٌ
@@ -31,17 +31,19 @@ export const TEAM_FIELDS = [
   ['status',      'الحالة',               m => STATUS_LABEL[m.status] || m.status],
   ['email',       'البريد الإلكتروني',     m => m.email],
   ['whatsapp',    'رقم الجوال',           (m, p) => intlPhone(p.whatsapp)],
-  ['national_id', 'رقم الهوية أو الإقامة', (m, p) => p.national_id],
+  ['national_id', 'رقم الهوية أو الإقامة', (m, p) => p.national_id, 'docs_id_view'],
   ['nationality', 'الجنسية',              (m, p) => p.nationality],
   ['residence',   'مكان الإقامة',         (m, p) => p.residence],
   ['languages',   'اللغات',               m => (m.member_languages || []).map(x => langName(x.language_code)).join('، ')],
   ['policy',      'ميثاق العمل',         (m, p, x) => x.signed ? 'موقّعة' : 'لم توقّع'],
-  // الحساب البنكي (ملاحظة ٨٤) — لا يظهر إلا لمن يرى البيانات المالية
-  ['bank_name',   'اسم البنك',            (m, p, x) => x.bank?.bank_name],
-  ['iban',        'الآيبان (IBAN)',        (m, p, x) => groupIban(x.bank?.iban) || x.bank?.account_number],
-  ['swift',       'سويفت (BIC)',          (m, p, x) => x.bank?.swift],
-  ['bank_holder', 'اسم صاحب الحساب',      (m, p, x) => x.bank?.account_holder],
-  ['bank_state',  'توثيق الحساب',         (m, p, x) => !x.bank ? 'لم يُسجَّل' : (x.bank.verified_at ? 'موثّق' : 'غير موثّق')],
+  // الحساب البنكي (ملاحظة ٨٤) — لا يظهر إلا لمن يرى البيانات المالية،
+  //   والمفتاحُ الرابع هو مفتاحُ الصلاحية الذي يُشترَط لعرض الحقل
+  //   (كان التعليقُ وحدَه بلا تحقُّق — فحصٌ أمنيّ ٠١٣٠)
+  ['bank_name',   'اسم البنك',            (m, p, x) => x.bank?.bank_name, 'bank_view'],
+  ['iban',        'الآيبان (IBAN)',        (m, p, x) => groupIban(x.bank?.iban) || x.bank?.account_number, 'bank_view'],
+  ['swift',       'سويفت (BIC)',          (m, p, x) => x.bank?.swift, 'bank_view'],
+  ['bank_holder', 'اسم صاحب الحساب',      (m, p, x) => x.bank?.account_holder, 'bank_view'],
+  ['bank_state',  'توثيق الحساب',         (m, p, x) => !x.bank ? 'لم يُسجَّل' : (x.bank.verified_at ? 'موثّق' : 'غير موثّق'), 'bank_view'],
   ['created_at',  'تاريخ التسجيل',        m => fmtDate(m.created_at)]
 ];
 
@@ -51,8 +53,13 @@ const groupIban = v => (v ? String(v).replace(/\s+/g, '').toUpperCase().replace(
 export const fieldLabel = key => (TEAM_FIELDS.find(f => f[0] === key) || [, key])[1];
 
 // جدول: أول صف رؤوس الأعمدة. extra أعمدة فارغة بأسماء يكتبها المستخدم (ملاحظة ٨٠)
+// الحقولُ التي يملكها فاتحُ الشاشة: ما لا مفتاحَ له مباحٌ لمن بلغ الشاشة،
+//   وما له مفتاحٌ لا يُعرَض إلا لصاحبه (فحصٌ أمنيّ ٠١٣٠)
+export const allowedTeamFields = () => TEAM_FIELDS.filter(f => !f[3] || can(f[3]));
+
 export function teamRows(members, keys, ctx = {}) {
-  const chosen = TEAM_FIELDS.filter(f => keys.includes(f[0]));
+  // والتصفيةُ تُعاد هنا ولو صُفّيت في الشاشة، فلا يُصدَّر حقلٌ لا يملكه
+  const chosen = allowedTeamFields().filter(f => keys.includes(f[0]));
   const extra = (ctx.extraColumns || []).map(t => String(t).trim()).filter(Boolean);
   const head = [...chosen.map(f => f[1]), ...extra];
   const body = members.map(m => [

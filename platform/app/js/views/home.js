@@ -457,6 +457,97 @@ export async function render(ctx) {
     try { await db.rpc('reassign_stage', { p_track: t.id, p_stage: s.stage_key, p_assignee: chosen }); toast('تم تغيير المسؤول.', 'ok'); reload(); }
     catch (err) { toast(err.message, 'bad'); }
   }
+  // من يملك رابطَ البثِّ ونقلَ التسجيل: الإدارةُ ومشرفُ لغة المسار —
+  //   وحساباتُ المتابعة ترى اللوحةَ ولا تملك فيها فعلًا (ملاحظة ٢٧١)
+  const mayEdit = t => isAdmin() || (state.supervisedLangs || []).includes(t.language_code);
+
+  // ـــ اللغاتُ المعتمَدةُ للخطب واللغاتُ الناقصةُ منها (ملاحظة ٤٧٧)
+  //   المعتمَدةُ هي اللغاتُ الأساسيةُ المفعَّلة، وما سواها يُسنَد عند
+  //   الحاجة فلا يُعدُّ نقصًا.
+  const coreLangs = () => state.languages.filter(l => l.is_core && l.is_active !== false
+    && !l.is_source && l.code !== 'ar');
+  function missingLangs(m) {
+    const core = coreLangs();
+    if (!core.length) return null;
+    const have = new Set((m.tracks || []).map(t => t.language_code));
+    const missing = core.filter(l => !have.has(l.code));
+    const line = `أُسنِد ${core.filter(l => have.has(l.code)).length} من ${core.length}`;
+    if (!missing.length) {
+      return h('p.small', h('span.badge.ok', `${line} — اللغاتُ المعتمَدةُ كاملة`));
+    }
+    return h('p.small',
+      h('span.badge.warn', `${line}`),
+      h('span.muted', ` — الناقص: ${missing.map(l => l.name_ar).join('، ')}`));
+  }
+
+  // المعرّفُ من مواضعه المعروفة في الرابط لا من أيِّ إحدى عشرة محرفًا،
+  //   فرابطُ القناة «/live» ليس رابطَ مقطع
+  const YT_ID = /(?:v=|\/live\/|\/shorts\/|\/embed\/|youtu\.be\/)([A-Za-z0-9_-]{11})(?:[?&/#]|$)|^[A-Za-z0-9_-]{11}$/;
+
+  // ـــ رابطُ بثِّ الترجمة على يوتيوب (ملاحظة ٤٧٨)
+  //   تُبَثُّ الترجمةُ مباشرةً بعد اعتماد المراحل، فيُحفَظ رابطُ بثِّها
+  //   في مسار اللغة — اختياريًّا، فليس كلُّ ترجمةٍ تُبَثّ.
+  async function streamDialog(t) {
+    const url = h('input', { dir: 'ltr', value: t.stream_video
+      ? `https://www.youtube.com/watch?v=${t.stream_video}` : '',
+      placeholder: 'https://www.youtube.com/watch?v=…', 'aria-label': 'رابط البث' });
+    const err = h('p.err', { hidden: true });
+    const res = await dialog({
+      title: `رابطُ بثِّ الترجمة — ${langName(t.language_code)}`,
+      body: h('div.stack',
+        h('p.small.muted', 'الصقِ الرابطَ كما تنسخه من يوتيوب، ويُستخرَج منه معرّفُ '
+          + 'المقطع. واتركْه فارغًا ثم احفظْ لمسحه.'),
+        h('label.field', 'الرابط', url),
+        t.stream_at ? h('p.small.muted', `حُفظ في: ${fmtDateTime(t.stream_at)}`) : null,
+        err),
+      buttons: [
+        { label: 'حفظ', kind: 'primary',
+          validate: () => {
+            const v = url.value.trim();
+            const ok = !v || YT_ID.test(v);
+            err.textContent = ok ? '' : 'الرابطُ لا يحمل معرّفَ مقطعٍ صحيحًا';
+            err.hidden = ok;
+            return ok;
+          },
+          value: () => url.value.trim() },
+        { label: 'إلغاء', value: null }
+      ]
+    });
+    if (res === null) return;
+    try {
+      await db.rpc('set_track_stream', { p_track: t.id, p_url: res || null });
+      toast(res ? 'حُفظ رابطُ البثّ.' : 'مُسح رابطُ البثّ.', 'ok');
+      reload();
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  // ـــ نقلُ مرحلة التسجيل الصوتي (ملاحظة ٤٧٥)
+  //   كانت تُختار عند الإنشاء ولا سبيلَ إلى تغييرها، فإن تبيَّن أنَّ
+  //   الأنسبَ غيرُها لم يكن إلا إعادةُ الإنشاء. ولا تُنقَل بعد الرفع.
+  async function audioStageDialog(t) {
+    const ok = t.stages.filter(s => (state.stages.find(x => x.key === s.stage_key) || {})
+      .assignee_role === 'translator');
+    if (!ok.length) return toast('لا مراحلَ ترجمةٍ في هذا المسار.', 'bad');
+    const pick = h('select', ok.map(s => h('option',
+      { value: s.stage_key, selected: s.stage_key === t.audio_stage_key ? true : null },
+      `${stageName(s.stage_key)} — ${s.assignee?.full_name || '—'}`)));
+    const res = await dialog({
+      title: `مرحلةُ التسجيل الصوتي — ${langName(t.language_code)}`,
+      body: h('div.stack',
+        h('p.small.muted', 'التسجيلُ يرفعه مسؤولُ المرحلة المختارة. ولا يُنقَل بعد '
+          + 'رفعه، فالمرفوعُ محفوظٌ بمرحلته.'),
+        h('label.field', 'المرحلة', pick)),
+      buttons: [{ label: 'نقلُه إليها', kind: 'primary', value: () => pick.value },
+        { label: 'إلغاء', value: null }]
+    });
+    if (!res) return;
+    try {
+      await db.rpc('set_audio_stage', { p_track: t.id, p_stage: res });
+      toast('نُقلت مرحلةُ التسجيل.', 'ok');
+      reload();
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
   async function cancelTrack(m, t) {
     const last = m.tracks.length === 1;
     const ok = await confirm('إلغاء إسناد اللغة',
@@ -483,8 +574,22 @@ export async function render(ctx) {
           : null,
         h('button.btn.sm', { onclick: () => details.replaceChildren() }, 'إغلاق')),
       h('p.muted.small', [MOSQUE_ANY[m.mosque], m.khateeb?.name, m.sermon_date && fmtSermonDate(m.sermon_date), PRIORITY[m.priority]].filter(Boolean).join(' · ')),
+      // اللغاتُ الناقصة: تُقابَل لغاتُ المادة باللغات المعتمَدة، فيُعرَف
+      //   النقصُ بالنظر لا بالعدِّ باليد بعد أسبوع (ملاحظة ٤٧٧)
+      missingLangs(m),
       h('div.stack', m.tracks.map(t => h('div.stack', { style: { gap: '8px' } },
-        h('div.row', h('b', langName(t.language_code)), statusBadge(t), lateSummary(t), h('span', { style: { flex: 1 } }),
+        h('div.row', h('b', langName(t.language_code)), statusBadge(t), lateSummary(t),
+          t.stream_video ? h('a.badge.ok', { href: `https://www.youtube.com/watch?v=${t.stream_video}`,
+            target: '_blank', rel: 'noopener' }, '▶ بثُّ الترجمة') : null,
+          h('span', { style: { flex: 1 } }),
+          // رابطُ البثِّ بعد الترجمة، ونقلُ مرحلة التسجيل قبل رفعه
+          //   (ملاحظتا ٤٧٨ و٤٧٥)
+          mayEdit(t) ? h('button.btn.sm', { type: 'button', onclick: e => busy(e.currentTarget, () => streamDialog(t)) },
+            t.stream_video ? '✎ رابطُ البثّ' : '＋ رابطُ البثّ') : null,
+          mayEdit(t) && t.audio_stage_key && !t.audio_path && t.status !== 'completed'
+            ? h('button.btn.sm.ghost', { type: 'button', onclick: e => busy(e.currentTarget, () => audioStageDialog(t)) },
+                `التسجيل: ${stageName(t.audio_stage_key)}`)
+            : null,
           t.status !== 'completed' && h('button.btn.sm.danger', { type: 'button', onclick: e => busy(e.currentTarget, () => cancelTrack(m, t)) }, 'إلغاء إسناد اللغة')),
         stageStrip(t),
         t.status !== 'completed' && h('div.row', { style: { gap: '6px' } }, h('span.small.muted', 'تغيير المسؤول:'),
