@@ -9,11 +9,15 @@
 # شفرةُ الواجهة تُراجَع في كل طلب، فيظهر الجديدُ فورًا بلا مسحِ ذاكرةٍ
 # ولا مطالبةِ الأعضاء بتحديثٍ قسري (ملاحظة ٢٣٩)
 /js/*
-  Cache-Control: no-cache
+  # لا تُخزَّن أصلًا: «no-cache» تعني «راجِعْ قبل الاستعمال»، وتبيَّن أنَّ
+  # متصفِّحاتٍ تُبقي النسخةَ القديمةَ معها فيبقى العضو على شفرةٍ قديمةٍ
+  # بعد النشر — ومنصةٌ لعشرات الأعضاء لا يضيرها أن تُحمَّل ملفّاتُها في
+  # كلِّ فتحة (ملاحظة ٤٧٩)
+  Cache-Control: no-store, must-revalidate
   Content-Type: text/javascript; charset=utf-8
 
 /css/*
-  Cache-Control: no-cache
+  Cache-Control: no-store, must-revalidate
   Content-Type: text/css; charset=utf-8
 
 /index.html

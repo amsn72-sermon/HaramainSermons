@@ -110,7 +110,10 @@ async function openNaming(done) {
 
 export async function render(ctx) {
   const fetched = await db.select('tracks', {
-    select: 'id,language_code,translation_html,audio_path,completed_at,is_published,receipt_late_seconds,'
+    // نصُّ الترجمة لا يُجلَب مع القائمة: كان ألفَ ترجمةٍ كاملةً في طلبٍ
+    //   واحدٍ فيثقل فتحُ الشاشة، وإنما يُجلَب عند التصدير لما اختِير
+    //   (ملاحظة ٤٧٩)
+    select: 'id,language_code,audio_path,completed_at,is_published,receipt_late_seconds,'
       + 'deleted_at,doc_no,doc_no_at,stream_video,stages:track_stages!track_stages_track_id_fkey'
       + '(stage_key,late_seconds,assignee:profiles(full_name)),material:materials(*,khateeb:khateebs(name))',
     status: 'eq.completed', order: 'completed_at.desc', limit: 1000
@@ -376,6 +379,7 @@ export async function render(ctx) {
 
     const sel = narrowed().filter(t => picked.codes.includes(t.language_code));
     if (!sel.length) return toast('لا أعمال ضمن هذا التحديد.', 'bad');
+    await loadTexts(sel);
 
     // ترتيبُ العمل الواحد: الأصلُ ثم تراجمه بترتيب اللغات
     const byWork = rows => {
@@ -544,9 +548,25 @@ export async function render(ctx) {
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
 
+  // نصوصُ الترجمة تُجلَب عند الحاجة وتُحفَظ، فلا تُطلَب مرّتين (ملاحظة ٤٧٩)
+  const textCache = new Map();
+  async function loadTexts(list) {
+    const need = [...new Set(list.map(t => t.id).filter(id => !textCache.has(id)
+      && !String(id).startsWith('src-')))];
+    for (let i = 0; i < need.length; i += 60) {
+      const part = need.slice(i, i + 60);
+      const got = await db.select('tracks',
+        { select: 'id,translation_html', id: `in.(${part.join(',')})` }).catch(() => []);
+      for (const r of got) textCache.set(r.id, r.translation_html || '');
+    }
+    for (const t of list) if (textCache.has(t.id)) t.translation_html = textCache.get(t.id);
+    return list;
+  }
+
   // التصديرُ المقابِل لعملٍ واحد: كلُّ لغاته التي تُرجمت (ملاحظة ٢٥٢)
   async function alignedOf(t) {
-    const sibs = rows.filter(x => x.material?.id === t.material?.id && x.translation_html);
+    const sibs = (await loadTexts(rows.filter(x => x.material?.id === t.material?.id)))
+      .filter(x => x.translation_html);
     const work = { title: `${heading(t.material)} (${t.material.title})`,
       source_html: t.material.source_html || '' };
     if (!work.source_html) return toast('لا أصلَ عربيًّا محفوظًا لهذا العمل.', 'bad');
