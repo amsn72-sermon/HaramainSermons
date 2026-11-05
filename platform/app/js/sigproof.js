@@ -148,15 +148,18 @@ const chunk = (rows, n) => {
 };
 
 export function rosterHtml(rows, { version = POLICY_VERSION, key = POLICY_KEY,
-                                   note = '', head = '' } = {}) {
+                                   note = '', head = '', band = '' } = {}) {
   const n = rows.length;
   const signed = rows.filter(r => r.signed).length;
 
   // التبويبُ بالفريق ثم المدينة: ولا تُطبَع عناوينُ الأبواب إذا كان
   //   الكشفُ بابًا واحدًا، فالعنوانُ حينئذٍ تكرارٌ لرأس الكشف
+  //   وإذا جاء الكشفُ من بابٍ مسمًّى في الشاشة — كبابِ الإداريين — فاسمُ
+  //   الباب هو عنوانُ أبوابه، لا مسارُ العضو: فمنسِّقٌ مسارُه الميدان
+  //   ليس مرشدًا مكانيًّا، وتسميتُه بذلك خلطٌ (ملاحظة ٤٨٢)
   const bins = new Map();
   rows.forEach(r => {
-    const k = `${r.track || ''}|${r.city || ''}`;
+    const k = band ? (r.city || '') : `${r.track || ''}|${r.city || ''}`;
     if (!bins.has(k)) bins.set(k, { track: r.track || '', city: r.city || '', rows: [] });
     bins.get(k).rows.push(r);
   });
@@ -176,15 +179,15 @@ export function rosterHtml(rows, { version = POLICY_VERSION, key = POLICY_KEY,
   <tbody>
     ${part.map(({ r, i }) => {
       // باركودُ كلِّ عضوٍ في صفِّه، يُفتَح به إثباتُه وحدَه (ملاحظة ٤٣٢)
-      const q = r.signed && r.proof_code
+      const q = (r.signed || r.prev) && r.proof_code
         ? qrDataUri(signVerifyUrl(r.proof_code), { margin: 0, dark: '#1d2b3a' }) : null;
       return `<tr>
       <td>${AR(i + 1)}</td>
       <td>${esc(r.full_name)}</td>
       <td class="ltr">${esc(r.national_id || '—')}</td>
-      <td>${r.signed ? 'وقَّع' : 'لم يوقِّعْ'}</td>
-      <td>${esc(r.signed ? r.policy_version : '—')}</td>
-      <td>${esc(r.signed ? ARD(r.accepted_at) : '—')}</td>
+      <td>${r.signed ? 'وقَّع' : r.prev ? 'وقَّع نسخةً سابقة' : 'لم يوقِّعْ'}</td>
+      <td>${esc(r.signed || r.prev ? r.policy_version : '—')}</td>
+      <td>${esc(r.signed || r.prev ? ARD(r.accepted_at) : '—')}</td>
       <td class="qr-cell">${q
         ? `<img src="${q}" alt="${esc(r.proof_code)}"><span>${esc(r.proof_code)}</span>`
         : '—'}</td>
@@ -202,7 +205,7 @@ ${head ? `<p class="note">${esc(head)}</p>` : ''}
 ${groups.map(g => {
   const sg = g.rows.filter(r => r.signed).length;
   const title = many
-    ? `<h3>${esc(trackName(g.track))} — ${esc(cityName(g.city))}`
+    ? `<h3>${esc(band || trackName(g.track))} — ${esc(cityName(g.city))}`
       + ` <span class="cnt">(${AR(g.rows.length)}، وقَّع منهم ${AR(sg)})</span></h3>`
     : '';
   const parts = chunk(g.rows, 9).map(table);
@@ -224,21 +227,35 @@ export function printRoster(rows, opts = {}) {
 }
 
 // كشفُ الموقِّعين من القاعدة: فيه الهويةُ ورمزُ الوثيقة (ملاحظتا ٤٣٢ و٤٣٣)
-export async function rosterRows({ key = POLICY_KEY } = {}) {
+export async function rosterRows({ key = POLICY_KEY, pick = null,
+                                   version = null } = {}) {
   let rows = [];
-  try { rows = await db.rpc('policy_roster', { p_key: key }) || []; } catch { rows = []; }
+  try {
+    const r = await db.rpc('policy_roster', { p_key: key });
+    rows = Array.isArray(r) ? r : (r ? [r] : []);
+  } catch { rows = []; }
   // ولا يُحشَر في كشفِ ميثاقٍ من ليس من أهله: أهلُ الميدان في ميثاقهم،
   //   وسائرُ الفريق — والحساباتُ الإدارية — في ميثاق المترجمين
-  //   (ملاحظة ٤٨١). ويبقى في الكشف من وقَّع هذا الميثاقَ ثم نُقل إلى
-  //   فريقٍ آخر: توقيعُه قائمٌ وإثباتُه يُطبَع، فلا يُحجَب بنقله.
-  rows = rows.filter(r => (key === FIELD_KEY) === isFieldMember(r) || r.accepted_at);
-  return rows.map(r => ({
-    id: r.member_id, full_name: r.full_name, member_no: r.member_no,
-    national_id: r.national_id, signed: !!r.accepted_at,
-    role: r.role || '', track: r.track || '', city: r.city || '',
-    policy_version: r.policy_version || '', accepted_at: r.accepted_at,
-    proof_code: r.proof_code || ''
-  }));
+  //   (ملاحظة ٤٨١). والفصلُ تامٌّ: من وقَّع ميثاقًا ثم نُقل إلى فريقٍ
+  //   آخر لا يدخل كشفَ ميثاقه الأول ولا يُحسَب في عدده، وإنما توقيعُه
+  //   السابقُ في بابه المستقلِّ في الشاشة ووثيقتُه تُطبَع منه.
+  rows = rows.filter(r => (key === FIELD_KEY) === isFieldMember(r));
+  // ثم بقدر ما تعرضه الشاشة: الإداريون وحدَهم أو المترجمون وحدَهم
+  if (pick) rows = rows.filter(pick);
+  // والموقِّعُ من وقَّع النسخةَ الجاريةَ، كما في الشاشة سواءً. ومن وقَّع
+  //   نسخةً سابقةً يُبيَّن أمرُه في صفِّه ولا يُعَدُّ في الموقِّعين، فالعددُ
+  //   في الورقة هو العددُ على الشاشة (ملاحظة ٤٢٦)
+  return rows.map(r => {
+    const has = !!r.accepted_at;
+    const cur = has && (!version || r.policy_version === version);
+    return {
+      id: r.member_id, full_name: r.full_name, member_no: r.member_no,
+      national_id: r.national_id, signed: cur, prev: has && !cur,
+      role: r.role || '', track: r.track || '', city: r.city || '',
+      policy_version: r.policy_version || '', accepted_at: r.accepted_at,
+      proof_code: r.proof_code || ''
+    };
+  });
 }
 
 // نافذةُ اختيار من يُرفَق في الكشف (ملاحظتا ٤٢٩ و٤٨٠)
@@ -248,7 +265,8 @@ export async function rosterRows({ key = POLICY_KEY } = {}) {
 //   من المكانيين رشَّح الأولَ واختار، ثم رشَّح الثانيَ واختار، والشاشةُ
 //   باقيةٌ واختيارُه محفوظ.
 export async function rosterDialog(people, { key = POLICY_KEY,
-                                             version = POLICY_VERSION } = {}) {
+                                             version = POLICY_VERSION,
+                                             band = '' } = {}) {
   const chosen = new Set(people.map(p => p.id));
   const q = h('input', { type: 'search', placeholder: 'ابحثْ بالاسم',
     'aria-label': 'البحث عن عضو' });
@@ -264,8 +282,9 @@ export async function rosterDialog(people, { key = POLICY_KEY,
   const anyNoCity = people.some(m => !m.city);
 
   const opt = (v, t) => h('option', { value: v }, t);
-  const fTrack = h('select', opt('', 'الفرقُ كلُّها'),
-    tracks.map(t => opt(t, trackName(t))));
+  const fTrack = (!band && tracks.length > 1)
+    ? h('select', opt('', 'الفرقُ كلُّها'), tracks.map(t => opt(t, trackName(t))))
+    : null;
   const fCity = (cities.length + (anyNoCity ? 1 : 0)) > 1
     ? h('select', opt('', 'المدنُ كلُّها'),
         cities.map(c => opt(c, cityName(c))),
@@ -282,7 +301,7 @@ export async function rosterDialog(people, { key = POLICY_KEY,
     const k = q.value.trim();
     return people.filter(m =>
       (!k || (m.full_name || '').includes(k))
-      && (!fTrack.value || (m.track || '') === fTrack.value)
+      && (!fTrack || !fTrack.value || (m.track || '') === fTrack.value)
       && (!fCity || !fCity.value
         || (fCity.value === NO_CITY ? !m.city : (m.city || '') === fCity.value))
       && (!fState.value || (fState.value === 'signed' ? m.signed : !m.signed)));
@@ -304,8 +323,10 @@ export async function rosterDialog(people, { key = POLICY_KEY,
       on.onchange = () => { on.checked ? chosen.add(m.id) : chosen.delete(m.id); count(); };
       return h('label.check.pick-row', on,
         h('span', m.full_name,
-          h('span.small.muted', ` · ${m.signed ? 'وقَّع' : 'لم يوقِّعْ'}`
-            + ` · ${trackName(m.track)}${m.city ? ` · ${cityName(m.city)}` : ''}`)));
+          h('span.small.muted',
+            ` · ${m.signed ? 'وقَّع' : m.prev ? 'وقَّع نسخةً سابقة' : 'لم يوقِّعْ'}`
+            + ` · ${band || trackName(m.track)}`
+            + `${m.city ? ` · ${cityName(m.city)}` : ''}`)));
     }) : [h('p.small.muted', 'لا أحدَ بهذا الترشيح.')]);
     count();
   };
@@ -318,7 +339,8 @@ export async function rosterDialog(people, { key = POLICY_KEY,
     if (!narrowed) { narrowed = true; chosen.clear(); }
     paint();
   };
-  fTrack.onchange = onFilter; if (fCity) fCity.onchange = onFilter;
+  if (fTrack) fTrack.onchange = onFilter;
+  if (fCity) fCity.onchange = onFilter;
   fState.onchange = onFilter;
   paint();
 
@@ -342,8 +364,8 @@ export async function rosterDialog(people, { key = POLICY_KEY,
       .sort((a, b) => cityRank(a) - cityRank(b));
     const none = picked.some(m => !m.city);
     const bits = [];
-    bits.push(t.length === 1 ? trackName(t[0])
-      : t.map(x => trackName(x)).join(' و'));
+    bits.push(band || (t.length === 1 ? trackName(t[0])
+      : t.map(x => trackName(x)).join(' و')));
     if (c.length) {
       bits.push(c.map(x => cityName(x)).join(' و')
         + (none ? ' ومن لا مدينةَ له' : ''));
@@ -361,7 +383,7 @@ export async function rosterDialog(people, { key = POLICY_KEY,
         + 'من الأعضاء وتاريخِ توقيعهم، مبوَّبًا بالفريق ثم المدينة. '
         + 'ولا تدخله تفاصيلُ الشبكة والجهاز.'),
       h('div.row.wrap',
-        h('label.field.tight', 'الفريق', fTrack),
+        fTrack ? h('label.field.tight', 'الفريق', fTrack) : null,
         fCity ? h('label.field.tight', 'المدينة', fCity) : null,
         h('label.field.tight', 'الحال', fState)),
       h('p.small.muted', 'والكشفُ ابتداءً شاملٌ لمن في هذه الشاشة. '
@@ -377,5 +399,5 @@ export async function rosterDialog(people, { key = POLICY_KEY,
       { label: 'إلغاء', value: null }]
   });
   if (!res) return false;
-  return printRoster(res, { key, version, head: headLine(res) });
+  return printRoster(res, { key, version, band, head: headLine(res) });
 }

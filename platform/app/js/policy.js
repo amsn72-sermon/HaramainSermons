@@ -235,9 +235,13 @@ export const isFieldTrack = t => FIELD_TRACKS.includes(String(t || ''));
 
 // والحساباتُ الإداريةُ على ميثاق المترجمين ولو كان فريقُها الميدان:
 //   فهي تطّلع على المواد قبل نشرها، وبنودُ السرية فيه هي التي تلزمها.
-const ADMIN_ROLES = ['manager', 'coordinator'];
+//   ومثلُها حسابُ مدير المشروع من الهيئة وحسابُ المتابع.
+export const ADMIN_ACCOUNT_ROLES = ['manager', 'coordinator', 'supervisor', 'viewer'];
+export const isAdminAccount = profile =>
+  ADMIN_ACCOUNT_ROLES.includes(String(profile?.role || ''));
+
 export const isFieldMember = profile =>
-  isFieldTrack(profile?.track) && !ADMIN_ROLES.includes(String(profile?.role || ''));
+  isFieldTrack(profile?.track) && !isAdminAccount(profile);
 
 export const charterOf = profile => (isFieldMember(profile)
   ? { key: FIELD_KEY, version: FIELD_VERSION, doc: F10 }

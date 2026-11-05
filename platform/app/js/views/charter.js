@@ -10,24 +10,32 @@ import { h, fill, toast, busy, fmtDate, fmtDateTime } from '../ui.js';
 import { db } from '../sb.js';
 import { isAdmin, isManager, roleLabel } from '../store.js';
 import { POLICY_KEY, POLICY_VERSION, FIELD_KEY, FIELD_VERSION,
-         charterDoc, isFieldMember } from '../policy.js';
+         charterDoc, isFieldMember, isAdminAccount } from '../policy.js';
 import { policyText } from './policy.js';
 import { proofFor, rosterDialog, rosterRows } from '../sigproof.js';
 import { exportExcel, exportPdf, exportWord } from '../teamexport.js';
 
 const GROUP_NAME = { admins: 'الحسابات الإدارية', translators: 'المترجمون المتخصصون',
   field: 'المرشدون المكانيون', answers: 'المخصَّصون لإجابة السائلين' };
-const groupOf = m => (['manager', 'coordinator'].includes(m.role) ? 'admins'
+const groupOf = m => (isAdminAccount(m) ? 'admins'
   : m.track === 'answers' ? 'answers' : (m.track === 'field' ? 'field' : 'translators'));
 
 const CITY_AR = { makkah: 'مكة المكرمة', madinah: 'المدينة المنورة' };
 
-// الميثاقان: مفتاحُ كلٍّ ونسختُه الجاريةُ وأهلُه
+// ثلاثةُ أبواب: ميثاقان لا غير، غير أنَّ ميثاق العمل يُعرَض على بابين
+//   — الإداريون وحدَهم والمترجمون وحدَهم — فلا يختلط فريقٌ بفريقٍ في
+//   الجداول ولا في الأعداد ولا في الكشف المطبوع (ملاحظة ٤٨٢).
+//   والنصُّ واحدٌ في البابين لأنَّ الميثاق واحد.
 const CHARTERS = [
-  { key: POLICY_KEY, version: POLICY_VERSION,
-    who: 'المترجمون المتخصصون والحسابات الإدارية' },
-  { key: FIELD_KEY, version: FIELD_VERSION,
-    who: 'المرشدون المكانيون وفريقُ إجابة السائلين' }
+  { id: 'admins', tab: 'الإداريون', key: POLICY_KEY, version: POLICY_VERSION,
+    who: 'مديرُ المشروع والمنسقون ومديرُ المشروع من الهيئة والمتابعون',
+    pick: m => isAdminAccount(m) },
+  { id: 'translators', tab: 'المترجمون المتخصصون', key: POLICY_KEY, version: POLICY_VERSION,
+    who: 'المترجمون المتخصصون',
+    pick: m => !isAdminAccount(m) },
+  { id: 'field', tab: 'المكانيون وإجابة السائلين', key: FIELD_KEY, version: FIELD_VERSION,
+    who: 'المرشدون المكانيون وفريقُ إجابة السائلين',
+    pick: () => true }
 ];
 
 export async function render(ctx) {
@@ -35,7 +43,8 @@ export async function render(ctx) {
 
   const [members, signs] = await Promise.all([
     db.select('profiles', {
-      select: 'id,full_name,email,member_no,role,track,city,status', order: 'full_name.asc' }),
+      select: 'id,full_name,email,member_no,role,track,city,status,job_title,admin_title',
+      order: 'full_name.asc' }),
     db.select('policy_acceptances', {
       select: 'member_id,policy_key,policy_version,signed_name,accepted_at',
       policy_key: `in.(${POLICY_KEY},${FIELD_KEY})` }).catch(() => [])
@@ -43,6 +52,14 @@ export async function render(ctx) {
 
   const wrap = h('div.stack');
   const tabs = h('div.row.wrap', { style: { margin: '2px 0 10px' } });
+
+  // ـــ مرشِّحُ المدينة داخلَ كلِّ باب (ملاحظة ٤٨٣): مكةُ وحدَها أو
+  //   المدينةُ وحدَها أو كلتاهما. ويسري على الجداول والأعداد والتصدير
+  //   والكشف المطبوع جميعًا، فما تراه هو ما يُطبَع.
+  const NO_CITY = '\u0000none';
+  let cityPick = '';
+  const inCity = m => (!cityPick
+    || (cityPick === NO_CITY ? !m.city : (m.city || '') === cityPick));
 
   // ـــ لوحةُ ميثاقٍ واحد: أهلُه وتواقيعُهم ونصُّه
   const panel = ch => {
@@ -59,15 +76,27 @@ export async function render(ctx) {
       if (r.policy_version !== ch.version) prevOf[r.member_id] = r;
     }
 
-    // أهلُ هذا الميثاق، ومعهم من وقَّعه ثم نُقل إلى فريقٍ آخر: توقيعُه
-    //   قائمٌ ووثيقةُ إثباته تُطبَع من هنا، فلا يُحجَب بنقله (ملاحظة ٤٨١)
+    // أهلُ هذا الميثاق وحدَهم: هم جداولُه وأعدادُه وكشفُ طباعته، فلا
+    //   يُخلَط فريقٌ بفريق (ملاحظة ٤٨١)
     const mineOf = {};
     for (const r of mine) mineOf[r.member_id] = true;
     const belongs = m => isFieldMember(m) === (ch.key === FIELD_KEY);
-    const people = members.filter(m => m.status === 'active'
-      && (belongs(m) || mineOf[m.id]));
+    // ومدنُ هذا الباب من أهله قبل الترشيح، فلا تختفي المدينةُ باختيارها.
+    //   وإن كان الاختيارُ على مدينةٍ لا وجودَ لها في هذا الباب رُدَّ إلى
+    //   «المدينتان معًا»، وإلّا بدا البابُ خاليًا والسببُ خافٍ.
+    const pool = members.filter(m => m.status === 'active' && ch.pick(m) && belongs(m));
+    const cityOpts = [...new Set(pool.map(m => m.city || ''))];
+    const hasCity = cityOpts.filter(Boolean).length > 0;
+    if (cityPick && !cityOpts.includes(cityPick === NO_CITY ? '' : cityPick)) cityPick = '';
+
+    const people = members.filter(m => m.status === 'active' && belongs(m) && ch.pick(m)
+      && inCity(m));
+    // ومن وقَّع هذا الميثاقَ ثم نُقل إلى فريقٍ آخر: لا يُحسَب هنا ولا
+    //   يُطالَب به، ويبقى توقيعُه قائمًا ووثيقتُه تُطبَع من بابه أدناه
+    const moved = members.filter(m => m.status === 'active'
+      && !belongs(m) && mineOf[m.id] && ch.pick(m) && inCity(m));
     const signed = people.filter(m => signOf[m.id]);
-    const waiting = people.filter(m => !signOf[m.id] && belongs(m));
+    const waiting = people.filter(m => !signOf[m.id]);
 
     // زرُّ وثيقة الإثبات: يُطبَع بنصِّ النسخة التي وقَّعها هو (ملاحظة ٤٢٧)
     const proofBtn = (m, sg) => {
@@ -86,10 +115,7 @@ export async function render(ctx) {
         h('td', { 'data-label': 'العضو' }, h('b', m.full_name),
           h('div.small.muted', { dir: 'ltr' }, m.email || '')),
         h('td', { 'data-label': 'الفريق' }, GROUP_NAME[groupOf(m)],
-          h('div.small.muted', [roleLabel(m), CITY_AR[m.city]].filter(Boolean).join(' · ')),
-          belongs(m) ? null
-            : h('div.small.warn', 'وقَّع هذا الميثاقَ ثم نُقل إلى فريقٍ آخر، '
-                + 'وميثاقُه اليومَ غيرُه')),
+          h('div.small.muted', [roleLabel(m), CITY_AR[m.city]].filter(Boolean).join(' · '))),
         h('td', { 'data-label': 'الرقم' }, m.member_no || '—'),
         h('td', { 'data-label': 'الحال' }, sg
           ? h('span', h('span.badge.ok', 'وقّع'), h('div.small.muted', `باسم «${sg.signed_name}»`))
@@ -114,18 +140,21 @@ export async function render(ctx) {
       ['الإجمالي', `${people.length} عضوًا`, '', '',
         `وقّع ${signed.length} · لم يوقّع ${waiting.length}`, '', '']
     ];
-    const title = `${doc.title} — كشف التواقيع`;
+    const cityNote = cityPick === '' ? ''
+      : cityPick === NO_CITY ? ' — بلا مدينةٍ مسجَّلة' : ` — ${CITY_AR[cityPick]}`;
+    const title = `${doc.title} — ${ch.tab}${cityNote} — كشف التواقيع`;
     const note = `وقّع ${signed.length} من ${people.length} — النسخة ${ch.version}`
-      + ` — ${fmtDate(new Date())}`;
+      + `${cityNote} — ${fmtDate(new Date())}`;
 
     // كشفٌ كاملٌ على كليشة الهيئة: الميثاقُ منسَّقًا ثم جدولُ من يُختار،
     //   ويُرشَّح بالفريق والمدينة ويُبوَّب بهما (ملاحظتا ٤٢٩ و٤٨٠)
     const rosterBtn = h('button.btn.sm.primary', { type: 'button' }, '🖨 طباعةُ الكشف');
     rosterBtn.onclick = () => busy(rosterBtn, async () => {
       // الكشفُ من القاعدة: فيه الهويةُ ورمزُ الوثيقة (ملاحظتا ٤٣٢ و٤٣٣)
-      const rows = await rosterRows({ key: ch.key });
+      const rows = await rosterRows({ key: ch.key, version: ch.version,
+        pick: r => ch.pick(r) && inCity(r) });
       if (!rows.length) { toast('لا أعضاءَ في الكشف.', 'warn'); return; }
-      await rosterDialog(rows, { key: ch.key, version: ch.version });
+      await rosterDialog(rows, { key: ch.key, version: ch.version, band: ch.tab });
     });
 
     const wordBtn = h('button.btn.sm', { type: 'button' }, 'تصدير Word');
@@ -137,12 +166,25 @@ export async function render(ctx) {
         .map(t => h('th', t)))),
       h('tbody', rowsOf(list))));
 
+    const cityBox = !hasCity ? null : (() => {
+      const sel = h('select',
+        h('option', { value: '', selected: cityPick === '' }, 'المدينتان معًا'),
+        ['makkah', 'madinah'].filter(c => cityOpts.includes(c)).map(c =>
+          h('option', { value: c, selected: cityPick === c }, CITY_AR[c])),
+        cityOpts.includes('')
+          ? h('option', { value: NO_CITY, selected: cityPick === NO_CITY },
+              'بلا مدينةٍ مسجَّلة')
+          : null);
+      sel.onchange = () => { cityPick = sel.value; paint(); };
+      return h('div.row.wrap', h('label.field.tight', 'المدينة', sel));
+    })();
+
     return h('div.stack',
-      h('p.muted', `أهلُ هذا الميثاق: ${ch.who}.`),
+      h('p.muted', `${doc.title} — النسخة ${ch.version}. وهذا الباب لـ: ${ch.who}.`),
+      cityBox,
 
       h('div.pay-sum',
-        h('div.pay-cell', h('span', 'أهلُ الميثاق'),
-          h('b', String(people.filter(belongs).length))),
+        h('div.pay-cell', h('span', 'أهلُ هذا الباب'), h('b', String(people.length))),
         h('div.pay-cell', h('span', 'وقّعوا'), h('b', String(signed.length))),
         h('div.pay-cell', { class: waiting.length ? 'warn' : '' },
           h('span', 'لم يوقّعوا'), h('b', String(waiting.length)))),
@@ -168,6 +210,15 @@ export async function render(ctx) {
       h('div.card.stack',
         h('h3', `وقّعوا (${signed.length})`),
         signed.length ? table(signed) : h('p.muted', 'لم يوقّع أحد بعد.')),
+
+      moved.length ? h('details.cd-more',
+        h('summary', `وقَّعوا هذا الميثاق ثم نُقلوا إلى فريقٍ آخر (${moved.length})`),
+        h('div.card.stack',
+          h('p.small.muted', 'هؤلاء ليسوا من أهل هذا الميثاق اليوم، فلا يُحسَبون في '
+            + 'أعداده ولا يدخلون كشفَ طباعته، ولا يُطالَبون به. وإنما يبقى توقيعُهم '
+            + 'السابقُ قائمًا بنصِّه وتاريخه، فيُحتجُّ به عليهم فيما كان قبل نقلهم، '
+            + 'ووثيقةُ إثباته تُطبَع من هنا.'),
+          table(moved))) : null,
 
       h('details.cd-more', { style: { marginTop: '14px' } },
         h('summary', `نصّ ${doc.title} — النسخة ${ch.version}`),
@@ -204,7 +255,7 @@ export async function render(ctx) {
   const paint = () => {
     fill(tabs, CHARTERS.map(c => {
       const b = h('button.btn.sm', { type: 'button',
-        class: c.key === cur.key ? 'primary' : '' }, charterDoc(c.key, c.version).title);
+        class: c.id === cur.id ? 'primary' : '' }, c.tab);
       b.onclick = () => { cur = c; paint(); };
       return b;
     }));
