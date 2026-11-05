@@ -7245,6 +7245,8 @@ declare v_open text[]; v_want text[] := array[
   'video_langs',
   -- قنواتُ المزامنة: تقرؤها المزامنةُ على GitHub بلا حساب (ملاحظة ٤٦٧)
   'sync_channels',
+  -- أصلُ خطبة عرفة: معرّفُ مقطعٍ علنيٍّ على يوتيوب (ملاحظة ٤٧٦)
+  'arafah_originals',
   'verify_doc'];
   v_extra text[]; v_gone text[]; v_x text;
 begin
@@ -9017,3 +9019,545 @@ begin
   end if;
   raise notice 'PASS: قنواتُ المزامنة ثلاثٌ بترتيبها، تُقرَأ بلا حساب وتُدار بيد المدير';
 end $$;
+-- =====================================================================
+-- 85) سدُّ الثغرات الأمنية (هجرة ٠١٣٠)
+-- =====================================================================
+-- ـ نسخُ المستندات: لا يُنادى من حسابٍ أصلًا، ولا يقرأ سجلَّه إلا صاحبُه
+--   والإدارة
+do $$
+declare v_bank jsonb;
+begin
+  -- نهيّئ بياناتٍ خاصّةً وحسابًا بنكيًّا لسارة، ثم نحفظ نسختهما بالمالك
+  update public.profile_private set national_id = '1099887766', iqama_path = 'x/iqama.jpg'
+   where id = '00000000-0000-0000-0000-00000000000e';
+  insert into public.bank_accounts (member_id, iban, bank_name, account_holder)
+  values ('00000000-0000-0000-0000-00000000000e', 'SA0380000000608010167519', 'الراجحي', 'سارة')
+  on conflict (member_id) do update set iban = excluded.iban;
+  perform public.snapshot_doc('00000000-0000-0000-0000-00000000000e', 'bank');
+  if (select count(*) from public.doc_history
+       where member_id = '00000000-0000-0000-0000-00000000000e') = 0 then
+    raise exception 'FAIL: لم تُحفَظ نسخةُ المستند بالمالك';
+  end if;
+end $$;
+
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000aa', true);
+do $$
+begin
+  -- مديرُ الهيئة (مشرف): لا يُنادي الدالَّة ولا يقرأ سجلَّ غيره
+  begin
+    perform public.snapshot_doc('00000000-0000-0000-0000-00000000000e', 'bank');
+    raise exception 'FAIL: المشرفُ نادى نسخَ المستندات';
+  exception when insufficient_privilege then null;
+    when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  if (select count(*) from public.doc_history) <> 0 then
+    raise exception 'FAIL: المشرفُ يقرأ سجلَّ المستندات';
+  end if;
+  if (select count(*) from public.doc_renewals) <> 0 then
+    raise exception 'FAIL: المشرفُ يقرأ طلباتِ التجديد';
+  end if;
+  -- ويبقى له ما كان له: من وقّع الميثاق (ملاحظة ١٦٤)
+  if (select count(*) from public.policy_acceptances) = 0 then
+    raise exception 'FAIL: حُجب عن المشرف ما كان له من التواقيع';
+  end if;
+  if (select count(*) from public.policy_sign_meta) <> 0 then
+    raise exception 'FAIL: المشرفُ يقرأ عنوانَ الشبكة وجهازَ التوقيع';
+  end if;
+end $$;
+commit;
+
+-- ـ والإدارةُ تقرأ السجلَّ ووثيقةَ الإثبات بعنوانها وجهازها
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$
+begin
+  if (select count(*) from public.doc_history) = 0 then
+    raise exception 'FAIL: الإدارةُ لا تقرأ سجلَّ المستندات';
+  end if;
+end $$;
+commit;
+
+-- ـ العضوُ لا يُعدِّل بياناته الخاصة مباشرةً، وإنما بالدوالِّ المحروسة
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000e', true);
+do $$
+begin
+  begin
+    update public.profile_private set iqama_status = 'approved'
+     where id = '00000000-0000-0000-0000-00000000000e';
+    raise exception 'FAIL: العضوُ اعتمد هويتَه بنفسه';
+  exception when insufficient_privilege then null;
+    when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  perform public.set_my_iqama('00000000-0000-0000-0000-00000000000e/iqama-1.jpg');
+  if (select iqama_status from public.profile_private
+       where id = '00000000-0000-0000-0000-00000000000e') <> 'pending' then
+    raise exception 'FAIL: رفعُ العضو صورتَه لم يُعِدْها إلى التدقيق';
+  end if;
+end $$;
+commit;
+
+-- ـ سرُّ بطاقة العمل: لصاحبه وللإدارة لا للزملاء، والتحقّقُ العامُّ قائم
+do $$
+declare v_key text; v_rows int;
+begin
+  v_key := public.ensure_card_key('00000000-0000-0000-0000-00000000000e');
+  if v_key is null then raise exception 'FAIL: لم يُولَّد مفتاحُ البطاقة'; end if;
+  select count(*) into v_rows from public.verify_card(
+    (select member_no::text from public.profiles where id = '00000000-0000-0000-0000-00000000000e'),
+    v_key);
+  if v_rows <> 1 then raise exception 'FAIL: التحقّقُ من البطاقة لا يعمل بعد النقل'; end if;
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'profiles'
+                and column_name = 'card_key') then
+    raise exception 'FAIL: عمودُ مفتاح البطاقة ما زال في جدول الأعضاء';
+  end if;
+end $$;
+
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', true);
+do $$
+begin
+  if (select count(*) from public.member_card_keys
+       where member_id <> '00000000-0000-0000-0000-00000000000c') <> 0 then
+    raise exception 'FAIL: العضوُ يقرأ مفتاحَ بطاقة زميله';
+  end if;
+end $$;
+commit;
+
+-- ـ «مسجَّلٌ» ليست «له دور»: من لم يُراجَع طلبُه لا يقرأ الإعدادات
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000f', true);
+do $$
+begin
+  if (select count(*) from public.platform_settings) <> 0 then
+    raise exception 'FAIL: من لم يُفعَّل حسابُه يقرأ إعدادات المنصة';
+  end if;
+  if (select count(*) from public.card_settings) <> 0 then
+    raise exception 'FAIL: من لم يُفعَّل حسابُه يقرأ إعدادات البطاقة';
+  end if;
+  if (select count(*) from public.pay_rates) <> 0 then
+    raise exception 'FAIL: من لم يُفعَّل حسابُه يقرأ جدولَ الأجور';
+  end if;
+end $$;
+commit;
+
+do $$ begin raise notice 'PASS: سدُّ الثغرات: نسخُ المستندات والبياناتُ الخاصةُ ومفتاحُ البطاقة وعنوانُ التوقيع والإعدادات'; end $$;
+
+-- =====================================================================
+-- 86) المحذوفُ لا يبقى عند المترجمين (ملاحظة ٤٧٤)
+-- =====================================================================
+do $$
+declare v_mat uuid; v_track uuid; v_who uuid; v_before int; v_after int; v_msgs int;
+begin
+  -- مادةٌ جديدةٌ بلغةٍ واحدةٍ مسنَدةٍ إلى يوسف، يُنشئها مديرُ المشروع
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  v_mat := public.create_material(jsonb_build_object(
+    'material', jsonb_build_object('material_type','خطب','sermon_type','خطبة جمعة',
+      'title','خطبةٌ تُحذَف','mosque','makkah','khateeb_id','1',
+      'sermon_date','2026-09-18','source_html','<p>نص</p>','deliverable','text'),
+    'stage_minutes', '{"translation":60,"coordinator_receipt":10}'::jsonb,
+    'languages', jsonb_build_array(jsonb_build_object('code','en','stages', jsonb_build_array(
+      jsonb_build_object('key','translation','assignee','00000000-0000-0000-0000-00000000000c'),
+      jsonb_build_object('key','coordinator_receipt','assignee','00000000-0000-0000-0000-00000000000b'))))));
+  select id into v_track from public.tracks where material_id = v_mat;
+
+  -- يوسف يراها في سجلِّه قبل الحذف
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', true);
+  select count(*) into v_before from public.my_history() where track_id = v_track;
+  if v_before = 0 then raise exception 'FAIL: المهمةُ لا تظهر في سجلِّ المترجم أصلًا'; end if;
+
+  -- ومدير المشروع يحذفها إلى الأرشيف
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  perform public.set_archive_deleted(v_mat, null, true, 'خطأٌ في الإسناد');
+
+  -- فتختفي من سجلِّ المترجم
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', true);
+  select count(*) into v_after from public.my_history() where track_id = v_track;
+  if v_after <> 0 then raise exception 'FAIL: المحذوفُ ما زال في سجلِّ المترجم'; end if;
+
+  -- ويصله إشعارُ الإلغاء
+  select count(*) into v_msgs from public.notifications
+   where member_id = '00000000-0000-0000-0000-00000000000c' and kind = 'cancelled';
+  if v_msgs = 0 then raise exception 'FAIL: لم يُخبَر المترجمُ بإلغاء إسناده'; end if;
+
+  -- ولا تبقى رسالةٌ معلَّقةٌ تدعوه إلى العمل الملغى
+  if exists (select 1 from public.notifications
+              where track_id = v_track and status = 'pending') then
+    raise exception 'FAIL: بقيت رسالةٌ معلَّقةٌ عن عملٍ ملغًى';
+  end if;
+
+  -- والمادةُ تعود بالاسترجاع، فالحذفُ ليس محوًا
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  perform public.set_archive_deleted(v_mat, null, false, null);
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', true);
+  if (select count(*) from public.my_history() where track_id = v_track) = 0 then
+    raise exception 'FAIL: الاسترجاعُ لم يُعِدِ المهمةَ إلى سجلِّ المترجم';
+  end if;
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  perform public.set_archive_deleted(v_mat, null, true, 'تنظيفُ الاختبار');
+  raise notice 'PASS: المحذوفُ يختفي من سجلِّ المترجم ويصله إشعارُ الإلغاء، ويعود بالاسترجاع';
+end $$;
+
+-- =====================================================================
+-- 87) رابطُ بثِّ الترجمة، ونقلُ التسجيل، وأصلُ خطبة عرفة
+--     (الملاحظات ٤٧٨ و٤٧٥ و٤٧٦)
+-- =====================================================================
+do $$
+declare v_mat uuid; v_track uuid; v_id text;
+begin
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  v_mat := public.create_material(jsonb_build_object(
+    'material', jsonb_build_object('material_type','خطب','sermon_type','خطبة جمعة',
+      'title','خطبةٌ تُبَثُّ ترجمتُها','mosque','makkah','khateeb_id','1',
+      'sermon_date','2026-09-18','source_html','<p>نص</p>','deliverable','text_audio'),
+    'stage_minutes', '{"translation":60,"linguistic_review":20,"coordinator_receipt":10}'::jsonb,
+    'languages', jsonb_build_array(jsonb_build_object('code','en','audio_stage','translation',
+      'stages', jsonb_build_array(
+        jsonb_build_object('key','translation','assignee','00000000-0000-0000-0000-00000000000c'),
+        jsonb_build_object('key','linguistic_review','assignee','00000000-0000-0000-0000-00000000000c'),
+        jsonb_build_object('key','coordinator_receipt','assignee','00000000-0000-0000-0000-00000000000b'))))));
+  select id into v_track from public.tracks where material_id = v_mat;
+
+  -- الرابطُ يُقبَل كما يُنسَخ من يوتيوب، ويُستخرَج منه المعرّف
+  v_id := public.set_track_stream(v_track, 'https://www.youtube.com/watch?v=omeDYNmo0dE&t=12s');
+  if v_id <> 'omeDYNmo0dE' then raise exception 'FAIL: لم يُستخرَج معرّفُ المقطع (%)', v_id; end if;
+  if (select stream_video from public.tracks where id = v_track) <> 'omeDYNmo0dE' then
+    raise exception 'FAIL: لم يُحفَظ رابطُ البثّ';
+  end if;
+  -- ويُمسَح بتركه فارغًا
+  perform public.set_track_stream(v_track, null);
+  if (select stream_video from public.tracks where id = v_track) is not null then
+    raise exception 'FAIL: لم يُمسَح رابطُ البثّ';
+  end if;
+  perform public.set_track_stream(v_track, 'omeDYNmo0dE');
+  -- ورابطٌ لا معرّفَ فيه يُردّ
+  begin
+    perform public.set_track_stream(v_track, 'ليس رابطًا');
+    raise exception 'FAIL: قُبل رابطٌ بلا معرّف';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  -- نقلُ مرحلة التسجيل ما دام لم يُرفَع
+  perform public.set_audio_stage(v_track, 'linguistic_review');
+  if (select audio_stage_key from public.tracks where id = v_track) <> 'linguistic_review' then
+    raise exception 'FAIL: لم تُنقَل مرحلةُ التسجيل';
+  end if;
+  -- ولا تُنقَل إلى مرحلةٍ ليست من مراحل المترجمين
+  begin
+    perform public.set_audio_stage(v_track, 'coordinator_receipt');
+    raise exception 'FAIL: نُقل التسجيلُ إلى مرحلةٍ ليست للمترجمين';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  -- وبعد الرفع لا تُنقَل
+  update public.tracks set audio_path = 'x/audio.mp3' where id = v_track;
+  begin
+    perform public.set_audio_stage(v_track, 'translation');
+    raise exception 'FAIL: نُقلت مرحلةُ التسجيل بعد رفعه';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  update public.tracks set audio_path = null where id = v_track;
+  perform public.set_archive_deleted(v_mat, null, true, 'تنظيفُ الاختبار');
+  raise notice 'PASS: رابطُ بثِّ الترجمة يُحفَظ ويُمسَح، ومرحلةُ التسجيل تُنقَل قبل الرفع لا بعده';
+end $$;
+
+-- ـ ومشرفُ اللغة يملكهما في لغته، والمترجمُ لا يملكهما
+do $$
+declare v_mat uuid; v_track uuid;
+begin
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  perform public.set_lang_supervisor('en', '00000000-0000-0000-0000-00000000000c');
+  v_mat := public.create_material(jsonb_build_object(
+    'material', jsonb_build_object('material_type','خطب','sermon_type','خطبة جمعة',
+      'title','خطبةٌ لمشرف اللغة','mosque','makkah','khateeb_id','1',
+      'sermon_date','2026-09-18','source_html','<p>نص</p>','deliverable','text'),
+    'stage_minutes', '{"translation":60,"coordinator_receipt":10}'::jsonb,
+    'languages', jsonb_build_array(jsonb_build_object('code','en','stages', jsonb_build_array(
+      jsonb_build_object('key','translation','assignee','00000000-0000-0000-0000-00000000000c'),
+      jsonb_build_object('key','coordinator_receipt','assignee','00000000-0000-0000-0000-00000000000b'))))));
+  select id into v_track from public.tracks where material_id = v_mat;
+
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', true);
+  if public.set_track_stream(v_track, 'https://youtu.be/omeDYNmo0dE') <> 'omeDYNmo0dE' then
+    raise exception 'FAIL: مشرفُ اللغة لم يستطعْ حفظَ رابط البثّ';
+  end if;
+
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000e', true);
+  begin
+    perform public.set_track_stream(v_track, 'https://youtu.be/omeDYNmo0dE');
+    raise exception 'FAIL: مترجمٌ ليس مشرفًا حفظ رابطَ البثّ';
+  exception when insufficient_privilege then null;
+    when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  perform public.set_archive_deleted(v_mat, null, true, 'تنظيفُ الاختبار');
+  raise notice 'PASS: رابطُ البثِّ بيد الإدارة ومشرف اللغة لا غير';
+end $$;
+
+-- ـ أصلُ خطبة عرفة: يُدار من المنصة ويُقرَأ بلا حساب
+do $$
+declare v_id text;
+begin
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  v_id := public.set_arafah_original(1449, 'https://www.youtube.com/watch?v=Ea664JHx2rY', 'اختبار');
+  if v_id <> 'Ea664JHx2rY' then raise exception 'FAIL: لم يُحفَظ أصلُ عرفة'; end if;
+  if (select count(*) from public.arafah_originals() where year = 1449) <> 1 then
+    raise exception 'FAIL: الأصلُ لا يظهر في القائمة';
+  end if;
+  perform public.set_arafah_original(1449, null);
+  if (select count(*) from public.arafah_originals() where year = 1449) <> 0 then
+    raise exception 'FAIL: لم يُمسَح أصلُ عرفة';
+  end if;
+  -- وسنةٌ غير صحيحةٍ تُردّ
+  begin
+    perform public.set_arafah_original(900, 'https://youtu.be/Ea664JHx2rY');
+    raise exception 'FAIL: قُبلت سنةٌ غير صحيحة';
+  exception when others then
+    if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+  raise notice 'PASS: أصلُ خطبة عرفة يُدار من المنصة لكلِّ عام';
+end $$;
+
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000e', true);
+do $$
+begin
+  begin
+    perform public.set_arafah_original(1450, 'https://youtu.be/Ea664JHx2rY');
+    raise exception 'FAIL: مترجمٌ عيَّن أصلَ خطبة عرفة';
+  exception when insufficient_privilege then null;
+    when others then if position('FAIL' in sqlerrm) > 0 then raise; end if;
+  end;
+end $$;
+commit;
+
+-- =====================================================================
+-- 88) ما كشفته مراجعةُ الدفعة: الرابطُ المضلِّل، ومفتاحُ البطاقة،
+--     وبياناتُ الفريق بقدر الصلاحية
+-- =====================================================================
+do $$
+begin
+  -- رابطُ القناة أو القائمة ليس رابطَ مقطع
+  if public.video_id_of('https://www.youtube.com/@HaramainInfo/live') is not null then
+    raise exception 'FAIL: رابطُ القناة قُرئ مقطعًا';
+  end if;
+  if public.video_id_of('https://www.youtube.com/playlist?list=PLabcdefghijklmnopqrs') is not null then
+    raise exception 'FAIL: رابطُ القائمة قُرئ مقطعًا';
+  end if;
+  -- والروابطُ الصحيحةُ بأشكالها
+  if public.video_id_of('https://www.youtube.com/watch?v=Ea664JHx2rY&t=5') <> 'Ea664JHx2rY'
+     or public.video_id_of('https://youtu.be/omeDYNmo0dE') <> 'omeDYNmo0dE'
+     or public.video_id_of('https://www.youtube.com/live/abcdefghijk') <> 'abcdefghijk'
+     or public.video_id_of('omeDYNmo0dE') <> 'omeDYNmo0dE' then
+    raise exception 'FAIL: رابطٌ صحيحٌ لم يُقرأ';
+  end if;
+
+  -- مفتاحُ البطاقة يُولَّد عند اعتمادها، وكان الاستدعاءُ بعد الإرجاع
+  --   فلم يُنفَّذ قطّ
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  perform public.issue_member_cards(array['00000000-0000-0000-0000-00000000000d'::uuid], true);
+  if (select count(*) from public.member_card_keys
+       where member_id = '00000000-0000-0000-0000-00000000000d') <> 1 then
+    raise exception 'FAIL: اعتمادُ البطاقة لم يولِّد مفتاحَ تحقُّقها';
+  end if;
+
+  -- وبياناتُ الفريق: الهويةُ لمن يملك مفتاحَها
+  update public.profile_private set national_id = '1055443322'
+   where id = '00000000-0000-0000-0000-00000000000c';
+  if (select national_id from public.team_private()
+       where id = '00000000-0000-0000-0000-00000000000c') is null then
+    raise exception 'FAIL: مديرُ المشروع لا يرى رقمَ الهوية';
+  end if;
+  raise notice 'PASS: الرابطُ المضلِّل يُردّ، ومفتاحُ البطاقة يُولَّد، وبياناتُ الفريق بقدر الصلاحية';
+end $$;
+
+-- ـ ومنسقٌ أُغلق عنه مفتاحُ الاطّلاع على الهوية لا يصله الرقم
+do $$
+begin
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  perform public.set_member_perm('00000000-0000-0000-0000-00000000000b', 'docs_id_view', false);
+end $$;
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000b', true);
+do $$
+begin
+  if (select count(*) from public.team_private()) = 0 then
+    raise exception 'FAIL: المنسقُ لا يرى بياناتِ الفريق أصلًا';
+  end if;
+  if exists (select 1 from public.team_private() where national_id is not null) then
+    raise exception 'FAIL: وصل المنسقَ رقمُ الهوية وقد أُغلق عنه مفتاحُه';
+  end if;
+  if exists (select 1 from public.team_private() where iqama_path is not null) then
+    raise exception 'FAIL: وصل المنسقَ مسارُ صورة الهوية';
+  end if;
+  if (select count(*) from public.team_private() where whatsapp is not null) = 0 then
+    raise exception 'FAIL: حُجب عن المنسق ما لا مفتاحَ له';
+  end if;
+end $$;
+commit;
+do $$ begin raise notice 'PASS: الهويةُ لا تصل متصفِّحَ من أُغلق عنه مفتاحُها'; end $$;
+
+-- =====================================================================
+-- ٨٩) ميثاقُ العمل الميداني، وكشفُ الموقِّعين بفريقه ومدينته
+--     (الملاحظتان ٤٨١ و٤٨٠)
+-- =====================================================================
+
+-- ـ مرشدٌ مكانيٌّ في مكة، وآخرُ لإجابة السائلين في المدينة
+do $$
+begin
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  update public.profiles set track = 'field', city = 'makkah', status = 'active'
+   where id = '00000000-0000-0000-0000-0000000002b1';
+  update public.profiles set track = 'answers', city = 'madinah', status = 'active'
+   where id = '00000000-0000-0000-0000-0000000f0001';
+end $$;
+
+-- ـ ويوقِّع المرشدُ على ميثاقه هو، فيُسجَّل بمفتاحه لا بمفتاح المترجمين
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000002b1', true);
+select public.accept_policy('1.0', 'مرشدٌ للورديات', 'field', 'نصُّ ميثاق العمل الميداني للتجربة');
+commit;
+
+do $$
+declare v_key text; v_hash text; v_code text;
+begin
+  select policy_key, doc_hash, proof_code into v_key, v_hash, v_code
+    from public.policy_acceptances
+   where member_id = '00000000-0000-0000-0000-0000000002b1';
+  if v_key is distinct from 'field' then
+    raise exception 'FAIL: توقيعُ الميدان لم يُسجَّل بمفتاح ميثاقه';
+  end if;
+  if v_hash is null or v_code is null then
+    raise exception 'FAIL: بصمةُ النصِّ أو رمزُ الوثيقة ناقصٌ في ميثاق الميدان';
+  end if;
+  if encode(sha256(convert_to('نصُّ ميثاق العمل الميداني للتجربة', 'UTF8')), 'hex')
+     is distinct from v_hash then
+    raise exception 'FAIL: بصمةُ النصِّ لا تُطابق النصَّ الذي عُرِض';
+  end if;
+  -- ولا يُحسَب موقِّعًا على ميثاق المترجمين
+  if exists (select 1 from public.policy_acceptances
+              where member_id = '00000000-0000-0000-0000-0000000002b1'
+                and policy_key = 'confidentiality') then
+    raise exception 'FAIL: حُسِب موقِّعًا على ميثاقٍ لم يوقِّعْه';
+  end if;
+  -- والتحقُّقُ العامُّ يُظهِر مفتاحَ ميثاقه فيُقرأ بنصِّه هو
+  if (public.verify_signature(v_code) ->> 'policy_key') is distinct from 'field' then
+    raise exception 'FAIL: التحقُّقُ العامُّ لا يُبيِّن أيَّ ميثاقٍ وُقِّع';
+  end if;
+end $$;
+
+-- ـ وكشفُ ميثاقِ الميدان يحمل الفريقَ والمدينةَ والدور
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$
+declare r record; v_n int;
+begin
+  select count(*) into v_n from public.policy_roster('field')
+   where track in ('field', 'answers');
+  if v_n < 2 then
+    raise exception 'FAIL: كشفُ ميثاق الميدان لا يضمُّ أهلَه (%)', v_n;
+  end if;
+  select * into r from public.policy_roster('field')
+   where member_id = '00000000-0000-0000-0000-0000000002b1';
+  if r.track is distinct from 'field' or r.city is distinct from 'makkah'
+     or r.role is distinct from 'translator' then
+    raise exception 'FAIL: الكشفُ لا يحمل فريقَ العضو ومدينتَه ودورَه';
+  end if;
+  if r.accepted_at is null or r.proof_code is null then
+    raise exception 'FAIL: الكشفُ لا يُظهِر توقيعَ من وقَّع';
+  end if;
+  -- ومن لم يوقِّعْ يبقى في الكشف بلا تاريخ، فيُعرَف أنه مطلوبٌ منه
+  select * into r from public.policy_roster('field')
+   where member_id = '00000000-0000-0000-0000-0000000f0001';
+  if r.member_id is null then
+    raise exception 'FAIL: من لم يوقِّعْ سقط من الكشف';
+  end if;
+  if r.accepted_at is not null then
+    raise exception 'FAIL: من لم يوقِّعْ عُدَّ موقِّعًا';
+  end if;
+  -- والترشيحُ بالفريق يقصُر الكشفَ على فريقٍ بعينه
+  if exists (select 1 from public.policy_roster('field', array['field'])
+              where track <> 'field') then
+    raise exception 'FAIL: الترشيحُ بالفريق لا يعمل';
+  end if;
+  -- وتوقيعُ الميدان لا يظهر في كشف ميثاق المترجمين
+  if exists (select 1 from public.policy_roster('confidentiality')
+              where member_id = '00000000-0000-0000-0000-0000000002b1'
+                and accepted_at is not null) then
+    raise exception 'FAIL: توقيعُ ميثاقٍ حُسِب لميثاقٍ آخر';
+  end if;
+end $$;
+commit;
+
+-- ـ ووثيقةُ إثباته تُبنى من سجلِّ ميثاقه
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000002b1', true);
+do $$
+declare r record;
+begin
+  select * into r from public.policy_proof(
+    '00000000-0000-0000-0000-0000000002b1', null, 'field');
+  if r.policy_key is distinct from 'field' or r.policy_version is distinct from '1.0' then
+    raise exception 'FAIL: سجلُّ إثبات ميثاق الميدان غيرُ صحيح';
+  end if;
+  if exists (select 1 from public.policy_proof(
+               '00000000-0000-0000-0000-0000000002b1', null, 'confidentiality')) then
+    raise exception 'FAIL: ظهر له إثباتٌ على ميثاقٍ لم يوقِّعْه';
+  end if;
+end $$;
+commit;
+
+-- ـ والمترجمُ ليس له من كشف الميدان شيء
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', true);
+do $$
+begin
+  if exists (select 1 from public.policy_roster('field')) then
+    raise exception 'FAIL: كشفُ الموقِّعين مفتوحٌ لغير الإدارة';
+  end if;
+end $$;
+commit;
+
+do $$ begin raise notice
+  'PASS: ميثاقُ الميدان يُوقَّع بمفتاحه، وكشفُه بأهله وفريقِهم ومدينتِهم'; end $$;
+
+-- ـ والهويةُ في الكشف لا تصل من أُغلق عنه مفتاحُها (مقتضى ٠١٣٣ في ٠١٣٤)
+do $$
+begin
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  perform public.set_member_perm('00000000-0000-0000-0000-00000000000b', 'docs_id_view', true);
+end $$;
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000b', true);
+do $$
+begin
+  if not exists (select 1 from public.policy_roster('confidentiality')
+                  where national_id is not null) then
+    raise exception 'FAIL: من يملك المفتاحَ لا يرى الهويةَ في الكشف';
+  end if;
+end $$;
+commit;
+do $$
+begin
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  perform public.set_member_perm('00000000-0000-0000-0000-00000000000b', 'docs_id_view', false);
+end $$;
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000b', true);
+do $$
+begin
+  if (select count(*) from public.policy_roster('confidentiality')) = 0 then
+    raise exception 'FAIL: المنسقُ لا يرى الكشفَ أصلًا';
+  end if;
+  if exists (select 1 from public.policy_roster('confidentiality')
+              where national_id is not null) then
+    raise exception 'FAIL: وصلت الهويةُ في الكشف من أُغلق عنه مفتاحُها';
+  end if;
+end $$;
+commit;
+do $$ begin raise notice 'PASS: هويةُ الكشف لمن يملك مفتاحَها وحدَه'; end $$;

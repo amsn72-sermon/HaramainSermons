@@ -8,7 +8,7 @@
 import { h, fill, fmtDate, fmtDateTime, fmtHijri } from '../ui.js';
 import { db } from '../sb.js';
 import { brand, footer } from './shell.js';
-import { policyOf, policyBreachClause } from '../policy.js';
+import { charterDoc, policyBreachClause, POLICY_KEY } from '../policy.js';
 
 export async function render(ctx) {
   const q = ctx?.query || new URLSearchParams(location.search);
@@ -42,7 +42,10 @@ export async function render(ctx) {
       return;
     }
 
-    const p = policyOf(v.version);
+    // ميثاقُ العضو هو المحتجُّ به: ميثاقُ العمل أو ميثاقُ العمل
+    //   الميداني، كلٌّ بنسخته (ملاحظة ٤٨١)
+    const pkey = v.policy_key || POLICY_KEY;
+    const p = charterDoc(pkey, v.version);
     fill(out, h('div.card.stack.verify-ok',
       h('div.row',
         h('span.pill.ok', 'توقيعٌ صحيح'),
@@ -58,7 +61,7 @@ export async function render(ctx) {
         v.doc_hash ? row('بصمةُ النصِّ الموقَّع', v.doc_hash, true) : null),
       h('div.policy-clause',
         h('b.small', `بندُ المخالفة في النسخة ${v.version} — بنصِّه`),
-        h('p', policyBreachClause(v.version))),
+        h('p', policyBreachClause(v.version, pkey))),
       v.doc_hash
         ? h('p.small.muted', 'بصمةُ النصِّ محسوبةٌ على نصِّ الميثاق الذي عُرِض على العضو '
             + 'حرفًا بحرف وقتَ توقيعه، وهي بصمةُ النصِّ المطبوع في وثيقته.')

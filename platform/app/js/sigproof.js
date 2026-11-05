@@ -10,16 +10,36 @@
 //
 //   والكشفُ كذلك: نصُّ الميثاق أولًا، ثم جدولُ من اختير من الأعضاء
 //   وتواريخُ توقيعهم — بلا تفاصيل الشبكة والجهاز، فتلك في وثيقة العضو.
+//
+//   ويُبوَّب الكشفُ بالفريق ثم المدينة، وفي رأسه بيانٌ بما طُبع
+//   (ملاحظة ٤٨٠): فالاستفسارُ يأتي عن موقِّعي فريقٍ في مدينةٍ بعينها،
+//   فيُطبَع لهم كشفُهم مبوَّبًا معدودًا لا يُخلَط بغيرهم. وميثاقُ كلِّ
+//   فريقٍ نصُّه هو (ملاحظة ٤٨١).
 import { h, fill, fmtHijri, fmtDate, fmtDateTime, toast, dialog } from './ui.js';
 import { db } from './sb.js';
 import { qrDataUri } from './qr.js';
 import { printOnLetterhead } from './lhprint.js';
-import { policyOf, policyBreachClause, POLICY_KEY, POLICY_VERSION } from './policy.js';
+import { policyBreachClause, charterDoc, isFieldMember,
+         FIELD_KEY, POLICY_KEY, POLICY_VERSION } from './policy.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, ch =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
 const AR = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn');
+
+// الفرقُ بترتيبها، والمدن (ملاحظة ٤٨٠)
+export const TRACK_ORDER = ['translation', 'field', 'answers'];
+const TRACK_AR = {
+  translation: 'المترجمون المتخصصون',
+  field: 'المرشدون المكانيون',
+  answers: 'فريقُ إجابة السائلين'
+};
+const CITY_AR = { makkah: 'مكة المكرمة', madinah: 'المدينة المنورة' };
+export const CITY_ORDER = ['makkah', 'madinah'];
+// ورتبةُ المدينة بترتيبها المعروف لا بحروف رمزها اللاتينية، وبلا مدينةٍ آخرًا
+const cityRank = c => { const i = CITY_ORDER.indexOf(c || ''); return i < 0 ? 9 : i; };
+export const trackName = t => TRACK_AR[t] || 'فريقٌ غيرُ محدَّد';
+export const cityName = c => CITY_AR[c] || 'مدينةٌ غيرُ محدَّدة';
 const ARD = v => (v ? fmtDateTime(v) : '—');
 
 const AUTHORITY = 'مشروع خادم الحرمين الشريفين لترجمة خطب الحرمين — '
@@ -39,8 +59,8 @@ export async function signatureRecords(memberId, { key = POLICY_KEY } = {}) {
 }
 
 // ـــ نصُّ الميثاق منسَّقًا كما يُعرَض في المنصة
-function charterHtml(version) {
-  const p = policyOf(version);
+function charterHtml(version, key = POLICY_KEY) {
+  const p = charterDoc(key, version);
   return `<h1>${esc(p.title)}</h1>
 <p class="sub">${esc(AUTHORITY)} — النسخة ${esc(version)}</p>
 <p>${esc(p.intro)}</p>
@@ -52,7 +72,8 @@ ${p.sections.map(([t, items], i) => `<h2>${AR(i + 1)}) ${esc(t)}</h2>
 
 // ـــ وثيقةُ إثبات توقيع عضوٍ بعينه
 export function proofHtml(r) {
-  const clause = policyBreachClause(r.policy_version);
+  const key = r.policy_key || POLICY_KEY;
+  const clause = policyBreachClause(r.policy_version, key);
   const code = r.proof_code || '';
   const qr = code ? qrDataUri(signVerifyUrl(code), { margin: 1, dark: '#1d2b3a' }) : null;
 
@@ -60,7 +81,7 @@ export function proofHtml(r) {
     + `<td${ltr ? ' class="ltr"' : ''}>${esc(v || '—')}</td></tr>`;
 
   return `<div class="doc">
-${charterHtml(r.policy_version)}
+${charterHtml(r.policy_version, key)}
 <div class="keep">
 <h2>إثباتُ التوقيع</h2>
 <table class="rec">
@@ -104,8 +125,8 @@ export function printProof(r) {
 }
 
 // زرُّ الوثيقة: يقرأ السجلَّ ثم يطبع. ومن لم يوقِّعْ لا وثيقةَ له.
-export async function proofFor(memberId, version = null) {
-  const rows = await signatureRecords(memberId);
+export async function proofFor(memberId, version = null, key = POLICY_KEY) {
+  const rows = await signatureRecords(memberId, { key });
   if (!rows.length) { toast('لا توقيعَ مسجَّلٌ لهذا العضو.', 'warn'); return false; }
   const r = version ? rows.find(x => x.policy_version === version) || rows[0] : rows[0];
   return printProof(r);
@@ -126,15 +147,27 @@ const chunk = (rows, n) => {
   return out;
 };
 
-export function rosterHtml(rows, { version = POLICY_VERSION, note = '' } = {}) {
+export function rosterHtml(rows, { version = POLICY_VERSION, key = POLICY_KEY,
+                                   note = '', head = '' } = {}) {
   const n = rows.length;
   const signed = rows.filter(r => r.signed).length;
-  return `<div class="doc">
-${charterHtml(version)}
-<h2>كشفُ التوقيع على الميثاق</h2>
-<p class="note">${esc(note || `عددُ من في الكشف ${AR(n)}، وقَّع منهم ${AR(signed)}.`)}
-  وتاريخُ الكشف ${esc(fmtDate(new Date()))}.</p>
-${chunk(rows, 14).map(part => `<table class="roster keep">
+
+  // التبويبُ بالفريق ثم المدينة: ولا تُطبَع عناوينُ الأبواب إذا كان
+  //   الكشفُ بابًا واحدًا، فالعنوانُ حينئذٍ تكرارٌ لرأس الكشف
+  const bins = new Map();
+  rows.forEach(r => {
+    const k = `${r.track || ''}|${r.city || ''}`;
+    if (!bins.has(k)) bins.set(k, { track: r.track || '', city: r.city || '', rows: [] });
+    bins.get(k).rows.push(r);
+  });
+  const groups = [...bins.values()].sort((a, b) => {
+    const ta = TRACK_ORDER.indexOf(a.track), tb = TRACK_ORDER.indexOf(b.track);
+    if (ta !== tb) return (ta < 0 ? 9 : ta) - (tb < 0 ? 9 : tb);
+    return cityRank(a.city) - cityRank(b.city);
+  });
+  const many = groups.length > 1;
+
+  const table = part => `<table class="roster keep">
   <thead><tr>
     <th style="width:9mm">م</th><th>العضو</th><th style="width:26mm">رقمُ الهوية</th>
     <th style="width:20mm">الحال</th><th style="width:16mm">النسخة</th>
@@ -158,7 +191,25 @@ ${chunk(rows, 14).map(part => `<table class="roster keep">
     </tr>`;
     }).join('')}
   </tbody>
-</table>`).join('')}
+</table>`;
+
+  return `<div class="doc">
+${charterHtml(version, key)}
+<h2>كشفُ التوقيع على الميثاق</h2>
+${head ? `<p class="note">${esc(head)}</p>` : ''}
+<p class="note">${esc(note || `عددُ من في الكشف ${AR(n)}، وقَّع منهم ${AR(signed)}.`)}
+  وتاريخُ الكشف ${esc(fmtDate(new Date()))}.</p>
+${groups.map(g => {
+  const sg = g.rows.filter(r => r.signed).length;
+  const title = many
+    ? `<h3>${esc(trackName(g.track))} — ${esc(cityName(g.city))}`
+      + ` <span class="cnt">(${AR(g.rows.length)}، وقَّع منهم ${AR(sg)})</span></h3>`
+    : '';
+  const parts = chunk(g.rows, 9).map(table);
+  // عنوانُ الباب يلزم جدولَه الأوَّل فلا يبقى وحدَه في ذيل صفحة
+  const first = `<div class="keep">${title}${parts[0] || ''}</div>`;
+  return first + parts.slice(1).join('');
+}).join('')}
 <p class="note">هذا الكشفُ بيانٌ بمن وقَّع على الميثاق المعروض أعلاه وتاريخِ توقيعه.
   ويُمسَح باركودُ كلِّ صفٍّ فيُفتَح إثباتُ صاحبه وحدَه. وتفصيلُ التوقيع —
   عنوانُ الشبكة والجهازُ وبصمةُ النصِّ — في وثيقة إثباته الخاصّة.</p>
@@ -176,55 +227,148 @@ export function printRoster(rows, opts = {}) {
 export async function rosterRows({ key = POLICY_KEY } = {}) {
   let rows = [];
   try { rows = await db.rpc('policy_roster', { p_key: key }) || []; } catch { rows = []; }
+  // ولا يُحشَر في كشفِ ميثاقٍ من ليس من أهله: أهلُ الميدان في ميثاقهم،
+  //   وسائرُ الفريق — والحساباتُ الإدارية — في ميثاق المترجمين
+  //   (ملاحظة ٤٨١). ويبقى في الكشف من وقَّع هذا الميثاقَ ثم نُقل إلى
+  //   فريقٍ آخر: توقيعُه قائمٌ وإثباتُه يُطبَع، فلا يُحجَب بنقله.
+  rows = rows.filter(r => (key === FIELD_KEY) === isFieldMember(r) || r.accepted_at);
   return rows.map(r => ({
     id: r.member_id, full_name: r.full_name, member_no: r.member_no,
     national_id: r.national_id, signed: !!r.accepted_at,
+    role: r.role || '', track: r.track || '', city: r.city || '',
     policy_version: r.policy_version || '', accepted_at: r.accepted_at,
     proof_code: r.proof_code || ''
   }));
 }
 
-// نافذةُ اختيار من يُرفَق في الكشف (ملاحظة ٤٢٩)
-export async function rosterDialog(people) {
+// نافذةُ اختيار من يُرفَق في الكشف (ملاحظتا ٤٢٩ و٤٨٠)
+//
+//   ويُرشَّح المعروضُ بالفريق والمدينة، والأزرارُ الثلاثةُ تعمل في
+//   المرشَّح وحدَه لا في الكشف كلِّه: فمن أراد عددًا من المترجمين وعددًا
+//   من المكانيين رشَّح الأولَ واختار، ثم رشَّح الثانيَ واختار، والشاشةُ
+//   باقيةٌ واختيارُه محفوظ.
+export async function rosterDialog(people, { key = POLICY_KEY,
+                                             version = POLICY_VERSION } = {}) {
   const chosen = new Set(people.map(p => p.id));
   const q = h('input', { type: 'search', placeholder: 'ابحثْ بالاسم',
     'aria-label': 'البحث عن عضو' });
+
+  // الفرقُ والمدنُ الموجودةُ فعلًا في هذا الكشف لا كلُّ ما يمكن.
+  //   و«بلا مدينة» خيارٌ له قيمتُه الخاصّة، فلا يلتبس بـ«المدنُ كلُّها»
+  //   فيبدو مرشِّحًا لا يُرشِّح
+  const NO_CITY = '\u0000none';
+  const tracks = [...new Set(people.map(m => m.track || ''))]
+    .sort((a, b) => TRACK_ORDER.indexOf(a) - TRACK_ORDER.indexOf(b));
+  const cities = [...new Set(people.map(m => m.city || ''))].filter(Boolean)
+    .sort((a, b) => cityRank(a) - cityRank(b));
+  const anyNoCity = people.some(m => !m.city);
+
+  const opt = (v, t) => h('option', { value: v }, t);
+  const fTrack = h('select', opt('', 'الفرقُ كلُّها'),
+    tracks.map(t => opt(t, trackName(t))));
+  const fCity = (cities.length + (anyNoCity ? 1 : 0)) > 1
+    ? h('select', opt('', 'المدنُ كلُّها'),
+        cities.map(c => opt(c, cityName(c))),
+        anyNoCity ? opt(NO_CITY, 'بلا مدينةٍ مسجَّلة') : null)
+    : null;
+  const fState = h('select', opt('', 'الموقِّعون وغيرُهم'),
+    opt('signed', 'الموقِّعون وحدَهم'), opt('unsigned', 'من لم يوقِّعْ'));
+
   const box = h('div.pick-list.tall');
   const tally = h('span.small.muted');
-  const count = () => { tally.textContent = `اختير ${AR(chosen.size)} من ${AR(people.length)}`; };
+
+  // المعروضُ الآن بعد الترشيح والبحث
+  const shown = () => {
+    const k = q.value.trim();
+    return people.filter(m =>
+      (!k || (m.full_name || '').includes(k))
+      && (!fTrack.value || (m.track || '') === fTrack.value)
+      && (!fCity || !fCity.value
+        || (fCity.value === NO_CITY ? !m.city : (m.city || '') === fCity.value))
+      && (!fState.value || (fState.value === 'signed' ? m.signed : !m.signed)));
+  };
+
+  const count = () => {
+    const sh = shown();
+    const inSh = sh.filter(m => chosen.has(m.id)).length;
+    tally.textContent = `اختير ${AR(chosen.size)} من ${AR(people.length)}`
+      + (sh.length === people.length ? ''
+        : ` — والمعروضُ الآن ${AR(sh.length)}، اختير منه ${AR(inSh)}`);
+  };
 
   const paint = () => {
-    const k = q.value.trim();
-    fill(box, people
-      .filter(m => !k || (m.full_name || '').includes(k))
-      .map(m => {
-        const on = h('input', { type: 'checkbox', checked: chosen.has(m.id),
-          'aria-label': m.full_name });
-        on.onchange = () => { on.checked ? chosen.add(m.id) : chosen.delete(m.id); count(); };
-        return h('label.check.pick-row', on,
-          h('span', m.full_name,
-            h('span.small.muted', ` · ${m.signed ? 'وقَّع' : 'لم يوقِّعْ'}`)));
-      }));
+    const sh = shown();
+    fill(box, sh.length ? sh.map(m => {
+      const on = h('input', { type: 'checkbox', checked: chosen.has(m.id),
+        'aria-label': m.full_name });
+      on.onchange = () => { on.checked ? chosen.add(m.id) : chosen.delete(m.id); count(); };
+      return h('label.check.pick-row', on,
+        h('span', m.full_name,
+          h('span.small.muted', ` · ${m.signed ? 'وقَّع' : 'لم يوقِّعْ'}`
+            + ` · ${trackName(m.track)}${m.city ? ` · ${cityName(m.city)}` : ''}`)));
+    }) : [h('p.small.muted', 'لا أحدَ بهذا الترشيح.')]);
+    count();
   };
-  q.oninput = paint; paint(); count();
+  q.oninput = paint;
+  // أوّلُ ترشيحٍ: يُفهَم منه أنه يريد بعضَهم لا كلَّهم، فيُفرَّغ الاختيارُ
+  //   الشاملُ مرَّةً واحدةً ثم يُبنى بالأزرار أو بالعلامات، ويبقى ما اختاره
+  //   بعد ذلك محفوظًا ولو بدَّل الترشيح
+  let narrowed = false;
+  const onFilter = () => {
+    if (!narrowed) { narrowed = true; chosen.clear(); }
+    paint();
+  };
+  fTrack.onchange = onFilter; if (fCity) fCity.onchange = onFilter;
+  fState.onchange = onFilter;
+  paint();
 
-  const all = h('button.btn.xs', { type: 'button' }, 'الكلّ');
-  all.onclick = () => { people.forEach(m => chosen.add(m.id)); paint(); count(); };
-  const none = h('button.btn.xs.ghost', { type: 'button' }, 'لا أحد');
-  none.onclick = () => { chosen.clear(); paint(); count(); };
-  const onlySigned = h('button.btn.xs', { type: 'button' }, 'الموقِّعون وحدَهم');
+  // والأزرارُ في المعروض وحدَه، فلا يُفسد الترشيحُ اختيارًا سابقًا
+  const all = h('button.btn.xs', { type: 'button' }, 'اختَرِ المعروض');
+  all.onclick = () => { shown().forEach(m => chosen.add(m.id)); paint(); };
+  const none = h('button.btn.xs.ghost', { type: 'button' }, 'ألغِ المعروض');
+  none.onclick = () => { shown().forEach(m => chosen.delete(m.id)); paint(); };
+  const onlySigned = h('button.btn.xs', { type: 'button' }, 'الموقِّعون من المعروض');
   onlySigned.onclick = () => {
-    chosen.clear();
-    people.filter(m => m.signed).forEach(m => chosen.add(m.id));
-    paint(); count();
+    shown().forEach(m => (m.signed ? chosen.add(m.id) : chosen.delete(m.id)));
+    paint();
+  };
+  const clear = h('button.btn.xs.ghost', { type: 'button' }, 'تفريغُ الاختيار');
+  clear.onclick = () => { chosen.clear(); paint(); };
+
+  // ـــ بيانٌ في رأس الكشف بما طُبع: الفريقُ والمدينةُ والحال
+  const headLine = picked => {
+    const t = [...new Set(picked.map(m => m.track || ''))];
+    const c = [...new Set(picked.map(m => m.city || ''))].filter(Boolean)
+      .sort((a, b) => cityRank(a) - cityRank(b));
+    const none = picked.some(m => !m.city);
+    const bits = [];
+    bits.push(t.length === 1 ? trackName(t[0])
+      : t.map(x => trackName(x)).join(' و'));
+    if (c.length) {
+      bits.push(c.map(x => cityName(x)).join(' و')
+        + (none ? ' ومن لا مدينةَ له' : ''));
+    }
+    const sg = picked.filter(m => m.signed).length;
+    return `طُبع هذا الكشفُ لـ${bits.join(' — ')}: ${AR(picked.length)} عضوًا،`
+      + ` وقَّع منهم ${AR(sg)}`
+      + (sg === picked.length ? '' : ` ولم يوقِّعْ ${AR(picked.length - sg)}`) + '.';
   };
 
   const res = await dialog({
     title: 'طباعةُ كشف التوقيع',
     body: h('div.stack',
       h('p.small.muted', 'يبدأ الكشفُ بنصِّ الميثاق منسَّقًا، ثم جدولُ من تختاره '
-        + 'من الأعضاء وتاريخِ توقيعهم. ولا تدخله تفاصيلُ الشبكة والجهاز.'),
-      h('div.row.wrap', all, onlySigned, none),
+        + 'من الأعضاء وتاريخِ توقيعهم، مبوَّبًا بالفريق ثم المدينة. '
+        + 'ولا تدخله تفاصيلُ الشبكة والجهاز.'),
+      h('div.row.wrap',
+        h('label.field.tight', 'الفريق', fTrack),
+        fCity ? h('label.field.tight', 'المدينة', fCity) : null,
+        h('label.field.tight', 'الحال', fState)),
+      h('p.small.muted', 'والكشفُ ابتداءً شاملٌ لمن في هذه الشاشة. '
+        + 'فإن رشَّحتَ أُفرِغ الاختيارُ لتبنيَه بنفسك: '
+        + 'رشِّحْ ثم «اختَرِ المعروض» أو ضعِ العلامةَ على من تريد، '
+        + 'ثم بدِّلِ الترشيحَ واختَرْ آخرين — ويبقى اختيارُك الأول.'),
+      h('div.row.wrap', all, onlySigned, none, clear),
       h('label.field', 'الأسماء', q),
       box, tally),
     buttons: [{ label: '🖨 اطبعِ الكشف', kind: 'primary',
@@ -233,5 +377,5 @@ export async function rosterDialog(people) {
       { label: 'إلغاء', value: null }]
   });
   if (!res) return false;
-  return printRoster(res);
+  return printRoster(res, { key, version, head: headLine(res) });
 }

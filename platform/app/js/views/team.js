@@ -4,7 +4,7 @@ import { db, storage } from '../sb.js';
 import { state, isManager, ROLE_LABEL, STATUS_LABEL, roleName,
   TRACK_LABEL, trackOf, CITY, NO_FATWA, langName, stageName, roleLabel, ADMIN_TITLE,
   leadScope, can, LEAD_KIND } from '../store.js';
-import { POLICY_KEY, POLICY_VERSION } from '../policy.js';
+import { POLICY_KEY, FIELD_KEY, charterOf, charterDoc } from '../policy.js';
 import { allowedTeamFields, teamRows, exportExcel, exportWord, exportPdf } from '../teamexport.js';
 import { nationalitySelect } from '../nationalities.js';
 import { icon } from '../icons.js';
@@ -29,7 +29,9 @@ export async function render(ctx, opts = {}) {
     db.rpc('team_private').catch(() => db.select('profile_private', { select: '*' })),
     db.select('member_performance', { select: '*' }).catch(() => []),
     db.select('member_rating_summary', { select: '*' }).catch(() => []),
-    db.select('policy_acceptances', { select: 'member_id,policy_version,signed_name,accepted_at', policy_key: `eq.${POLICY_KEY}` }).catch(() => []),
+    // الميثاقان معًا: لكلِّ عضوٍ ميثاقُ فريقه (ملاحظة ٤٨١)
+    db.select('policy_acceptances', { select: 'member_id,policy_key,policy_version,signed_name,accepted_at',
+      policy_key: `in.(${POLICY_KEY},${FIELD_KEY})` }).catch(() => []),
     db.select('bank_accounts', { select: '*' }).catch(() => [])
   ]);
   const bankOf = Object.fromEntries(bank.map(b => [b.member_id, b]));
@@ -52,8 +54,16 @@ export async function render(ctx, opts = {}) {
   const members = all.filter(belongs);
   const perfOf = Object.fromEntries(perf.map(r => [r.member_id, r]));
   const rateOf = Object.fromEntries(rateSum.map(r => [r.member_id, r]));
+  // وتوقيعُ العضو هو ما كان على ميثاق فريقه بنسخته الجارية
+  const charterFor = {};
+  for (const m of all) charterFor[m.id] = charterOf(m);
   const signOf = {};
-  for (const r of signed) if (r.policy_version === POLICY_VERSION) signOf[r.member_id] = r;
+  for (const r of signed) {
+    const ch = charterFor[r.member_id];
+    if (ch && (r.policy_key || POLICY_KEY) === ch.key && r.policy_version === ch.version) {
+      signOf[r.member_id] = r;
+    }
+  }
 
   const stars = n => h('span.stars', { title: n ? `${n} من 5` : 'بلا تقييم' },
     [1, 2, 3, 4, 5].map(i => h('b', { class: i <= Math.round(n || 0) ? '' : 'off' }, '★')));
@@ -583,15 +593,24 @@ export async function render(ctx, opts = {}) {
       let recs = [];
       try {
         const m2 = await import('../sigproof.js');
-        recs = await m2.signatureRecords(m.id);
+        // ميثاقُ فريقه، ومعه ما وقَّعه من الميثاق الآخر قبل نقله:
+        //   توقيعُه قائمٌ ووثيقةُ إثباته تُطبَع (ملاحظة ٤٨١)
+        const [a, b] = await Promise.all([
+          m2.signatureRecords(m.id, { key: POLICY_KEY }),
+          m2.signatureRecords(m.id, { key: FIELD_KEY })
+        ]);
+        recs = [...a, ...b].sort((x, y) =>
+          String(y.accepted_at).localeCompare(String(x.accepted_at)));
       } catch { recs = []; }
       if (!recs.length) {
-        return h('fieldset.stack', h('legend', 'ميثاقُ العمل'),
+        return h('fieldset.stack', h('legend', charterOf(m).doc.title),
           h('p.small.muted', 'لم يوقِّعْ على الميثاق بعد، فلا وثيقةَ إثباتٍ له. '
             + 'ويُطالَب به عند دخوله ولا يتابع عمله قبله.'));
       }
-      const cur = recs.find(r => r.policy_version === POLICY_VERSION);
-      return h('fieldset.stack', h('legend', 'ميثاقُ العمل'),
+      const mych = charterOf(m);
+      const cur = recs.find(r => (r.policy_key || POLICY_KEY) === mych.key
+        && r.policy_version === mych.version);
+      return h('fieldset.stack', h('legend', mych.doc.title),
         h('div.stack', { style: { gap: '6px' } }, ...recs.map(r => {
           const b = h('button.btn.xs', { type: 'button',
             title: `وثيقةُ إثبات التوقيع على النسخة ${r.policy_version}` }, '🖨 وثيقةُ إثبات');
@@ -602,15 +621,20 @@ export async function render(ctx, opts = {}) {
           return h('div.row.between.wrap', { style: { gap: '8px' } },
             h('div.stack', { style: { gap: '2px', minWidth: '200px' } },
               h('b.small', `النسخة ${r.policy_version}`,
-                r.policy_version === POLICY_VERSION
+                (r.policy_key || POLICY_KEY) === mych.key
+                  && r.policy_version === mych.version
                   ? h('span.badge.ok', 'الجارية') : h('span.badge.warn', 'سابقة')),
+              (r.policy_key || POLICY_KEY) === mych.key ? null
+                : h('span.small.muted',
+                    charterDoc(r.policy_key || POLICY_KEY, r.policy_version).title
+                    + ' — وقَّعه قبل نقله إلى فريقه اليوم'),
               h('span.small.muted', `باسم «${r.signed_name}» في ${fmtDateTime(r.accepted_at)}`),
               r.proof_code
                 ? h('span.small.muted', { dir: 'ltr' }, r.proof_code)
                 : h('span.small.muted', 'بلا رمزِ وثيقةٍ — توقيعٌ سابقٌ لاستحداثه')),
             b);
         })),
-        cur ? null : h('p.small.warn', `لم يوقِّعْ على النسخة الجارية ${POLICY_VERSION} بعد — `
+        cur ? null : h('p.small.warn', `لم يوقِّعْ على النسخة الجارية ${mych.version} بعد — `
           + 'ويُطالَب بها عند دخوله. والمحتجُّ عليه فيما مضى نصُّ نسخته هو.'));
     })();
 
@@ -951,8 +975,9 @@ export async function render(ctx, opts = {}) {
           h('div', h('div.small.muted', 'معدل التقدير الداخلي'), h('div.v', sum.avg_score ? `${sum.avg_score} / 5` : '—'),
             h('div.small.muted', sum.ratings_count ? `${sum.ratings_count} تقدير` : ''))),
         h('p.small.muted', sg
-          ? `وقّع ميثاق العمل (نسخة ${sg.policy_version}) باسم «${sg.signed_name}» في ${fmtDateTime(sg.accepted_at)}.`
-          : 'لم يوقّع على ميثاق العمل بنسخته الحالية بعد.'),
+          ? `وقّع ${charterOf(m).doc.title} (نسخة ${sg.policy_version})`
+            + ` باسم «${sg.signed_name}» في ${fmtDateTime(sg.accepted_at)}.`
+          : `لم يوقّع على ${charterOf(m).doc.title} بنسخته الحالية بعد.`),
         h('fieldset', h('legend', 'تقديرٌ داخليٌّ جديد'),
           h('p.small.muted', 'تقديرٌ داخليٌّ للمتابعة. وتقييمُ الأداء يأتي من مشرفي الهيئة، '
             + 'ونحن نسجِّله في بابه لا نُنشئه.'),

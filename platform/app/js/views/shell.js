@@ -1,5 +1,6 @@
 import { h } from '../ui.js';
 import { auth, db } from '../sb.js';
+import { charterOf } from '../policy.js';
 import { state, isAdmin, isManager, isSupervisor, isViewer, isWatcher, can, roleLabel, isTeamLead } from '../store.js';
 
 export function themeToggle() {
@@ -30,13 +31,17 @@ export function footer(left = 'إدارة ترجمة الحرمين الشريف
 }
 
 // ميثاق العمل حاضر دائمًا: أخضر إن وُقّع وأحمر إن لم يُوقَّع (ملاحظتا ٧٦ و١٢٥)
+//   وباسم ميثاقِ العضو نفسِه، فأهلُ الميدان على ميثاقهم (ملاحظة ٤٨١)
 export function policyChip() {
-  const chip = h('button.btn.sm.policy-chip', { type: 'button', title: 'ميثاق العمل' });
+  const name = () => charterOf(state.profile).doc.title;
+  const chip = h('button.btn.sm.policy-chip', { type: 'button' });
   const paint = () => {
     const ok = !!state.policySigned;
+    const t = name();
     chip.className = 'btn sm policy-chip ' + (ok ? 'signed' : 'unsigned');
-    chip.replaceChildren(h('span.dot', { 'aria-hidden': 'true' }), 'ميثاق العمل');
-    chip.setAttribute('aria-label', ok ? 'ميثاق العمل — موقَّع' : 'ميثاق العمل — لم يُوقَّع بعد');
+    chip.title = t;
+    chip.replaceChildren(h('span.dot', { 'aria-hidden': 'true' }), t);
+    chip.setAttribute('aria-label', ok ? `${t} — موقَّع` : `${t} — لم يُوقَّع بعد`);
   };
   chip.onclick = async () => {
     const m = await import('./policy.js');

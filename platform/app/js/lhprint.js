@@ -45,6 +45,9 @@ export const DOC_CSS = `
   .doc td.qr-cell img { width: 13mm; height: 13mm; display: block; margin: 0 auto .6mm; }
   .doc td.qr-cell span { font-size: 6.5pt; color: #6b6257; direction: ltr;
                          display: block; letter-spacing: .2px; }
+  /* عنوانُ بابٍ في الكشف: فريقٌ ومدينةٌ وعددُهما (ملاحظة ٤٨٠) */
+  .doc h3 { font-size: 10.5pt; color: #3b3630; margin: 4mm 0 1.2mm; font-weight: 700; }
+  .doc h3 .cnt { font-size: 8.5pt; color: #6b6257; font-weight: 400; }
   .doc table.roster { font-size: 9pt; }
   .doc table.roster td, .doc table.roster th { padding: 1mm 1.4mm; }
   /* جداولُ الكشف تتلاحق بلا فراغٍ بينها، ورأسُها يتكرّر (ملاحظة ٤٦٢) */

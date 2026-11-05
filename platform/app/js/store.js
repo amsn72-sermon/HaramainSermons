@@ -1,6 +1,6 @@
 // الحالة المشتركة: المستخدم الحالي والبيانات المرجعية
 import { auth, db, storage } from './sb.js';
-import { POLICY_KEY, POLICY_VERSION } from './policy.js';
+import { charterOf } from './policy.js';
 
 export const state = {
   profile: null,      // صف profiles للمستخدم الحالي
@@ -203,15 +203,21 @@ export async function loadProfile() {
   return state.profile;
 }
 
-// إقرار سياسة السرية: يُطلب عند أول دخول بعد التفعيل، ويتجدد إذا تغيّرت نسخة السياسة (ملاحظة ٥٧)
+// إقرار الميثاق: يُطلب عند أول دخول بعد التفعيل، ويتجدد إذا تغيّرت نسخته (ملاحظة ٥٧)
+//
+//   وميثاقُ العضو يتبع فريقَه (ملاحظة ٤٨١): فيُفحَص مفتاحُ ميثاقِه هو
+//   ونسختُه، ولا يُطالَب أحدٌ بميثاق غير فريقه.
 export async function loadPolicyState(force = false) {
   if (state.policyLoaded && !force) return state.policySigned;
   if (!state.profile) return false;
+  const ch = charterOf(state.profile);
+  state.charterKey = ch.key;
+  state.charterVersion = ch.version;
   try {
     const rows = await db.select('policy_acceptances', {
-      select: 'policy_version', member_id: `eq.${state.profile.id}`, policy_key: `eq.${POLICY_KEY}`
+      select: 'policy_version', member_id: `eq.${state.profile.id}`, policy_key: `eq.${ch.key}`
     });
-    state.policySigned = rows.some(r => r.policy_version === POLICY_VERSION);
+    state.policySigned = rows.some(r => r.policy_version === ch.version);
   } catch {
     // تعذّر الفحص لا يحجب العمل
     state.policySigned = true;

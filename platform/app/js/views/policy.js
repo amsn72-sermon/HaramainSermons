@@ -1,17 +1,21 @@
-// شاشة سياسة السرية: تُعرض عند أول دخول بعد التفعيل، ولا يُتجاوزها إلا بالتوقيع (ملاحظة ٥٧)
+// شاشة الميثاق: تُعرض عند أول دخول بعد التفعيل، ولا يُتجاوزها إلا بالتوقيع (ملاحظة ٥٧)
+//
+//   وميثاقُ العضو يتبع فريقَه (ملاحظة ٤٨١): أهلُ الميدان — الإرشادِ
+//   المكانيِّ وإجابةِ السائلين — على «ميثاق العمل الميداني»، وسائرُ
+//   الفريق على «ميثاق العمل». فلا تُعرَض على أحدٍ بنودُ غيره.
 import { h, toast, busy, fmtDate, fmtDateTime } from '../ui.js';
 import { db, auth } from '../sb.js';
 import { state } from '../store.js';
 import { brand, themeToggle, footer } from './shell.js';
-import { POLICY_KEY, POLICY_VERSION, POLICY_TITLE, POLICY_INTRO, POLICY_SECTIONS, POLICY_ACK,
-         policyOf, policyPlainText } from '../policy.js';
+import { POLICY_KEY, POLICY_VERSION, charterOf, charterDoc, policyPlainText } from '../policy.js';
 
-// نصُّ نسخةٍ بعينها: الجاريةُ بأصلها، ومن وقَّع على نسخةٍ عُرِضت عليه
+// ميثاقُ العضو الحاليِّ: مفتاحُه ونسختُه ونصُّه
+const mine = () => charterOf(state.profile);
+
+// نصُّ نسخةٍ بعينها من ميثاقٍ بعينه: ومن وقَّع على نسخةٍ عُرِضت عليه
 //   نسختُه هي لا ما استُحدث بعدها (ملاحظة ٤٢٥)
-export function policyText(version = POLICY_VERSION) {
-  const p = version === POLICY_VERSION
-    ? { intro: POLICY_INTRO, sections: POLICY_SECTIONS }
-    : policyOf(version);
+export function policyText(version = POLICY_VERSION, key = POLICY_KEY) {
+  const p = charterDoc(key, version);
   return h('div.policy-text',
     h('p.muted', p.intro),
     p.sections.map(([title, items]) =>
@@ -21,6 +25,7 @@ export function policyText(version = POLICY_VERSION) {
 // عرض السياسة كاملة من الزر الدائم؛ ومن لم يوقّع يستطيع التوقيع من هنا (ملاحظة ٧٦)
 export async function policyDialog() {
   const { dialog } = await import('../ui.js');
+  const ch = mine();
   const signed = !!state.policySigned;
   const agree = h('input', { type: 'checkbox' });
   const name = h('input', { autocomplete: 'off', placeholder: state.profile?.full_name || 'اكتب اسمك الكامل' });
@@ -29,34 +34,34 @@ export async function policyDialog() {
     try {
       const rows = await db.select('policy_acceptances', {
         select: 'signed_name,policy_version,accepted_at,proof_code',
-        member_id: `eq.${state.profile.id}`, policy_key: `eq.${POLICY_KEY}`, order: 'accepted_at.desc', limit: 1
+        member_id: `eq.${state.profile.id}`, policy_key: `eq.${ch.key}`, order: 'accepted_at.desc', limit: 1
       });
       stamp = rows[0] || null;
     } catch { /* العرض لا يتوقف على السجل */ }
   }
   const res = await dialog({
-    title: POLICY_TITLE,
+    title: ch.doc.title,
     body: h('div.stack',
       h('div.policy-state', { class: signed ? 'signed' : 'unsigned' },
         signed
           ? `تم التوقيع${stamp ? ` باسم «${stamp.signed_name}» في ${fmtDateTime(stamp.accepted_at)} — النسخة ${stamp.policy_version}` : ''}`
-          : 'لم توقّع على هذه السياسة بعد'),
-      h('p.small.muted', `النسخة ${POLICY_VERSION}`),
+          : 'لم توقّع على هذا الميثاق بعد'),
+      h('p.small.muted', `النسخة ${ch.version}`),
       // وثيقةُ إثبات توقيعه بين يديه (ملاحظة ٤٢٧)
       signed && stamp
         ? h('div.row.wrap',
             h('button.btn.sm', { type: 'button',
               onclick: async ev => busy(ev.currentTarget, async () => {
                 const m = await import('../sigproof.js');
-                await m.proofFor(state.profile.id, stamp.policy_version);
+                await m.proofFor(state.profile.id, stamp.policy_version, ch.key);
               }) }, '🖨 وثيقةُ إثبات توقيعي'),
             stamp.proof_code
               ? h('span.small.muted', { dir: 'ltr', style: { alignSelf: 'center' } }, stamp.proof_code)
               : null)
         : null,
-      policyText(signed && stamp ? stamp.policy_version : POLICY_VERSION),
+      policyText(signed && stamp ? stamp.policy_version : ch.version, ch.key),
       signed ? null : h('div.stack',
-        h('label.check.top', agree, h('span', POLICY_ACK)),
+        h('label.check.top', agree, h('span', ch.doc.ack)),
         h('label.field', 'التوقيع: اكتب اسمك الكامل', name))),
     buttons: signed
       ? [{ label: 'إغلاق', value: null }]
@@ -70,8 +75,8 @@ export async function policyDialog() {
   if (!res) return false;
   try {
     // النصُّ يُرسَل كما عُرِض، فتُحسَب بصمتُه في الخادم (ملاحظة ٤٢٥)
-    await db.rpc('accept_policy', { p_version: POLICY_VERSION, p_name: res,
-      p_key: POLICY_KEY, p_text: policyPlainText(POLICY_VERSION) });
+    await db.rpc('accept_policy', { p_version: ch.version, p_name: res,
+      p_key: ch.key, p_text: policyPlainText(ch.version, ch.key) });
     state.policySigned = true;
     toast('شكرًا لك، سُجّل توقيعك.', 'ok');
     return true;
@@ -80,6 +85,7 @@ export async function policyDialog() {
 
 export async function render(ctx) {
   const me = state.profile;
+  const ch = mine();
   const agree = h('input', { type: 'checkbox' });
   const name = h('input', { autocomplete: 'off', placeholder: me?.full_name || 'اكتب اسمك الكامل' });
   const sign = h('button.btn.primary', { type: 'button' }, 'أوافق وأوقّع');
@@ -89,8 +95,8 @@ export async function render(ctx) {
     const typed = name.value.trim();
     if (typed.length < 3) return toast('اكتب اسمك الكامل توقيعًا.', 'bad');
     try {
-      await db.rpc('accept_policy', { p_version: POLICY_VERSION, p_name: typed,
-        p_key: POLICY_KEY, p_text: policyPlainText(POLICY_VERSION) });
+      await db.rpc('accept_policy', { p_version: ch.version, p_name: typed,
+        p_key: ch.key, p_text: policyPlainText(ch.version, ch.key) });
       state.policySigned = true;
       toast('شكرًا لك، سُجّل توقيعك.', 'ok');
       ctx.navigate('/app', { replace: true });
@@ -101,10 +107,10 @@ export async function render(ctx) {
     h('header.topbar', h('div.inner', brand(undefined, undefined, '/app'), h('div.spacer'), themeToggle())),
     h('main#main.auth-wrap', { tabindex: '-1' },
       h('div.card.auth-card.stack', { style: { maxWidth: '820px' } },
-        h('div', h('div.eyebrow', 'قبل البدء'), h('h2', POLICY_TITLE),
-          h('p.small.muted', `النسخة ${POLICY_VERSION} — ${fmtDate(new Date())}`)),
-        policyText(),
-        h('label.check.top', agree, h('span', POLICY_ACK)),
+        h('div', h('div.eyebrow', 'قبل البدء'), h('h2', ch.doc.title),
+          h('p.small.muted', `النسخة ${ch.version} — ${fmtDate(new Date())}`)),
+        policyText(ch.version, ch.key),
+        h('label.check.top', agree, h('span', ch.doc.ack)),
         h('label.field', 'التوقيع: اكتب اسمك الكامل', name),
         h('div.row', sign,
           h('button.btn', { type: 'button', onclick: async () => { await auth.signOut(); ctx.navigate('/login', { replace: true }); } }, 'خروج')),

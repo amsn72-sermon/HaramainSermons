@@ -150,6 +150,9 @@ main { min-width: 0; }
 .btn[disabled] { opacity: .55; cursor: not-allowed; }
 label.field { display: grid; gap: 6px; font-weight: 600; font-size: .92rem; }
 label.field > small { font-weight: 400; color: var(--muted); }
+/* مرشِّحٌ صغيرٌ في صفٍّ واحد: الفريقُ والمدينةُ في كشف التوقيع (ملاحظة ٤٨٠) */
+label.field.tight { gap: 3px; font-size: .84rem; min-width: 140px; flex: 1 1 140px; }
+label.field.tight select { padding: 6px 8px; font-size: .9rem; }
 input, select, textarea { font: inherit; color: var(--text); background: var(--field); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 12px; min-height: 46px; width: 100%; }
 textarea { min-height: 96px; resize: vertical; }
 input:focus, select:focus, textarea:focus { border-color: var(--gold); outline: 2px solid color-mix(in srgb, var(--gold) 35%, transparent); }
