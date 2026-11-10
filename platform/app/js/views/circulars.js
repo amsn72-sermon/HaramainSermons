@@ -3,7 +3,7 @@ import { h, toast, busy, dialog, confirm, emptyState, fmtDateTime, req, markBad 
 import { db, storage, auth } from '../sb.js';
 import { state, isAdmin, isManager, ROLE_LABEL, loadCircularState } from '../store.js';
 import { pdfViewer } from '../pdfview.js';
-import { signaturePad, signatureImg, signatureUpload } from '../signature.js';
+import { signaturePad, signatureImg } from '../signature.js';
 
 export const KIND_LABEL = {
   notice: 'تعميم', directive: 'توجيه', warning: 'تحذير', invitation: 'دعوة'
@@ -12,6 +12,31 @@ const KIND_CLASS = { notice: '', directive: 'gold', warning: 'bad', invitation: 
 
 const SELECT = '*,sender:profiles!circulars_sent_by_fkey(full_name),'
   + 'recipients:circular_recipients(member_id,read_at,acked_at,signed_name,member:profiles(full_name,role))';
+
+// ـــ نصُّ التعميم مسطَّحًا: منه تُحسَب بصمةُ sha256 في الخادم، فصياغتُه
+//   ثابتةٌ لا تتغيَّر بتغيُّر العرض (ملاحظة ٤٩٣)
+export function circularPlainText(c) {
+  return [String(c.title || '').trim(), '', String(c.body || '').trim(),
+    c.pdf_path ? `مرفق: ${c.pdf_path}` : ''].join('\n').trim();
+}
+
+// ووصفُ الجهاز كما يعرفه المتصفِّح: نظامٌ ونوعُ جهازٍ لا أكثر
+export function deviceLabel() {
+  try {
+    const d = navigator.userAgentData;
+    if (d && d.platform) {
+      return `${d.platform}${d.mobile ? ' — جوال' : ' — حاسب'}`;
+    }
+    const u = navigator.userAgent || '';
+    const os = /iPhone|iPad|iPod/.test(u) ? 'iOS'
+      : /Android/.test(u) ? 'Android'
+      : /Mac OS X/.test(u) ? 'macOS'
+      : /Windows/.test(u) ? 'Windows'
+      : /Linux/.test(u) ? 'Linux' : 'غير معروف';
+    const mob = /Mobi|Android|iPhone|iPad/.test(u);
+    return `${os} — ${mob ? 'جوال' : 'حاسب'}`;
+  } catch { return ''; }
+}
 
 // بطاقة الرسالة كما يراها العضو، مع التوقيع بالعلم
 function readerCard(c, mine, onDone) {
@@ -39,22 +64,32 @@ function readerCard(c, mine, onDone) {
   const ackBtn = h('button.btn.primary', { type: 'button', disabled: !seenAll }, 'اطّلعت وأوقّع بالعلم');
   if (!seenAll) seenNote.hidden = false;
 
-  // التوقيع اليدوي: المحفوظ يُدرَج بضغطة، ومن لم يرسمه يرسمه هنا مرة واحدة (ملاحظة ١١٠)
+  // ـــ التوقيعُ الإلكترونيُّ هو الأصل، ورسمُ اليد خيارٌ في التعميم
+  //   (الملاحظتان ٤٩٣ و٤٩٤)
+  //
+  //   المعتمَدُ أن يكتب العضو اسمَه الكامل، ويُحفَظ معه إثباتُه: بصمةُ
+  //   النصِّ الذي عُرِض عليه حرفًا بحرف، وعنوانُ شبكته، ووصفُ متصفِّحه
+  //   وجهازه. وبعضُ التعاميم يُطلَب فيها رسمُ اليد، فتُسأل عنه وحدَها.
+  //   ومن رسم توقيعَه قبلُ أُدرج له ولم يُطالَب برسمه من جديد. وبابُ
+  //   رفع الصورة مغلقٌ (ملاحظة ٤٩٠): رسمٌ على الشاشة لا غير.
+  const needSig = c.require_sign === true;
   const sigWrap = h('div.stack', { style: { gap: '8px' } });
   let pad = null, savedSig = null;
   const drawSigArea = async () => {
+    if (!needSig) return;
     try {
-      const rows = await db.select('profile_private', { select: 'signature_path', id: `eq.${state.profile.id}` });
+      const rows = await db.select('profile_private',
+        { select: 'signature_path', id: `eq.${state.profile.id}` });
       savedSig = rows[0]?.signature_path || null;
     } catch { savedSig = null; }
     if (savedSig) {
       let url = null;
       try { url = await storage.signedUrl('signatures', savedSig, 600); } catch { /* تُتجاوز */ }
-      const redo = h('button.btn.sm', { type: 'button' }, 'رسم توقيع جديد');
+      const redo = h('button.btn.sm', { type: 'button' }, 'ارسمْ توقيعًا جديدًا');
       redo.onclick = () => { savedSig = null; showPad(); };
       sigWrap.replaceChildren(
-        h('span.small.muted', 'يُدرَج توقيعك المحفوظ:'),
-        url ? signatureImg(url, 'توقيعك') : h('span.small.muted', 'توقيع محفوظ'),
+        h('span.small.muted', 'ويُدرَج توقيعُك المحفوظ:'),
+        url ? signatureImg(url, 'توقيعك') : h('span.small.muted', 'توقيعٌ محفوظ'),
         h('div.row', redo));
     } else showPad();
   };
@@ -62,24 +97,30 @@ function readerCard(c, mine, onDone) {
     pad = signaturePad({ height: 150 });
     const clear = h('button.btn.sm', { type: 'button', onclick: () => pad.clear() }, 'مسح');
     sigWrap.replaceChildren(
-      h('span.small.muted', 'ارسم توقيعك هنا (يُحفظ في ملفك ويُستعمل في المرات القادمة):'),
-      pad.el, h('div.row', clear),
-      signatureUpload({ memberId: state.profile.id, onSaved: path => { savedSig = path; pad = null; drawSigArea(); } }));
+      h('span.small.muted', 'وهذا التعميمُ يطلب رسمَ توقيعك بيدك — '
+        + 'ارسمْه بإصبعك أو بالفأرة (ويُحفَظ لما بعدُ):'),
+      pad.el, h('div.row', clear));
   };
   drawSigArea();
 
   ackBtn.onclick = () => busy(ackBtn, async () => {
     if (name.value.trim().length < 3) return toast('اكتب اسمك الكامل توقيعًا بالعلم.', 'bad');
     try {
-      // توقيع جديد يُرفع ويُحفظ في ملف العضو قبل التوقيع
-      if (!savedSig && pad && !pad.isEmpty()) {
+      // ويُرسَل النصُّ الذي عُرِض عليه حرفًا بحرف فتُحسَب بصمتُه في
+      //   الخادم، ومعه وصفُ جهازه — كما في ميثاق العمل (ملاحظة ٤٩٣)
+      // ومن طُلب منه الرسمُ ولم يرسمْ ولا توقيعَ محفوظٌ له: يُنبَّه
+      if (needSig && !savedSig) {
+        if (!pad || pad.isEmpty()) return toast('ارسمْ توقيعَك في اللوح أولًا.', 'bad');
         const blob = await pad.toBlob();
         const path = `${state.profile.id}/sig-${Date.now()}.png`;
         await storage.upload('signatures', path, blob);
-        await db.rpc('set_my_signature', { p_path: path });
+        await db.rpc('set_my_signature', { p_path: path, p_kind: 'drawn' });
         savedSig = path;
       }
-      await db.rpc('ack_circular', { p_circular: c.id, p_name: name.value.trim(), p_signature: savedSig });
+      await db.rpc('ack_circular', {
+        p_circular: c.id, p_name: name.value.trim(), p_signature: savedSig,
+        p_text: circularPlainText(c), p_device: deviceLabel()
+      });
       await loadCircularState(true).catch(() => {});
       toast('سُجّل توقيعك بالعلم.', 'ok');
       onDone && onDone();
@@ -97,7 +138,10 @@ function readerCard(c, mine, onDone) {
           ? h('div.stack',
               h('div.policy-state.unsigned', 'لم توقّع بالعلم على هذه الرسالة بعد'),
               h('label.field', 'التوقيع: اكتب اسمك الكامل', name),
-              sigWrap,
+              h('p.small.muted', 'التوقيعُ الإلكترونيُّ يقوم مقام التوقيع الخطّي. '
+                + 'ويُحفَظ معه بصمةُ نصِّ الرسالة كما عُرِضت عليك، ووقتُ توقيعك، '
+                + 'وعنوانُ شبكتك ووصفُ جهازك — إثباتًا للتوقيع.'),
+              needSig ? sigWrap : null,
               seenNote,
               h('div.row', ackBtn))
           : h('p.small.muted', 'هذه الرسالة للعلم فقط ولا تحتاج توقيعًا.')));
@@ -164,7 +208,10 @@ export async function render(ctx) {
         kind === 'signed'
           ? h('td', { 'data-label': 'التوقيع' },
               h('span.badge.ok', 'وقّع'), h('span.sub', `${r.signed_name || ''} — ${fmtDateTime(r.acked_at)}`),
-              r.signature_path ? sigCell(r.signature_path) : null)
+              r.signature_path ? sigCell(r.signature_path) : null,
+              // وتفصيلُ الإثبات: بصمةُ النصِّ وعنوانُ الموقِّع وجهازُه
+              //   (ملاحظة ٤٩٣)
+              proofCell(c, r))
           : h('td', { 'data-label': 'الحال' },
               r.read_at ? h('span.badge.warn', 'اطّلع ولم يوقّع') : h('span.badge.bad', 'لم يفتحها')))))));
 
@@ -199,6 +246,30 @@ export async function render(ctx) {
     } catch (err) { toast(err.message, 'bad'); }
   }
 
+  // ـــ إثباتُ التوقيع: يُفتَح بطلبٍ فلا يُثقِل الكشفَ بطلباتٍ لا تُقرأ
+  function proofCell(c, r) {
+    const box = h('div.small.muted');
+    const btn = h('button.btn.xs.ghost', { type: 'button' }, 'تفصيلُ الإثبات');
+    btn.onclick = () => busy(btn, async () => {
+      try {
+        const rows = await db.rpc('circular_proof',
+          { p_circular: c.id, p_member: r.member_id });
+        const p = (Array.isArray(rows) ? rows[0] : rows) || null;
+        if (!p) { box.replaceChildren(h('span.muted', 'لا سجلَّ إثبات.')); return; }
+        box.replaceChildren(h('div.stack', { style: { gap: '2px' } },
+          p.sign_ip ? h('span', { dir: 'ltr' }, `IP: ${p.sign_ip}`) : null,
+          p.device ? h('span', `الجهاز: ${p.device}`) : null,
+          p.sign_agent ? h('span', { dir: 'ltr', style: { wordBreak: 'break-all' } },
+            p.sign_agent) : null,
+          p.doc_hash
+            ? h('span', { dir: 'ltr', style: { wordBreak: 'break-all' } },
+                `بصمةُ النصّ: ${p.doc_hash}`)
+            : h('span.muted', 'توقيعٌ سابقٌ لاستحداث بصمة النصّ')));
+      } catch (e) { box.replaceChildren(h('span.bad', e.message)); }
+    });
+    return h('div.stack', { style: { gap: '4px' } }, h('div', btn), box);
+  }
+
   // صورة التوقيع اليدوي داخل السجل
   function sigCell(path) {
     const box = h('div.sig-cell');
@@ -220,15 +291,18 @@ export async function render(ctx) {
       body: h('textarea', { rows: 6, placeholder: 'نص الرسالة كما يقرؤه العضو' }),
       pdf: h('input', { type: 'file', accept: 'application/pdf' }),
       require_ack: h('input', { type: 'checkbox', checked: d.require_ack !== false }),
-      blocking: h('input', { type: 'checkbox', checked: !!d.blocking })
+      blocking: h('input', { type: 'checkbox', checked: !!d.blocking }),
+      // رسمُ اليد خيارٌ في التعميم بعينه (ملاحظة ٤٩٤)
+      require_sign: h('input', { type: 'checkbox', checked: !!d.require_sign })
     };
     if (d.kind) f.kind.value = d.kind;
     if (d.audience) f.audience.value = d.audience;
     f.body.value = d.body || '';
 
     f.require_ack.addEventListener('change', () => {
-      if (!f.require_ack.checked) f.blocking.checked = false;
+      if (!f.require_ack.checked) { f.blocking.checked = false; f.require_sign.checked = false; }
       f.blocking.disabled = !f.require_ack.checked;
+      f.require_sign.disabled = !f.require_ack.checked;
     });
 
     // المرفق يُقرأ إلى الذاكرة حال اختياره: بعض المتصفحات تُسقط إشارة الملف
@@ -302,7 +376,11 @@ export async function render(ctx) {
         h('label.check', f.require_ack, 'يلزم توقيع العضو بالعلم'),
         h('label.check.top', f.blocking,
           h('span', h('b', 'تعميم ملزم: '),
-            'يُطالَب به عند كل دخول، ولا يتابع العضو مهامه حتى يطّلع ويوقّع.'))),
+            'يُطالَب به عند كل دخول، ولا يتابع العضو مهامه حتى يطّلع ويوقّع.')),
+        h('label.check.top', f.require_sign,
+          h('span', h('b', 'ومعه رسمُ اليد: '),
+            'يرسم العضو توقيعَه على الشاشة زيادةً على التوقيع الإلكتروني. '
+            + 'ومن رسمه قبلُ أُدرج له ولم يُطالَب به من جديد.'))),
       buttons: [
         { label: 'إرسال', kind: 'primary', validate: () => {
           // العنوان والنص إلزاميان، والمرفق اختياري — والسبب يُعرض داخل النافذة لا خلفها (ملاحظة ١٣١)
@@ -326,7 +404,8 @@ export async function render(ctx) {
           title: f.title.value.trim(), kind: f.kind.value, audience: f.audience.value,
           body: f.body.value.trim() || null,
           file: att.blob, fileName: att.name, fileSize: att.size,
-          require_ack: f.require_ack.checked, blocking: f.blocking.checked, members: [...picked]
+          require_ack: f.require_ack.checked, blocking: f.blocking.checked,
+          require_sign: f.require_sign.checked, members: [...picked]
         }) },
         { label: 'إلغاء', value: null }
       ]
@@ -355,7 +434,8 @@ export async function render(ctx) {
       await db.rpc('send_circular', {
         p_title: res.title, p_kind: res.kind, p_body: res.body, p_pdf_path: path,
         p_audience: res.audience, p_members: res.audience === 'selected' ? res.members : null,
-        p_require_ack: res.require_ack, p_blocking: res.blocking
+        p_require_ack: res.require_ack, p_blocking: res.blocking,
+        p_require_sign: res.require_sign
       });
       toast('أُرسلت الرسالة.', 'ok');
       reload();

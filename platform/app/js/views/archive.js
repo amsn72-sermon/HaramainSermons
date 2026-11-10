@@ -153,8 +153,20 @@ export async function render(ctx) {
   // ----------------------------------------------------------------
   // المستوى الحالي والمرشّحات — محفوظة في العنوان ليُشارَك الرابط
   // ----------------------------------------------------------------
+  // والأصلُ في التصفُّح التاريخُ لا النوع (ملاحظة ٤٩٢): عامٌ فأشهرُه
+  //   فجُمَعُه فخطبُها — فذاك ترتيبُ الخطب في نفسها. والنوعُ خيارٌ
+  //   يُعاد إليه عند الحاجة، ويُحفَظ آخرُ ما اختاره صاحبُ الشاشة فيعود
+  //   إليه في مرّته التالية.
+  const BROWSE_KEY = 'hs.archive.by';
+  const savedBy = (() => {
+    try { return localStorage.getItem(BROWSE_KEY); } catch { return null; }
+  })();
+  const askedBy = ctx.query.get('by');
   let level = { type: ctx.query.get('type') || '', sub: ctx.query.get('sub') || '',
-    by: ctx.query.get('by') === 'date' ? 'date' : 'type',
+    by: askedBy === 'type' ? 'type'
+      : askedBy === 'date' ? 'date'
+      : (ctx.query.get('type') || ctx.query.get('sub')) ? 'type'
+      : savedBy === 'type' ? 'type' : 'date',
     y: ctx.query.get('y') || '', mo: ctx.query.get('mo') || '', d: ctx.query.get('d') || '' };
   const q = h('input', { type: 'search', placeholder: 'العنوان أو الخطيب أو اللغة أو رقم التوثيق',
     'aria-label': 'البحث في الأرشيف' });
@@ -550,18 +562,39 @@ export async function render(ctx) {
 
   // نصوصُ الترجمة تُجلَب عند الحاجة وتُحفَظ، فلا تُطلَب مرّتين (ملاحظة ٤٧٩)
   const textCache = new Map();
+  let textFailed = false;
   async function loadTexts(list) {
+    textFailed = false;
     const need = [...new Set(list.map(t => t.id).filter(id => !textCache.has(id)
       && !String(id).startsWith('src-')))];
     for (let i = 0; i < need.length; i += 60) {
       const part = need.slice(i, i + 60);
       const got = await db.select('tracks',
-        { select: 'id,translation_html', id: `in.(${part.join(',')})` }).catch(() => []);
+        { select: 'id,translation_html', id: `in.(${part.join(',')})` })
+        .catch(() => { textFailed = true; return []; });
       for (const r of got) textCache.set(r.id, r.translation_html || '');
     }
     for (const t of list) if (textCache.has(t.id)) t.translation_html = textCache.get(t.id);
     return list;
   }
+
+  // ـــ ولا يُصدَّر عملٌ قبل أن يُجلَب نصُّه (ملاحظة ٤٨٨)
+  //
+  //   نصُّ الترجمة نُزع من استعلام القائمة تخفيفًا لها (ملاحظة ٤٧٣)،
+  //   وصار يُجلَب عند الحاجة. فمن صدَّر من السطر مباشرةً — وورد أو
+  //   طباعة أو PDF — خرجت وثيقتُه برأسٍ تامٍّ وجسمٍ فارغ. فكلُّ تصديرٍ
+  //   يمرُّ من هنا أوّلًا.
+  const withText = async (t, fn) => {
+    await loadTexts([t]);
+    if (!t.translation_html) {
+      // وعطلُ الجلب غيرُ خلوِّ النصّ، فلا يُقال للمستخدم خبرٌ عن المحتوى
+      //   وإنما خبرٌ عن العطل
+      toast(textFailed ? 'تعذَّر جلبُ نصِّ الترجمة — أعِدِ المحاولة.'
+        : 'لا نصَّ محفوظًا لهذه الترجمة.', 'bad');
+      return false;
+    }
+    return fn();
+  };
 
   // التصديرُ المقابِل لعملٍ واحد: كلُّ لغاته التي تُرجمت (ملاحظة ٢٥٢)
   async function alignedOf(t) {
@@ -599,10 +632,14 @@ export async function render(ctx) {
           target: '_blank', rel: 'noopener', title: 'بثُّ الترجمة على يوتيوب' }, '▶ بثّ') : null,
         late && h('span.badge.bad', 'تأخير')),
       h('span.arch-actions',
-        iconBtn('word', 'تصدير Word على الكليشة', e => busy(e.currentTarget, () => downloadDocx(args).catch(err => toast(err.message, 'bad')))),
-        iconBtn('print', 'طباعة', () => printTranslation(args) || toast('اسمح بالنوافذ المنبثقة.', 'bad')),
-        iconBtn('view', 'استعراض PDF', () => printTranslation(args, { autoPrint: false }) || toast('اسمح بالنوافذ المنبثقة.', 'bad')),
-        iconBtn('pdf', 'تنزيل PDF (اختر «حفظ كـ PDF»)', () => printTranslation(args) || toast('اسمح بالنوافذ المنبثقة.', 'bad')),
+        iconBtn('word', 'تصدير Word على الكليشة', e => busy(e.currentTarget,
+          () => withText(t, () => downloadDocx(args).catch(err => toast(err.message, 'bad'))))),
+        iconBtn('print', 'طباعة', e => busy(e.currentTarget, () => withText(t,
+          () => printTranslation(args) || toast('اسمح بالنوافذ المنبثقة.', 'bad')))),
+        iconBtn('view', 'استعراض PDF', e => busy(e.currentTarget, () => withText(t,
+          () => printTranslation(args, { autoPrint: false }) || toast('اسمح بالنوافذ المنبثقة.', 'bad')))),
+        iconBtn('pdf', 'تنزيل PDF (اختر «حفظ كـ PDF»)', e => busy(e.currentTarget, () => withText(t,
+          () => printTranslation(args) || toast('اسمح بالنوافذ المنبثقة.', 'bad')))),
         // الأصلُ وترجمتُه تحتَه، فقرةً بفقرة أو جملةً بجملة (ملاحظة ٢٥٢)
         iconBtn('pair', 'تصديرٌ مقابِل: الأصل وترجمته', e => busy(e.currentTarget, () => alignedOf(t))),
         t.audio_path ? iconBtn('play', 'تشغيل التسجيل', e => play(e.currentTarget, t)) : h('span.icon-btn.off', { title: 'لا تسجيل' }, icon('audio')),
@@ -668,6 +705,7 @@ export async function render(ctx) {
     push();
   };
   function push() {
+    try { localStorage.setItem(BROWSE_KEY, level.by); } catch { /* يُتجاوز */ }
     const qs = new URLSearchParams();
     if (level.by === 'date') {
       qs.set('by', 'date');
@@ -675,6 +713,7 @@ export async function render(ctx) {
       if (level.mo) qs.set('mo', level.mo);
       if (level.d) qs.set('d', level.d);
     }
+    else qs.set('by', 'type');
     if (level.type) qs.set('type', level.type);
     if (level.sub) qs.set('sub', level.sub);
     history.replaceState(null, '', '/app/archive' + (qs.toString() ? `?${qs}` : ''));
@@ -686,7 +725,7 @@ export async function render(ctx) {
   const byTypeBtn = h('button.btn.sm', { type: 'button', onclick: () => go('', '') }, 'بالنوع');
   const byDateBtn = h('button.btn.sm', { type: 'button', onclick: () => goDate('', '', '') }, 'بالتاريخ');
   const browseBtns = h('div.row', { style: { gap: '4px' }, role: 'group',
-    'aria-label': 'طريقةُ التصفُّح' }, byTypeBtn, byDateBtn);
+    'aria-label': 'طريقةُ التصفُّح' }, byDateBtn, byTypeBtn);
   const syncBrowse = () => {
     byTypeBtn.classList.toggle('primary', level.by !== 'date');
     byDateBtn.classList.toggle('primary', level.by === 'date');
@@ -808,7 +847,10 @@ export async function render(ctx) {
 
     box.replaceChildren(h('div.stack', crumbs(), exportRow(list), view));
 
-    if (isManager() && trashed.length && !level.type) {
+    // بابُ المحذوفة في أعلى الشجرة لا في كلِّ درجةٍ منها، وفي وضع
+    //   التاريخ يُقاس بالسنة لا بالنوع (ملاحظة ٤٩٢)
+    const atRoot = level.by === 'date' ? !level.y : !level.type;
+    if (isManager() && trashed.length && atRoot) {
       const trashBtn = h('button.btn.sm', { type: 'button',
         onclick: () => { showTrash = !showTrash; draw(); } },
         showTrash ? `إخفاء المحذوفة (${trashed.length})` : `عرض المحذوفة (${trashed.length})`);

@@ -35,10 +35,17 @@ export async function render(ctx) {
     v = Array.isArray(v) ? v[0] : v;
 
     if (!v || !v.found) {
-      fill(out, h('div.card.stack.verify-bad',
-        h('h3.bad', 'لا وثيقةَ بهذا الرمز'),
-        h('p.small.muted', 'تأكّدْ من الرمز كما هو مطبوعٌ على الوثيقة، '
-          + 'أو امسحِ الباركودَ منها مباشرةً.')));
+      // محاولاتٌ خائبةٌ كثيرةٌ من عنوانٍ واحد: يُمسَك البابُ ساعةً
+      //   فلا يُجرَّب الرمزُ تخمينًا (ملاحظة ٤٨٩)
+      fill(out, v && v.throttled
+        ? h('div.card.stack.verify-bad',
+            h('h3.bad', 'كثُرت المحاولاتُ الخائبة'),
+            h('p.small.muted', 'أُمسك البابُ عن هذا الجهاز مدّةً. '
+              + 'امسحِ الباركودَ من الوثيقة مباشرةً بدل كتابة الرمز.'))
+        : h('div.card.stack.verify-bad',
+            h('h3.bad', 'لا وثيقةَ بهذا الرمز'),
+            h('p.small.muted', 'تأكّدْ من الرمز كما هو مطبوعٌ على الوثيقة، '
+              + 'أو امسحِ الباركودَ منها مباشرةً.')));
       return;
     }
 
@@ -54,6 +61,9 @@ export async function render(ctx) {
       h('dl.verify-grid',
         row('اسمُ العضو', v.name),
         v.member_no != null ? row('رقمُ العضوية', String(v.member_no)) : null,
+        // رقمُ الهوية: الورقةُ التي فيها الباركودُ تحمله أصلًا، فتُقابَل
+        //   بها المنصةُ مقابلةً تامّة (ملاحظة ٤٨٩)
+        v.national_id ? row('رقمُ الهوية أو الإقامة', v.national_id, true) : null,
         row('الاسمُ الذي وقَّع به', v.signed_name),
         row('وقتُ التوقيع', fmtDateTime(v.accepted_at)),
         row('تاريخُه الهجري', fmtHijri(String(v.accepted_at).slice(0, 10))),

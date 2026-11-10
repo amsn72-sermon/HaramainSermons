@@ -3,6 +3,10 @@ import { qrDataUri } from './qr.js';
 // يشترك فيه المصمِّم على الشاشة وصفحة الطباعة، فما تراه هو ما يُطبع.
 
 export const CARD = { w: 85.6, h: 54 };        // مقاس ISO/IEC 7810 ID-1
+// والعمودي هو هو مقلوبًا، فالبطاقةُ واحدةٌ والاتجاهُ اختيار (ملاحظة ٤٨٧)
+export const CARD_PORT = { w: 54, h: 85.6 };
+export const isPort = l => (l && l.orient === 'port');
+export const cardSize = l => (isPort(l) ? CARD_PORT : CARD);
 export const MM_PT = 25.4 / 72;                 // مليمترات النقطة الواحدة
 export const HARAMAIN_LOGO = '/assets/alharamain-logo.png';
 
@@ -17,10 +21,54 @@ export const ITEM_LABEL = {
   member_no: 'رقم العضوية',
   official: 'المسؤول والتوقيع',
   valid: 'الصلاحية',
-  qr: 'باركود التحقق'
+  qr: 'باركود التحقق',
+  // الوقتُ والتاريخُ يجريان في العرض على الشاشة، فصورةُ الشاشة تنكشف
+  //   بوقتها الواقف (ملاحظة ٤٨٧)
+  clock: 'الساعة الجارية',
+  gdate: 'التاريخ الميلادي',
+  hdate: 'التاريخ الهجري'
 };
-export const ITEM_ORDER = ['logo', 'title', 'subtitle', 'photo', 'name', 'role', 'langs', 'member_no', 'official', 'valid', 'qr'];
+export const ITEM_ORDER = ['logo', 'title', 'subtitle', 'photo', 'name', 'role', 'langs',
+  'member_no', 'official', 'valid', 'qr', 'clock', 'gdate', 'hdate'];
+// العناصرُ التي تُحسَب وقتَ العرض لا تُكتَب نصًّا محفوظًا
+export const LIVE_ITEMS = ['clock', 'gdate', 'hdate'];
 export const TEXT_ITEMS = ITEM_ORDER.filter(k => k !== 'logo' && k !== 'photo' && k !== 'qr');
+
+// ـــ الوقتُ والتاريخ: بتوقيت الرياض، ميلاديٌّ وهجريٌّ ويومُ الأسبوع
+const TZ = 'Asia/Riyadh';
+const fmtClock = new Intl.DateTimeFormat('ar-SA-u-nu-latn', {
+  timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+const fmtG = new Intl.DateTimeFormat('ar-SA-u-ca-gregory-nu-latn', {
+  timeZone: TZ, weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit' });
+const fmtH = new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura-nu-latn', {
+  timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+
+export const liveText = (key, now = new Date()) => {
+  if (key === 'clock') return fmtClock.format(now);
+  if (key === 'gdate') return `${fmtG.format(now)} م`;
+  if (key === 'hdate') return `${fmtH.format(now)} هـ`;
+  return '';
+};
+
+// وتُحدَّث العناصرُ الحيّةُ في الشاشة كلَّ ثانية، وتتوقف من نفسها إذا
+//   خرجت بطاقتُها من الصفحة — فلا مؤقِّتٌ معلَّقٌ بلا صاحب
+export function startCardClocks(root) {
+  if (!root) return () => {};
+  let seen = false;
+  const tick = () => {
+    // البطاقةُ تُبنى ثم تُلحَق بالصفحة، فلا يُحكَم عليها بالانفصال قبل
+    //   أن تتّصل مرّةً — وإلّا وقف الوقتُ من أوّل نبضة
+    if (root.isConnected) seen = true;
+    else if (seen) { clearInterval(id); return; }
+    const now = new Date();
+    root.querySelectorAll('[data-live]').forEach(el => {
+      el.textContent = liveText(el.getAttribute('data-live'), now);
+    });
+  };
+  const id = setInterval(tick, 1000);
+  tick();
+  return () => clearInterval(id);
+}
 
 // صفحةُ التحقق من البطاقة: تُثبتها ولا تُفشي صاحبَها (ملاحظة ٣١٣)
 export const cardVerifyUrl = (no, key) =>
@@ -39,14 +87,23 @@ export const CARD_FONTS = [
 export const FONT_KEYS = CARD_FONTS.map(f => f[0]);
 export const fontStack = key => (CARD_FONTS.find(f => f[0] === key) || CARD_FONTS[0])[2];
 
+// ألوانُ الهيئة في البطاقة المعتمدة — مأخوذةٌ من التصميم نفسِه
+export const HA = {
+  navy: '#192834', navy2: '#1A2935', gold: '#E2CEA1', gold2: '#C9A86A',
+  ivory: '#F2EFEC', ivory2: '#E8E4DE', ink: '#13202A'
+};
+
 export const COLORS = [
   ['#ffffff', 'أبيض'], ['#1c1a17', 'أسود'], ['#1a232d', 'كحلي'],
   ['#8a6f3c', 'ذهبي داكن'], ['#bc9661', 'ذهبي'], ['#d5bd87', 'ذهبي فاتح'],
-  ['#55503f', 'رمادي داكن'], ['#6b6257', 'رمادي'], ['#2f6b52', 'أخضر']
+  ['#55503f', 'رمادي داكن'], ['#6b6257', 'رمادي'], ['#2f6b52', 'أخضر'],
+  ['#192834', 'كحلي الهيئة'], ['#E2CEA1', 'ذهبي الهيئة'], ['#F2EFEC', 'عاجي الهيئة']
 ];
 
-// ثلاثة قوالب جاهزة: يختار المدير أقربها إلى ما يريد ثم يعدّل عليه
+// قوالب جاهزة: يختار المدير أقربها إلى ما يريد ثم يعدّل عليه
 export const PRESETS = [
+  ['haramain_h', 'المعتمَد — أفقيّ'],
+  ['haramain_v', 'المعتمَد — عموديّ'],
   ['classic',  'رسمي داكن — شريط علوي'],
   ['haramain', 'الحرمين — رأسٌ داكن وحقلٌ مؤطَّر'],
   ['sidebar',  'شريط جانبي — الصورة والشعار معًا'],
@@ -54,6 +111,73 @@ export const PRESETS = [
 ];
 
 export const PRESET_LAYOUT = {
+  // ـــ المعتمَدُ أفقيًّا (ملاحظة ٤٨٧): رأسٌ كحليٌّ بالشعار، ثم حقلٌ
+  //    عاجيٌّ فيه الصورةُ والاسمُ والصفةُ ورقمُ العضوية، والباركودُ في
+  //    إطاره المضيء إلى اليسار، وشريطُ الوقت والتاريخ أسفله
+  haramain_h: () => ({
+    v: 1, orient: 'land', font: 'haramain', custom: [],
+    card: { bg: HA.ivory, border: HA.gold, glow: true },
+    band: { show: true, side: 'top', h: 15.5, bg: HA.navy, line: HA.gold, lineH: 0.9 },
+    rules: {
+      top:    { show: false, x: 4, y: 16.6, w: 77.6, h: 0.3, color: HA.gold },
+      bottom: { show: true,  x: 4, y: 44.6, w: 77.6, h: 0.35, color: HA.gold }
+    },
+    shapes: [
+      { id: 'sband', kind: 'rect', x: 4, y: 45.4, w: 77.6, h: 6.4,
+        color: HA.navy, stroke: 0.3, fill: true, radius: 3.2, fade: 1, show: true }
+    ],
+    items: {
+      logo:      { x: 62,   y: 2.6,  w: 19,   show: true },
+      title:     { x: 5,    y: 3.2,  w: 54,   size: 8.4, bold: true,  align: 'right', color: '#ffffff', show: true },
+      subtitle:  { x: 5,    y: 8.6,  w: 54,   size: 5.4, bold: false, align: 'right', color: HA.gold, show: true },
+      photo:     { x: 5.6,  y: 18.6, w: 17,   show: true },
+      name:      { x: 24,   y: 19.6, w: 37,   size: 7.6, bold: true,  align: 'center', color: HA.ink, show: true },
+      role:      { x: 24,   y: 26.4, w: 37,   size: 6,   bold: false, align: 'center', color: '#55503f', show: true },
+      member_no: { x: 26,   y: 32.6, w: 33,   size: 6.2, bold: true,  align: 'center', color: HA.ink,
+                   box: true, boxColor: HA.gold, boxW: 0.3, show: true },
+      langs:     { x: 24.5, y: 38.4, w: 36,   size: 5.6, bold: false, align: 'center', color: '#6b6257', show: false },
+      official:  { x: 24.5, y: 41,   w: 36,   size: 5.6, bold: false, align: 'center', color: '#6b6257', show: false },
+      valid:     { x: 62,   y: 41.4, w: 19,   size: 5.4, bold: false, align: 'center', color: '#6b6257', show: true },
+      qr:        { x: 63.5, y: 19.6, w: 16,   frame: true, show: true },
+      clock:     { x: 46,   y: 46.6, w: 33,   size: 6.4, bold: true,  align: 'center', color: HA.gold, show: true },
+      gdate:     { x: 7,    y: 46.4, w: 37,   size: 5, bold: false, align: 'center', color: HA.gold, show: true },
+      hdate:     { x: 7,    y: 49.2, w: 37,   size: 5, bold: false, align: 'center', color: HA.gold, show: true }
+    }
+  }),
+
+  // ـــ والمعتمَدُ عموديًّا: الترويسةُ أعلى، والصورةُ في الوسط، والاسمُ
+  //    والصفةُ تحتها، والباركودُ أسفلها، وشريطُ الوقت في الذيل
+  haramain_v: () => ({
+    v: 1, orient: 'port', font: 'haramain', custom: [],
+    card: { bg: HA.ivory, border: HA.gold, glow: true },
+    band: { show: true, side: 'top', h: 23, bg: HA.navy, line: HA.gold, lineH: 0.9 },
+    rules: {
+      top:    { show: false, x: 4, y: 24, w: 46, h: 0.3, color: HA.gold },
+      bottom: { show: true,  x: 5, y: 60.2, w: 44, h: 0.3, color: HA.gold }
+    },
+    shapes: [
+      { id: 'sband', kind: 'rect', x: 5, y: 77.4, w: 44, h: 7,
+        color: HA.navy, stroke: 0.3, fill: true, radius: 3.2, fade: 1, show: true }
+    ],
+    items: {
+      logo:      { x: 15,   y: 3.4,  w: 24,   show: true },
+      title:     { x: 4,    y: 5.6,  w: 46,   size: 8,   bold: true,  align: 'center', color: '#ffffff', show: false },
+      subtitle:  { x: 4,    y: 14.4, w: 46,   size: 4.6, bold: false, align: 'center', color: HA.gold, show: false },
+      photo:     { x: 18.5, y: 25.6, w: 17,   show: true },
+      name:      { x: 4,    y: 52.4, w: 46,   size: 7,   bold: true,  align: 'center', color: HA.ink, show: true },
+      role:      { x: 4,    y: 57.4, w: 46,   size: 5.4, bold: false, align: 'center', color: '#55503f', show: true },
+      member_no: { x: 13,   y: 64,   w: 28,   size: 5.6, bold: true,  align: 'center', color: HA.ink,
+                   box: true, boxColor: HA.gold, boxW: 0.3, show: false },
+      langs:     { x: 4,    y: 76,   w: 46,   size: 4.6, bold: false, align: 'center', color: '#6b6257', show: false },
+      official:  { x: 4,    y: 76,   w: 46,   size: 4.6, bold: false, align: 'center', color: '#6b6257', show: false },
+      valid:     { x: 4,    y: 75.6, w: 46,   size: 4.4, bold: false, align: 'center', color: '#6b6257', show: false },
+      qr:        { x: 20.5, y: 62.4, w: 13,   frame: true, show: true },
+      clock:     { x: 7,    y: 77.9, w: 40,   size: 5.4, bold: true,  align: 'center', color: HA.gold, show: true },
+      gdate:     { x: 7,    y: 80.5, w: 40,   size: 4.2, bold: false, align: 'center', color: HA.gold, show: true },
+      hdate:     { x: 7,    y: 82.3, w: 40,   size: 4.2, bold: false, align: 'center', color: HA.gold, show: true }
+    }
+  }),
+
   // ٠) «الحرمين»: رأسٌ داكن تحته خطٌّ ذهبي، والاسمُ في حقلٍ مؤطَّر،
   //    والصورةُ إلى يسار البيانات، وسطرٌ أسفل للصلاحية والتوقيع
   haramain: () => ({
@@ -153,7 +277,7 @@ export const PRESET_LAYOUT = {
 
 // القالبُ الافتراضيّ، ومعه الخلفيةُ والأشكالُ والعلامةُ المائية فارغةً —
 //   فلا يُطلَب منها مفتاحٌ غيرُ موجود (ملاحظة ٣٩٥)
-export const DEFAULT_LAYOUT = () => withExtras(PRESET_LAYOUT.classic());
+export const DEFAULT_LAYOUT = () => withExtras(PRESET_LAYOUT.haramain_h());
 export const withExtras = l => Object.assign(l, {
   bg: l.bg || BG_DEFAULT(), wm: l.wm || WM_DEFAULT(),
   shapes: Array.isArray(l.shapes) ? l.shapes : []
@@ -260,6 +384,10 @@ export function normalizeLayout(saved) {
   if (!saved || typeof saved !== 'object') return base;
   const out = {
     v: 1,
+    // الاتجاهُ محفوظ، ومعه تخطيطُ الاتجاه الآخر كما تركه صاحبُه: فمن
+    //   بدَّل الاتجاهَ ثم عاد وجد عملَه كما هو لا منقلبًا (ملاحظة ٤٨٧)
+    orient: saved.orient === 'port' ? 'port' : 'land',
+    other: (saved.other && typeof saved.other === 'object') ? saved.other : null,
     font: FONT_KEYS.includes(saved.font) ? saved.font : 'haramain',
     card: { ...base.card, ...(saved.card || {}) },
     band: { ...base.band, ...(saved.band || {}) },
@@ -274,7 +402,17 @@ export function normalizeLayout(saved) {
     shapes: Array.isArray(saved.shapes) ? saved.shapes.filter(s => s && s.id).map(normShape).slice(0, 16) : [],
     items: {}
   };
-  for (const key of ITEM_ORDER) out.items[key] = { ...base.items[key], ...((saved.items || {})[key] || {}) };
+  // تصميمٌ محفوظٌ قبل ملاحظة ٤٨٧ لا يعرف الاتجاهَ ولا العناصرَ الحيّة.
+  //   فما لم يكن في المحفوظ يُؤخَذ من القالب مطفأً، لئلّا تظهر في
+  //   بطاقاتٍ معتمَدةٍ عناصرُ لم يضعها أحد — وربما فوق عناصرَ أخرى
+  const legacy = !saved.orient;
+  for (const key of ITEM_ORDER) {
+    const had = (saved.items || {})[key];
+    out.items[key] = { ...base.items[key], ...(had || {}) };
+    if (legacy && !had && LIVE_ITEMS.includes(key)) out.items[key].show = false;
+    if (legacy && !had && key === 'qr') out.items[key].frame = false;
+  }
+  if (legacy && !(saved.card || {}).glow) out.card.glow = false;
   return clampLayout(out);
 }
 
@@ -284,49 +422,51 @@ const num = (v, min, max, dflt) => {
 };
 
 export function clampLayout(l) {
-  const d = DEFAULT_LAYOUT();
+  const d = (l && l.orient === 'port')
+    ? withExtras(PRESET_LAYOUT.haramain_v()) : DEFAULT_LAYOUT();
+  const C = cardSize(l);
   if (!l.bg) l.bg = BG_DEFAULT();
   if (!l.wm) l.wm = WM_DEFAULT();
   if (!Array.isArray(l.shapes)) l.shapes = [];
   l.bg.fade = num(l.bg.fade, 0, 0.95, 0);
   if (l.bg.fit !== 'contain') l.bg.fit = 'cover';
-  l.wm.x = num(l.wm.x, -2, CARD.w - 2, 22);
-  l.wm.y = num(l.wm.y, -2, CARD.h - 2, 16);
-  l.wm.w = num(l.wm.w, 6, CARD.w, 42);
+  l.wm.x = num(l.wm.x, -2, C.w - 2, 22);
+  l.wm.y = num(l.wm.y, -2, C.h - 2, 16);
+  l.wm.w = num(l.wm.w, 6, C.w, 42);
   l.wm.size = num(l.wm.size, 4, 40, 16);
   l.wm.fade = num(l.wm.fade, 0.02, 1, 0.14);
   l.wm.rot = num(l.wm.rot, -90, 90, -20);
   for (const s of l.shapes) {
-    s.w = num(s.w, 0.3, CARD.w, 20);
-    s.h = num(s.h, 0.2, CARD.h, 10);
-    s.x = num(s.x, -2, CARD.w - 2, 6);
-    s.y = num(s.y, -2, CARD.h - 2, 14);
+    s.w = num(s.w, 0.3, C.w, 20);
+    s.h = num(s.h, 0.2, C.h, 10);
+    s.x = num(s.x, -2, C.w - 2, 6);
+    s.y = num(s.y, -2, C.h - 2, 14);
     s.stroke = num(s.stroke, 0.1, 4, 0.5);
     s.radius = num(s.radius, 0, 12, 1.2);
     s.fade = num(s.fade, 0.05, 1, 1);
   }
   for (const c of (l.custom || [])) {
-    c.w = num(c.w, 3, CARD.w, 20);
-    c.x = num(c.x, -2, CARD.w - 2, 8);
-    c.y = num(c.y, -2, CARD.h - 2, 20);
+    c.w = num(c.w, 3, C.w, 20);
+    c.x = num(c.x, -2, C.w - 2, 8);
+    c.y = num(c.y, -2, C.h - 2, 20);
     c.size = num(c.size, 4, 24, 8);
   }
-  l.band.h = num(l.band.h, 0, CARD.w, d.band.h);
+  l.band.h = num(l.band.h, 0, l.band.side === 'right' ? C.w : C.h, d.band.h);
   l.band.lineH = num(l.band.lineH, 0, 3, d.band.lineH);
   if (l.band.side !== 'right') l.band.side = 'top';
   for (const k of ['top', 'bottom']) {
     const r = l.rules[k], rd = d.rules[k];
-    r.x = num(r.x, 0, CARD.w, rd.x);
-    r.y = num(r.y, 0, CARD.h, rd.y);
-    r.w = num(r.w, 2, CARD.w, rd.w);
+    r.x = num(r.x, 0, C.w, rd.x);
+    r.y = num(r.y, 0, C.h, rd.y);
+    r.w = num(r.w, 2, C.w, rd.w);
     r.h = num(r.h, 0.1, 3, rd.h);
     r.show = r.show !== false;
   }
   for (const key of ITEM_ORDER) {
     const it = l.items[key], def = d.items[key];
-    it.w = num(it.w, 4, CARD.w, def.w);
-    it.x = num(it.x, -2, CARD.w - 2, def.x);
-    it.y = num(it.y, -2, CARD.h - 2, def.y);
+    it.w = num(it.w, 4, C.w, def.w);
+    it.x = num(it.x, -2, C.w - 2, def.x);
+    it.y = num(it.y, -2, C.h - 2, def.y);
     if ('size' in def) it.size = num(it.size, 4, 24, def.size);
     it.show = it.show !== false;
     if (key === 'logo') it.badge = it.badge === true;
@@ -387,10 +527,11 @@ export function itemStyle(it, key) {
 }
 
 // أنماط الشريط: علوي أو جانبي على يمين البطاقة
-export function bandStyle(band) {
+export function bandStyle(band, layout) {
   if (!band.show) return null;
+  const C = cardSize(layout);
   return band.side === 'right'
-    ? { position: 'absolute', top: '0', left: `${CARD.w - band.h}mm`, width: `${band.h}mm`, height: '100%',
+    ? { position: 'absolute', top: '0', left: `${C.w - band.h}mm`, width: `${band.h}mm`, height: '100%',
         background: band.bg, borderInlineStart: 'none',
         borderLeft: `${band.lineH}mm solid ${band.line}` }
     : { position: 'absolute', left: '0', top: '0', width: '100%', height: `${band.h}mm`,
@@ -428,7 +569,8 @@ export function staticCard(h, { layout, member, cfg, roleLabel, langsText, logoS
   const bgSrc = (customUrls || {}).__bg;
   const bgs = scaleStyle(bgStyle(layout.bg), scale);
   if (bgs && bgSrc) kids.push(h('img', { src: bgSrc, alt: '', style: bgs }));
-  const bs = scaleStyle(bandStyle(layout.band), scale);
+  const C = cardSize(layout);
+  const bs = scaleStyle(bandStyle(layout.band, layout), scale);
   if (bs) kids.push(h('div', { style: bs }));
   for (const k of ['top', 'bottom']) {
     const rs = scaleStyle(ruleStyle(layout.rules[k]), scale);
@@ -464,9 +606,17 @@ export function staticCard(h, { layout, member, cfg, roleLabel, langsText, logoS
       // باركودُ التحقق: يُثبت البطاقةَ ولا يُفشي صاحبَها (ملاحظة ٣١٣)
       const src = qrDataUri(cardVerifyUrl(member.member_no, member.card_key),
         { margin: 0, dark: it.color || '#1c1a17' });
-      kids.push(h('div.cd-item', { style: { ...style, height: px(it.w) } },
-        h('img', { src, alt: 'رمز التحقق',
-          style: { width: '100%', height: '100%', display: 'block' } })));
+      const img = h('img', { src, alt: 'رمز التحقق',
+        style: { width: '100%', height: '100%', display: 'block' } });
+      // وإطارُه المضيءُ يدور في العرض على الشاشة لا في المطبوع، فصورةُ
+      //   الشاشة تنكشف بسكونه كما تنكشف بوقتها الواقف (ملاحظة ٤٨٧)
+      kids.push(it.frame
+        ? h('div.cd-item.cd-qr.framed', { style: { ...style, height: px(it.w) },
+            'data-frame': '1' }, img, h('i.cd-qr-corners', { 'aria-hidden': 'true' }))
+        : h('div.cd-item.cd-qr', { style: { ...style, height: px(it.w) } }, img));
+    } else if (LIVE_ITEMS.includes(key)) {
+      // الوقتُ والتاريخُ: يُكتبان الآن ثم يجريان بأنفسهما كلَّ ثانية
+      kids.push(h('div.cd-item.cd-live', { style, 'data-live': key }, liveText(key)));
     } else {
       const text = itemText(key, { member, cfg, roleLabel, langsText });
       if (text) kids.push(h('div.cd-item', { style }, text));
@@ -487,7 +637,11 @@ export function staticCard(h, { layout, member, cfg, roleLabel, langsText, logoS
     }
   }
 
-  return h('div.card-stage.view', { style: {
-    width: px(CARD.w), height: px(CARD.h), background: layout.card.bg, borderColor: layout.card.border,
+  const root = h('div.card-stage.view' + (layout.card.glow ? '.glow' : ''), { style: {
+    width: px(C.w), height: px(C.h), background: layout.card.bg,
+    borderColor: layout.card.border,
     fontFamily: fontStack(layout.font) } }, kids);
+  // والخاصّيّةُ المخصَّصةُ لا تُضبَط بالإسناد، فتُوضَع بنفسها
+  root.style?.setProperty?.('--cd-glow', layout.card.border || HA.gold);
+  return root;
 }

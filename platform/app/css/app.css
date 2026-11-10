@@ -627,6 +627,60 @@ dialog:has(.circular-doc) .dlg-body { max-height: 82vh; }
 .swatch { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; }
 .swatch.on { outline: 2px solid var(--gold); outline-offset: 2px; }
 .card-stage.view { cursor: default; }
+
+/* ـــ البطاقةُ الحيّة: ضوءٌ يدور على حافتها وحول باركودها، ووقتٌ يجري
+   بالثواني (ملاحظة ٤٨٧). فصورةُ الشاشة تنكشف بسكونها ووقتِها الواقف،
+   ولا شيءَ من هذا في المطبوع. ومن أوقف الحركةَ في جهازه رأى إطارًا
+   ثابتًا ووقتًا جاريًا، فالدليلُ في الوقت لا في الدوران وحدَه. */
+.card-stage.glow::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  padding: 2px; pointer-events: none; z-index: 5;
+  background: conic-gradient(from var(--cd-a, 0deg),
+    transparent 0deg, transparent 240deg,
+    color-mix(in srgb, var(--cd-glow, #E2CEA1) 85%, #fff) 300deg,
+    transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0); mask-composite: exclude;
+  animation: cd-turn 4.5s linear infinite;
+}
+@property --cd-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes cd-turn { to { --cd-a: 360deg; } }
+
+.cd-qr.framed { overflow: visible; }
+.cd-qr-corners {
+  position: absolute; inset: -9%; border-radius: 12%; pointer-events: none;
+  border: 0.14em solid transparent;
+  background:
+    linear-gradient(var(--cd-glow, #E2CEA1) 0 0) top left / 34% 0.16em no-repeat,
+    linear-gradient(var(--cd-glow, #E2CEA1) 0 0) top left / 0.16em 34% no-repeat,
+    linear-gradient(var(--cd-glow, #E2CEA1) 0 0) top right / 34% 0.16em no-repeat,
+    linear-gradient(var(--cd-glow, #E2CEA1) 0 0) top right / 0.16em 34% no-repeat,
+    linear-gradient(var(--cd-glow, #E2CEA1) 0 0) bottom left / 34% 0.16em no-repeat,
+    linear-gradient(var(--cd-glow, #E2CEA1) 0 0) bottom left / 0.16em 34% no-repeat,
+    linear-gradient(var(--cd-glow, #E2CEA1) 0 0) bottom right / 34% 0.16em no-repeat,
+    linear-gradient(var(--cd-glow, #E2CEA1) 0 0) bottom right / 0.16em 34% no-repeat;
+  animation: cd-pulse 2.2s ease-in-out infinite;
+}
+@keyframes cd-pulse {
+  0%, 100% { opacity: .55; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.035); }
+}
+.cd-live { font-variant-numeric: tabular-nums; letter-spacing: .2px; }
+
+/* صورةُ التوقيع في كشف التواقيع: على بياضٍ ليُرى الحبرُ كما يُطبَع
+   (ملاحظة ٤٩٠) */
+.id-shot.sig-shot { background: #fff; display: flex; align-items: center;
+  justify-content: center; padding: 6px; }
+.id-shot.sig-shot .sig-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+@media (prefers-reduced-motion: reduce) {
+  .card-stage.glow::after, .cd-qr-corners { animation: none; opacity: .9; }
+}
+@media print {
+  .card-stage.glow::after { display: none; }
+  .cd-qr-corners { animation: none; opacity: 1; }
+}
 .card-show { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 /* نافذة إبراز البطاقة أوسع من النوافذ المعتادة */
 dialog:has(.card-show) { width: min(760px, calc(100vw - 24px)); }

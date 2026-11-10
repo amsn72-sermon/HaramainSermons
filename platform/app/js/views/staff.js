@@ -3,7 +3,7 @@
 // والمرشدون المكانيون (ملاحظتا ٩٩ و١٠١)
 import { fill, h, toast, busy, dialog, fmtDate, fmtDateTime, confirm } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, isManager } from '../store.js';
+import { state, isManager, roleName } from '../store.js';
 import { render as teamRender } from './team.js';
 import { adminList as bankAdmin } from './bank.js';
 
@@ -57,6 +57,8 @@ export async function render(ctx, group = 'translators') {
   const TABS = [
     ['team', scr.tab, team.pendingCount],
     ['ids',  'الهوية الشخصية', 0],
+    // كشفُ التواقيع: من رسمه حيًّا ومن رفع صورةً مكانَه (ملاحظة ٤٩٠)
+    ['sigs', 'التواقيع', 0],
     ['bank', 'الحسابات البنكية', 0],
     ['docs', 'تدقيق المستندات', 0]
   ];
@@ -96,6 +98,7 @@ export async function render(ctx, group = 'translators') {
         group === 'admins' ? securityCard(ctx) : null,
         team.joins, team.cityTabs, team.filters, team.table].filter(Boolean));
       else if (key === 'ids') panel.replaceChildren(await identitySection(group));
+      else if (key === 'sigs') panel.replaceChildren(await signatureSection(group));
       else if (key === 'docs') panel.replaceChildren(await docsSection(ctx, team, scr, group));
       else panel.replaceChildren(await bankAdmin(ctx, { parts: true, only: ids, reloadPath: `${scr.path}?tab=bank` }));
     } catch (err) { panel.replaceChildren(h('p.small.bad', err.message)); }
@@ -200,7 +203,8 @@ function securityCard(ctx0) {
 // ---------------------------------------------------------------------
 const GROUP_OF = m => (['manager', 'coordinator', 'supervisor'].includes(m.role) ? 'admins'
   : m.track === 'answers' ? 'answers' : (m.track === 'field' ? 'field' : 'translators'));
-const GROUP_NAME = { admins: 'الحسابات الإدارية', translators: 'المترجمون المتخصصون', field: 'المرشدون المكانيون' };
+const GROUP_NAME = { admins: 'الحسابات الإدارية', translators: 'المترجمون المتخصصون',
+  field: 'المرشدون المكانيون', answers: 'المخصَّصون لإجابة السائلين' };
 
 // ---------------------------------------------------------------------
 // الهوية الشخصية: البياناتُ والصورةُ مجتمعةً فتُطابَق، ثم قبولٌ أو إعادة
@@ -208,6 +212,143 @@ const GROUP_NAME = { admins: 'الحسابات الإدارية', translators: '
 //   مدير المشروع — ومن لا يملكه لا يرى التبويبَ شيئًا (ملاحظة ٢٩٤).
 // ---------------------------------------------------------------------
 const ID_TYPE_LABEL = { national: 'هوية وطنية أو إقامة', passport: 'جواز سفر' };
+
+// ---------------------------------------------------------------------
+// كشفُ التواقيع: من رسم توقيعَه بيده ومن رفع صورةً مكانَه (ملاحظة ٤٩٠)
+//
+//   وتُفحَص كلُّ صورةٍ في المتصفِّح نفسِه: حبرُها ولونُها. فالفارغةُ
+//   والصورةُ الشخصيةُ تُكشَفان ويُطلَب من صاحبهما توقيعٌ حيّ. والحكمُ
+//   كاشفٌ لا قاضٍ: المراجِعُ يرى الصورةَ بعينه ثم يقرّر.
+// ---------------------------------------------------------------------
+const SIG_GROUP_OF = m => (['manager', 'coordinator', 'supervisor', 'viewer'].includes(m.role)
+  ? 'admins' : (['field', 'answers'].includes(m.track) ? 'field' : 'translators'));
+
+async function signatureSection(group = 'translators') {
+  const { signatureQuality, SIG_VERDICT, signatureImg } = await import('../signature.js');
+  let rows = [];
+  try { rows = await db.rpc('signature_sheet') || []; }
+  catch (e) { return h('p.small.bad', e.message); }
+  rows = rows.filter(r => SIG_GROUP_OF(r) === (group === 'admins' ? 'admins'
+    : group === 'field' || group === 'answers' ? 'field' : 'translators'));
+  if (!rows.length) return h('p.muted', 'لا أعضاءَ في هذه الفئة.');
+
+  const picked = new Set();
+  const box = h('div.id-wrap');
+  const summary = h('p.small.muted');
+  const marks = new Map();
+  // الروابطُ المؤقَّتةُ والأحكامُ تُحفَظ، فلا يُعاد الفحصُ مع كلِّ رسم
+  const urls = new Map();
+
+  const count = () => {
+    const drawn = rows.filter(r => r.signature_kind === 'drawn').length;
+    const none = rows.filter(r => !r.signature_path).length;
+    const bad = [...marks.values()].filter(v => v && v !== 'ok').length;
+    summary.textContent = `${rows.length} عضوًا · رسموه بأيديهم: ${drawn}`
+      + ` · بلا توقيع: ${none} · مشتبهٌ فيه: ${bad} · اختير: ${picked.size}`;
+  };
+
+  const askBtn = h('button.btn.sm.primary', { type: 'button' }, '✍ اطلبْ توقيعًا حيًّا من المحدَّد');
+  askBtn.onclick = () => busy(askBtn, async () => {
+    if (!picked.size) return toast('اختَرْ عضوًا واحدًا على الأقل.', 'bad');
+    if (!await confirm('طلبُ توقيعٍ حيّ',
+      `يُمحى التوقيعُ المحفوظُ لـ${picked.size} عضوًا، ويُطالَبون برسمه بأيديهم `
+      + 'عند أوّل توقيعٍ قادم، ويصلهم بذلك إشعار.', 'اطلبْ', 'danger')) return;
+    try {
+      const n = Number(await db.rpc('require_live_signature', { p_members: [...picked] })) || 0;
+      toast(`طُلب توقيعٌ حيٌّ من ${n}.`, 'ok');
+      for (const id of picked) { marks.delete(id); urls.delete(id); }
+      for (const r of rows) {
+        if (picked.has(r.member_id)) {
+          r.signature_path = null; r.signature_kind = null;
+          r.signature_redo_at = new Date().toISOString();
+        }
+      }
+      picked.clear();
+      draw();
+    } catch (e) { toast(e.message, 'bad'); }
+  });
+
+  const card = r => {
+    const cb = h('input', { type: 'checkbox', checked: picked.has(r.member_id) ? true : null,
+      'aria-label': `اختيار ${r.full_name}` });
+    cb.onchange = () => { cb.checked ? picked.add(r.member_id) : picked.delete(r.member_id); count(); };
+    const view = h('div.id-shot.sig-shot');
+    if (r.signature_path) {
+      const url = urls.get(r.member_id);
+      if (url) view.replaceChildren(signatureImg(url, `توقيع ${r.full_name}`));
+      else view.replaceChildren(h('span.small.muted', 'تعذّر عرضُها'));
+    } else {
+      view.replaceChildren(h('span.small.muted', 'لا توقيع'));
+    }
+    const verdict = marks.get(r.member_id) ?? null;
+    const [vLabel, vTone] = SIG_VERDICT[verdict] || ['—', ''];
+    return h('div.id-card',
+      view,
+      h('div.stack', { style: { gap: '4px' } },
+        h('label.check', cb, h('b', r.full_name)),
+        h('span.small.muted', `${roleName(r.role)}${r.member_no ? ` · ${r.member_no}` : ''}`
+          + ` · وقَّع على ${r.acks || 0} تعميمًا`),
+        h('div.row.wrap', { style: { gap: '6px' } },
+          r.signature_path
+            ? h('span.badge', { class: r.signature_kind === 'drawn' ? 'ok' : 'warn' },
+                r.signature_kind === 'drawn' ? 'رُسم بيده' : 'صورةٌ مرفوعة')
+            : h('span.badge.bad', 'بلا توقيع'),
+          verdict ? h('span.badge', { class: vTone }, vLabel) : null,
+          r.signature_redo_at ? h('span.badge.warn', 'طُلب منه توقيعٌ حيّ') : null),
+        r.signature_at ? h('span.small.muted', fmtDateTime(r.signature_at)) : null));
+  };
+
+  const pickBad = h('button.btn.sm', { type: 'button' }, 'اختَرِ المشتبهَ فيه');
+  pickBad.onclick = () => {
+    picked.clear();
+    for (const r of rows) {
+      const v = marks.get(r.member_id);
+      if (r.signature_path && (r.signature_kind !== 'drawn' || (v && v !== 'ok'))) {
+        picked.add(r.member_id);
+      }
+    }
+    draw();
+  };
+  const clearPick = h('button.btn.sm.ghost', { type: 'button' }, 'تفريغُ الاختيار');
+  clearPick.onclick = () => { picked.clear(); draw(); };
+
+  // الرسمُ محليٌّ محضٌ ولا شبكةَ فيه
+  function draw() {
+    box.replaceChildren(...rows.map(card));
+    count();
+  }
+
+  // والفحصُ مرّةً واحدةً على دُفُعاتٍ متوازية، فلا تسعون طلبًا متتابعة
+  async function scan() {
+    const need = rows.filter(r => r.signature_path && !marks.has(r.member_id));
+    for (let i = 0; i < need.length; i += 8) {
+      await Promise.all(need.slice(i, i + 8).map(async r => {
+        try {
+          const url = await storage.signedUrl('signatures', r.signature_path, 600);
+          urls.set(r.member_id, url);
+          const q = await signatureQuality(url);
+          marks.set(r.member_id, q.verdict);
+        } catch { marks.set(r.member_id, 'unread'); }
+      }));
+      draw();
+    }
+    draw();
+  }
+
+  draw();
+  box.prepend(h('p.small.muted', 'جارٍ فحصُ التواقيع…'));
+  await scan();
+
+  return h('div.card.stack',
+    h('div.row.between.wrap',
+      h('h3', 'التواقيع'),
+      h('div.row.wrap', { style: { gap: '6px' } }, pickBad, clearPick, askBtn)),
+    h('p.small.muted', 'التوقيعُ يُرسَم على الشاشة بيد صاحبه، وبابُ رفع الصورة مغلق. '
+      + 'وما رُفع قبل ذلك يُفحَص هنا: الفارغةُ والصورةُ الشخصيةُ تُكشَفان، '
+      + 'والحكمُ كاشفٌ لا قاضٍ — انظرِ الصورةَ ثم قرّرْ.'),
+    summary,
+    box);
+}
 
 async function identitySection(group = 'translators') {
   const box = h('div.stack');
@@ -324,6 +465,13 @@ async function identitySection(group = 'translators') {
     } catch (e) { toast(e.message, 'bad'); }
   };
 
+  // رفعٌ وقع بعد قرار الإعادة: فالمعادةُ قد أُعيدت وإن بقيت الحالُ على
+  //   ما هي (ملاحظة ٤٨٤)
+  const resent = r => !!(r.iqama_path && (r.iqama_status || '') === 'rejected'
+    && (!r.iqama_at
+        || (r.iqama_uploaded_at
+            && new Date(r.iqama_uploaded_at) > new Date(r.iqama_at))));
+
   const expiryBadge = r => {
     if (r.id_expiry == null) return h('span.badge.warn', { title: 'لم يُسجَّل' }, 'بلا تاريخ');
     const d = Number(r.days_left);
@@ -351,7 +499,9 @@ async function identitySection(group = 'translators') {
 
     // من لم يرفعْ هويتَه يظهر بحاله لا منتظرًا للتدقيق (ملاحظة ٣١٧)
     const st = r.iqama_path ? (r.iqama_status || 'pending') : 'none';
-    const [label, tone] = DOC_STATE[st] || DOC_STATE.pending;
+    const [label0, tone0] = DOC_STATE[st] || DOC_STATE.pending;
+    const [label, tone] = resent(r)
+      ? ['أعادها — تنتظر التدقيق', 'warn'] : [label0, tone0];
 
     return h('div.card.stack.id-card', { class: st === 'pending' ? 'waiting' : '' },
       h('div.id-grid',
@@ -372,20 +522,30 @@ async function identitySection(group = 'translators') {
             h('span', h('small', 'الانتهاء'), expiryBadge(r))),
           r.iqama_note ? h('p.small.bad', { style: { margin: 0 } },
             'سببُ الإعادة: ', r.iqama_note) : null,
+          // أعادها بعد ردِّها: رفعٌ وقع بعد قرار الإعادة، فيُقال صريحًا
+          //   ولا يُترك المدقِّقُ يحزر (ملاحظة ٤٨٤)
+          resent(r) ? h('p.small.ok', { style: { margin: 0 } },
+            `أعاد إرسالَها بعد الردّ في ${fmtDateTime(r.iqama_uploaded_at)}`) : null,
           r.renewal_reason ? h('p.small.muted', { style: { margin: 0 } },
             'سببُ التجديد: ', r.renewal_reason) : null,
           r.iqama_at ? h('span.small.muted', fmtDateTime(r.iqama_at)) : null,
           h('div.row.wrap', { style: { gap: '6px' } },
             h('button.btn.xs', { type: 'button', onclick: () => editData(r) }, 'بياناتُ الهوية'),
-            st === 'pending' && r.iqama_path
+            // والاعتمادُ لا يُحجَب عن المدقِّق: يفتح الصورةَ فإن رآها
+            //   صحيحةً اعتمدها، وإن بقيت الحالُ «أُعيدت» لرفعٍ لم يُبدِّلها
+            //   أو لصفحةٍ لم تُحدَّث لم ينسدَّ عليه الباب (ملاحظة ٤٨٤)
+            r.iqama_path
               ? h('button.btn.xs.primary', { type: 'button',
-                  onclick: () => decide(r, 'approved') }, 'اعتماد') : null,
-            // المعادةُ لا تُعتمَد حتى يُعيد صاحبُها إرسالَها (ملاحظة ٣٨٩)
-            st === 'rejected'
+                  onclick: () => decide(r, 'approved') },
+                  st === 'rejected' ? 'اعتمادٌ بعد المراجعة' : 'اعتماد') : null,
+            // والمعادةُ يُنتظَر فيها إعادةُ صاحبها، ما لم يكن قد أعادها
+            //   (ملاحظتا ٣٨٩ و٤٨٤)
+            st === 'rejected' && !resent(r)
               ? h('span.small.warn', 'يُنتظَر إعادةُ إرسالها') : null,
-            st !== 'rejected' && r.iqama_path
+            r.iqama_path
               ? h('button.btn.xs.danger', { type: 'button',
-                  onclick: () => decide(r, 'rejected') }, 'إعادةٌ للعضو') : null,
+                  onclick: () => decide(r, 'rejected') },
+                  st === 'rejected' ? 'تعديلُ سبب الإعادة' : 'إعادةٌ للعضو') : null,
             !r.renewal_open
               ? h('button.btn.xs.ghost', { type: 'button',
                   onclick: () => askRenew(r) }, 'اطلبْ تجديدًا') : null))));
@@ -393,7 +553,10 @@ async function identitySection(group = 'translators') {
 
   function draw() {
     const want = filter.value;
-    const stOf = r => (r.iqama_path ? (r.iqama_status || 'pending') : 'none');
+    // ومن أعادها بعد ردِّها فهو في عداد المنتظِرين للتدقيق لا المردودين
+    //   (ملاحظة ٤٨٤)
+    const stOf = r => (!r.iqama_path ? 'none'
+      : resent(r) ? 'pending' : (r.iqama_status || 'pending'));
     const list = rows.filter(r => want === 'all'
       || (want === 'review' && ['pending', 'rejected', 'none'].includes(stOf(r)))
       || (want === 'pending' && stOf(r) === 'pending')

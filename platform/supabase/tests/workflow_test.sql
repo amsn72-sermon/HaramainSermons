@@ -9561,3 +9561,376 @@ begin
 end $$;
 commit;
 do $$ begin raise notice 'PASS: هويةُ الكشف لمن يملك مفتاحَها وحدَه'; end $$;
+
+-- =====================================================================
+-- ٩٠) الهويةُ المعادةُ إذا أُعيد رفعُها عادت إلى التدقيق (ملاحظة ٤٨٤)
+-- =====================================================================
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', true);
+select public.set_my_iqama('00000000-0000-0000-0000-00000000000c/iqama-1.jpg');
+commit;
+
+do $$
+declare r public.profile_private;
+begin
+  select * into r from public.profile_private
+   where id = '00000000-0000-0000-0000-00000000000c';
+  if r.iqama_status <> 'pending' or r.iqama_uploaded_at is null then
+    raise exception 'FAIL: رفعُ العضو لا يضع الهويةَ في التدقيق بوقتها';
+  end if;
+end $$;
+
+-- ـ ثم تُعاد إليه بسبب
+do $$
+begin
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  perform public.review_member_doc('00000000-0000-0000-0000-00000000000c', 'iqama',
+    'rejected', 'الصورةُ غيرُ واضحة');
+end $$;
+
+do $$
+declare r public.profile_private;
+begin
+  select * into r from public.profile_private
+   where id = '00000000-0000-0000-0000-00000000000c';
+  if r.iqama_status <> 'rejected' or r.iqama_at is null then
+    raise exception 'FAIL: الإعادةُ لم تُسجَّل';
+  end if;
+  if r.iqama_uploaded_at > r.iqama_at then
+    raise exception 'FAIL: وقتُ الرفع بعد وقتِ القرار قبل أن يُعيد';
+  end if;
+end $$;
+
+-- ـ فيُصحِّحها ويرفعها، فتعود إلى التدقيق ويُمحى سببُ الردّ
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', true);
+select pg_sleep(0.01);
+select public.set_my_iqama('00000000-0000-0000-0000-00000000000c/iqama-2.jpg');
+commit;
+
+do $$
+declare r public.profile_private;
+begin
+  select * into r from public.profile_private
+   where id = '00000000-0000-0000-0000-00000000000c';
+  if r.iqama_status <> 'pending' then
+    raise exception 'FAIL: المعادةُ لم تعد إلى التدقيق برفعها';
+  end if;
+  if r.iqama_note is not null or r.iqama_at is not null then
+    raise exception 'FAIL: سببُ الردِّ أو وقتُه باقٍ بعد إعادة الرفع';
+  end if;
+  if r.iqama_path <> '00000000-0000-0000-0000-00000000000c/iqama-2.jpg' then
+    raise exception 'FAIL: المسارُ لم يتبدَّل';
+  end if;
+  if r.iqama_uploaded_at is null then
+    raise exception 'FAIL: وقتُ إعادة الرفع لم يُسجَّل';
+  end if;
+end $$;
+
+-- ـ ورفعُ الإدارة عنه يفعل مثلَه
+do $$
+declare r public.profile_private;
+begin
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  perform public.review_member_doc('00000000-0000-0000-0000-00000000000c', 'iqama',
+    'rejected', 'أعِدْها بخلفيةٍ بيضاء');
+  perform public.admin_set_iqama('00000000-0000-0000-0000-00000000000c',
+    '00000000-0000-0000-0000-00000000000c/iqama-3.jpg');
+  select * into r from public.profile_private
+   where id = '00000000-0000-0000-0000-00000000000c';
+  if r.iqama_status <> 'pending' or r.iqama_note is not null
+     or r.iqama_uploaded_at is null then
+    raise exception 'FAIL: رفعُ الإدارة لا يُعيدها إلى التدقيق';
+  end if;
+end $$;
+
+-- ـ وكشفُ الهويات يحمل وقتَ الرفع، ويضمُّ فريقَ إجابة السائلين إلى الميدان
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$
+declare r record;
+begin
+  select * into r from public.identity_sheet('all')
+   where member_id = '00000000-0000-0000-0000-00000000000c';
+  if r.iqama_uploaded_at is null then
+    raise exception 'FAIL: كشفُ الهويات بلا وقتِ رفع';
+  end if;
+  if not exists (select 1 from public.identity_sheet('field')
+                  where track = 'answers') then
+    raise exception 'FAIL: فريقُ إجابة السائلين خارجَ كشف الميدان';
+  end if;
+end $$;
+commit;
+
+-- ـ واعتمادُها يصحّ وهي معادة، فلا ينسدُّ البابُ على المدقِّق
+do $$
+declare r public.profile_private;
+begin
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  perform public.review_member_doc('00000000-0000-0000-0000-00000000000c', 'iqama',
+    'rejected', 'سببٌ ما');
+  perform public.review_member_doc('00000000-0000-0000-0000-00000000000c', 'iqama',
+    'approved', null);
+  select * into r from public.profile_private
+   where id = '00000000-0000-0000-0000-00000000000c';
+  if r.iqama_status <> 'approved' then
+    raise exception 'FAIL: المعادةُ لا تُعتمَد ولو رآها المدقِّقُ صحيحة';
+  end if;
+end $$;
+
+do $$ begin raise notice
+  'PASS: الهويةُ المعادةُ تعود إلى التدقيق برفعها، ووقتُ الرفع محفوظ'; end $$;
+
+-- =====================================================================
+-- ٩١) رقمُ الهوية في وثيقة التحقّق، وحدُّ التخمين (ملاحظة ٤٨٩)
+-- =====================================================================
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000d', true);
+select public.accept_policy('1.2', 'د. خالد', 'confidentiality', 'نصُّ ميثاق العمل للتجربة');
+commit;
+
+do $$
+declare v_code text; v jsonb;
+begin
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  update public.profile_private set national_id = '1098765432'
+   where id = '00000000-0000-0000-0000-00000000000d';
+  select proof_code into v_code from public.policy_acceptances
+   where member_id = '00000000-0000-0000-0000-00000000000d';
+  v := public.verify_signature(v_code);
+  if (v ->> 'found') <> 'true' then raise exception 'FAIL: الرمزُ الصحيحُ لم يُعرَف'; end if;
+  if (v ->> 'national_id') is distinct from '1098765432' then
+    raise exception 'FAIL: رقمُ الهوية لا يظهر في وثيقة التحقّق';
+  end if;
+  if (v ->> 'policy_key') is distinct from 'confidentiality' then
+    raise exception 'FAIL: مفتاحُ الميثاق ناقصٌ في التحقّق';
+  end if;
+  -- والرمزُ الخاطئُ لا يُعرَف، ولا يُفشي شيئًا
+  v := public.verify_signature('SG-0000000000');
+  if (v ->> 'found') <> 'false' or v ? 'name' then
+    raise exception 'FAIL: الرمزُ الخاطئُ أفشى شيئًا';
+  end if;
+end $$;
+
+-- ـ والحدُّ يعمل على العناوين: ثلاثون خائبةً ثم يُمسَك الباب
+do $$
+declare v jsonb; i int;
+begin
+  perform set_config('request.headers',
+    '{"cf-connecting-ip":"203.0.113.9"}', true);
+  for i in 1..30 loop
+    v := public.verify_signature('SG-' || lpad(i::text, 10, '0'));
+  end loop;
+  v := public.verify_signature('SG-0000000099');
+  if (v ->> 'throttled') is distinct from 'true' then
+    raise exception 'FAIL: التخمينُ لم يُمسَك بعد ثلاثين محاولة';
+  end if;
+  -- وعنوانٌ آخرُ لا يُمسَك بذنب غيره
+  perform set_config('request.headers',
+    '{"cf-connecting-ip":"203.0.113.10"}', true);
+  v := public.verify_signature('SG-0000000099');
+  if (v ? 'throttled') then
+    raise exception 'FAIL: عنوانٌ بريءٌ أُمسك بذنب غيره';
+  end if;
+  perform set_config('request.headers', '', true);
+end $$;
+
+do $$ begin raise notice
+  'PASS: وثيقةُ التحقّق تحمل رقمَ الهوية، والتخمينُ محدود'; end $$;
+
+-- =====================================================================
+-- ٩٢) التوقيعُ يُرسَم ولا يُرفَع، والمرفوعُ يُطلَب حيًّا (ملاحظة ٤٩٠)
+-- =====================================================================
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', true);
+select public.set_my_signature('00000000-0000-0000-0000-00000000000c/sig-1.png', 'drawn');
+commit;
+
+do $$
+declare r public.profile_private;
+begin
+  select * into r from public.profile_private
+   where id = '00000000-0000-0000-0000-00000000000c';
+  if r.signature_kind <> 'drawn' or r.signature_at is null then
+    raise exception 'FAIL: وجهُ التوقيع لم يُحفَظ';
+  end if;
+end $$;
+
+-- ـ ولا يُحفَظ توقيعٌ في مجلَّد غيره
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', true);
+do $$
+begin
+  begin
+    perform public.set_my_signature('00000000-0000-0000-0000-00000000000d/sig-x.png', 'drawn');
+    raise exception 'FAIL: كُتب توقيعٌ في مجلَّد غيره';
+  exception when sqlstate '42501' then null;
+  end;
+end $$;
+commit;
+
+-- ـ ورفعُ الصورة يُوسَم «مرفوعة»، ثم تطلب الإدارةُ توقيعًا حيًّا
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000d', true);
+select public.set_my_signature('00000000-0000-0000-0000-00000000000d/sig-2.png', 'uploaded');
+commit;
+
+do $$
+declare r public.profile_private; v_n int;
+begin
+  select * into r from public.profile_private
+   where id = '00000000-0000-0000-0000-00000000000d';
+  if r.signature_kind <> 'uploaded' then
+    raise exception 'FAIL: المرفوعُ لم يُوسَم';
+  end if;
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  v_n := public.require_live_signature(array['00000000-0000-0000-0000-00000000000d']::uuid[]);
+  if v_n <> 1 then raise exception 'FAIL: طلبُ التوقيع الحيِّ لم يقع'; end if;
+  select * into r from public.profile_private
+   where id = '00000000-0000-0000-0000-00000000000d';
+  if r.signature_path is not null or r.signature_kind is not null
+     or r.signature_redo_at is null then
+    raise exception 'FAIL: المرفوعُ لم يُمحَ ولم يُسجَّل الطلب';
+  end if;
+  if not exists (select 1 from public.notifications
+                  where member_id = '00000000-0000-0000-0000-00000000000d'
+                    and subject = 'يلزمك توقيعٌ حيّ') then
+    raise exception 'FAIL: لم يُخبَر صاحبُه';
+  end if;
+end $$;
+
+-- ـ فإذا رسمه حيًّا سقط الطلب
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000d', true);
+select public.set_my_signature('00000000-0000-0000-0000-00000000000d/sig-3.png', 'drawn');
+commit;
+
+do $$
+declare r public.profile_private;
+begin
+  select * into r from public.profile_private
+   where id = '00000000-0000-0000-0000-00000000000d';
+  if r.signature_redo_at is not null or r.signature_kind <> 'drawn' then
+    raise exception 'FAIL: الطلبُ لم يسقطْ بالرسم الحيّ';
+  end if;
+end $$;
+
+-- ـ وطلبُ التوقيع الحيِّ ليس لغير الإدارة
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', true);
+do $$
+begin
+  begin
+    perform public.require_live_signature(array['00000000-0000-0000-0000-00000000000d']::uuid[]);
+    raise exception 'FAIL: مترجمٌ طلب توقيعًا حيًّا';
+  exception when sqlstate '42501' then null;
+  end;
+end $$;
+commit;
+
+-- ـ وكشفُ التواقيع للإدارة وحدَها
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$
+begin
+  if (select count(*) from public.signature_sheet()) = 0 then
+    raise exception 'FAIL: كشفُ التواقيع فارغٌ للإدارة';
+  end if;
+end $$;
+commit;
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', true);
+do $$
+begin
+  if exists (select 1 from public.signature_sheet()) then
+    raise exception 'FAIL: كشفُ التواقيع مفتوحٌ لغير الإدارة';
+  end if;
+end $$;
+commit;
+
+do $$ begin raise notice
+  'PASS: التوقيعُ يُرسَم، والمرفوعُ يُكشَف ويُطلَب حيًّا'; end $$;
+
+-- =====================================================================
+-- ٩٣) إثباتُ التوقيع على التعميم: بصمةٌ وعنوانٌ وجهاز (ملاحظة ٤٩٣)
+-- =====================================================================
+do $$
+declare v_c uuid;
+begin
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  v_c := public.send_circular('تعميمٌ للإثبات', 'notice', 'نصُّ التعميم', null, 'all', null, true, false);
+  -- يُعرَف بعنوانه فيما بعدُ، فالإعداداتُ المحليّةُ لا تعبُر المعاملات
+end $$;
+
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', true);
+select set_config('request.headers',
+  '{"user-agent":"TestBrowser/1.0","x-forwarded-for":"10.0.0.5, 198.51.100.7"}', true);
+select public.ack_circular(
+  (select id from public.circulars where title = 'تعميمٌ للإثبات'), 'يوسف أحمد',
+  '00000000-0000-0000-0000-00000000000c/sig-1.png',
+  'تعميمٌ للإثبات' || chr(10) || chr(10) || 'نصُّ التعميم', 'iOS — جوال');
+commit;
+
+do $$
+declare m public.circular_sign_meta;
+begin
+  select * into m from public.circular_sign_meta
+   where member_id = '00000000-0000-0000-0000-00000000000c'
+     and circular_id = (select id from public.circulars where title = 'تعميمٌ للإثبات');
+  if m.doc_hash is distinct from encode(sha256(convert_to(
+       'تعميمٌ للإثبات' || chr(10) || chr(10) || 'نصُّ التعميم', 'UTF8')), 'hex') then
+    raise exception 'FAIL: بصمةُ نصِّ التعميم لم تُحفَظ صحيحةً';
+  end if;
+  if m.sign_agent is distinct from 'TestBrowser/1.0' then
+    raise exception 'FAIL: وصفُ المتصفِّح لم يُحفَظ';
+  end if;
+  if m.device is distinct from 'iOS — جوال' then
+    raise exception 'FAIL: وصفُ الجهاز لم يُحفَظ';
+  end if;
+  -- والعنوانُ آخرُ السلسلة لا أوّلُها: ما أضافه وسيطُنا (ملاحظة ٤٨٩)
+  if host(m.sign_ip) is distinct from '198.51.100.7' then
+    raise exception 'FAIL: العنوانُ أُخذ مما أرسله العميل لا مما أضافه الوسيط (%)',
+      host(m.sign_ip);
+  end if;
+  -- والاسمُ المكتوبُ والرسمُ كلاهما محفوظٌ كما كان
+  if not exists (select 1 from public.circular_recipients
+                  where member_id = '00000000-0000-0000-0000-00000000000c'
+                    and signed_name = 'يوسف أحمد' and signature_path is not null
+                    and acked_at is not null) then
+    raise exception 'FAIL: التوقيعُ الإلكترونيُّ أو الرسمُ لم يُحفَظ';
+  end if;
+end $$;
+
+-- ـ وسجلُّ الإثبات للإدارة ولصاحبه، لا لغيرهما
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$
+declare r record;
+begin
+  select * into r from public.circular_proof(
+    (select id from public.circulars where title = 'تعميمٌ للإثبات'),
+    '00000000-0000-0000-0000-00000000000c');
+  if r.doc_hash is null or r.sign_agent is null then
+    raise exception 'FAIL: الإدارةُ لا ترى إثباتَ التوقيع';
+  end if;
+end $$;
+commit;
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000d', true);
+do $$
+begin
+  if exists (select 1 from public.circular_proof(
+      (select id from public.circulars where title = 'تعميمٌ للإثبات'),
+      '00000000-0000-0000-0000-00000000000c')) then
+    raise exception 'FAIL: عضوٌ رأى إثباتَ توقيع غيره';
+  end if;
+  if exists (select 1 from public.circular_sign_meta) then
+    raise exception 'FAIL: جدولُ الإثبات مفتوحٌ لغير الإدارة';
+  end if;
+end $$;
+commit;
+select set_config('request.headers', '', true);
+
+do $$ begin raise notice
+  'PASS: التوقيعُ على التعميم بوجهيه، ومعه بصمتُه وعنوانُه وجهازُه'; end $$;

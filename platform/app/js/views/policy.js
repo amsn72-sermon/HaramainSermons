@@ -7,7 +7,8 @@ import { h, toast, busy, fmtDate, fmtDateTime } from '../ui.js';
 import { db, auth } from '../sb.js';
 import { state } from '../store.js';
 import { brand, themeToggle, footer } from './shell.js';
-import { POLICY_KEY, POLICY_VERSION, charterOf, charterDoc, policyPlainText } from '../policy.js';
+import { POLICY_KEY, POLICY_VERSION, charterOf, charterDoc, hasCharterVersion,
+         policyPlainText } from '../policy.js';
 
 // ميثاقُ العضو الحاليِّ: مفتاحُه ونسختُه ونصُّه
 const mine = () => charterOf(state.profile);
@@ -29,8 +30,11 @@ export async function policyDialog() {
   const signed = !!state.policySigned;
   const agree = h('input', { type: 'checkbox' });
   const name = h('input', { autocomplete: 'off', placeholder: state.profile?.full_name || 'اكتب اسمك الكامل' });
+  // سجلُّ توقيعه يُقرأ دائمًا: فمن وقَّع نسخةً سابقةً ليس «موقِّعًا» عند
+  //   البوّابة، ومع ذلك له توقيعٌ قائمٌ ووثيقةُ إثباتٍ ونصُّ نسخةٍ
+  //   يُحتجُّ به عليه (ملاحظة ٤٨٥)
   let stamp = null;
-  if (signed) {
+  if (state.profile) {
     try {
       const rows = await db.select('policy_acceptances', {
         select: 'signed_name,policy_version,accepted_at,proof_code',
@@ -45,10 +49,14 @@ export async function policyDialog() {
       h('div.policy-state', { class: signed ? 'signed' : 'unsigned' },
         signed
           ? `تم التوقيع${stamp ? ` باسم «${stamp.signed_name}» في ${fmtDateTime(stamp.accepted_at)} — النسخة ${stamp.policy_version}` : ''}`
-          : 'لم توقّع على هذا الميثاق بعد'),
-      h('p.small.muted', `النسخة ${ch.version}`),
+          : stamp
+            ? `وقَّعتَ النسخة ${stamp.policy_version}، وتُطالَب بالنسخة الجارية ${ch.version}`
+            : 'لم توقّع على هذا الميثاق بعد'),
+      h('p.small.muted', `النسخةُ الجارية ${ch.version}`
+        + (stamp && stamp.policy_version !== ch.version
+          ? ` — ووقَّعتَ النسخة ${stamp.policy_version}` : '')),
       // وثيقةُ إثبات توقيعه بين يديه (ملاحظة ٤٢٧)
-      signed && stamp
+      stamp
         ? h('div.row.wrap',
             h('button.btn.sm', { type: 'button',
               onclick: async ev => busy(ev.currentTarget, async () => {
@@ -59,7 +67,19 @@ export async function policyDialog() {
               ? h('span.small.muted', { dir: 'ltr', style: { alignSelf: 'center' } }, stamp.proof_code)
               : null)
         : null,
-      policyText(signed && stamp ? stamp.policy_version : ch.version, ch.key),
+      // النصُّ المعروضُ هو النسخةُ الجاريةُ — فهي المعمولُ بها اليوم.
+      //   ونسخةُ الموقِّع تبقى بين يديه مطويّةً تحتها، فيُحتجُّ عليه
+      //   بنصِّه هو ولا يُحسَب أنَّ المعروضَ عليه قديم (ملاحظة ٤٨٥)
+      policyText(ch.version, ch.key),
+      stamp && stamp.policy_version !== ch.version && hasCharterVersion(ch.key, stamp.policy_version)
+        ? h('details.cd-more',
+            h('summary', `نصُّ النسخة التي وقَّعتَها — ${stamp.policy_version}`),
+            h('div.stack',
+              h('p.small.muted', 'هذا نصُّ نسختك الموقَّعة، وهو المحتجُّ به عليك '
+                + 'فيما كان قبل النسخة الجارية. وأمّا الجاريةُ فهي المعروضةُ أعلاه، '
+                + 'وتُطالَب بتوقيعها.'),
+              policyText(stamp.policy_version, ch.key)))
+        : null,
       signed ? null : h('div.stack',
         h('label.check.top', agree, h('span', ch.doc.ack)),
         h('label.field', 'التوقيع: اكتب اسمك الكامل', name))),

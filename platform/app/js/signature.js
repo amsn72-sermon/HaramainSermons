@@ -13,6 +13,9 @@ export function signaturePad({ width = 560, height = 180 } = {}) {
   ctx.scale(dpr, dpr);
   ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111';
   let drawing = false, empty = true, last = null;
+  // طولُ ما رُسم بالبكسل: نقرةٌ واحدةٌ لا تُعَدُّ توقيعًا (ملاحظة ٤٩٠)
+  let inked = 0;
+  const MIN_INK = 60;
 
   const pos = e => {
     const r = canvas.getBoundingClientRect();
@@ -20,7 +23,7 @@ export function signaturePad({ width = 560, height = 180 } = {}) {
   };
   canvas.addEventListener('pointerdown', e => {
     if (e.button !== undefined && e.button !== 0) return;
-    drawing = true; empty = false; last = pos(e);
+    drawing = true; last = pos(e);
     canvas.setPointerCapture(e.pointerId);
     e.preventDefault();
   });
@@ -28,6 +31,8 @@ export function signaturePad({ width = 560, height = 180 } = {}) {
     if (!drawing) return;
     const p = pos(e);
     ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+    inked += Math.hypot(p.x - last.x, p.y - last.y);
+    if (inked >= MIN_INK) empty = false;
     last = p; e.preventDefault();
   });
   const stop = () => { drawing = false; };
@@ -35,12 +40,16 @@ export function signaturePad({ width = 560, height = 180 } = {}) {
   canvas.addEventListener('pointerleave', stop);
   canvas.addEventListener('pointercancel', stop);
 
-  const clear = () => { ctx.clearRect(0, 0, canvas.width, canvas.height); empty = true; };
+  const clear = () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    empty = true; inked = 0;
+  };
 
   return {
     el: h('div.sig-pad', canvas, h('div.sig-line', { 'aria-hidden': 'true' })),
     canvas,
     isEmpty: () => empty,
+    inked: () => inked,
     clear,
     toBlob: () => new Promise(res => canvas.toBlob(res, 'image/png'))
   };
@@ -50,8 +59,13 @@ export function signaturePad({ width = 560, height = 180 } = {}) {
 export const signatureImg = (url, alt = 'التوقيع') => h('img.sig-img', { src: url, alt });
 
 // ---------------------------------------------------------------------
-// رفعُ صورة التوقيع: لمن كان توقيعُه مصوَّرًا أو ممسوحًا، فلا يُلزَم
-// بالرسم باليد. والرسمُ باقٍ كما هو، والخياران معًا (ملاحظة ٢١٥)
+// رفعُ صورة التوقيع — أُغلق هذا الباب (ملاحظة ٤٩٠)
+//
+//   كان مُتاحًا لمن توقيعُه ممسوحٌ (ملاحظة ٢١٥)، فجاء الكشفُ وفيه من
+//   رفع صورتَه الشخصية مكانَ توقيعه، ومن رفع صورةً بيضاءَ لا أثرَ
+//   فيها. والتوقيعُ إنما يُراد لأنه فعلُ صاحبه بيده. فبقيت الدالّةُ
+//   هنا ولا تُستعمَل في شاشات التوقيع، وإنما تُستدعى بوجهٍ موسومٍ
+//   «مرفوع» إن احتيج إليها يومًا بإذنٍ خاصّ.
 // ---------------------------------------------------------------------
 const SIG_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const SIG_MAX = 2 * 1024 * 1024;        // ميغابايتان تكفي صورةَ توقيع
@@ -77,7 +91,7 @@ export function signatureUpload({ memberId, onSaved, label = 'أو ارفع صو
       const ext = f.type === 'image/png' ? 'png' : f.type === 'image/webp' ? 'webp' : 'jpg';
       const path = `${memberId}/sig-${Date.now()}.${ext}`;
       await storage.upload('signatures', path, f);
-      await db.rpc('set_my_signature', { p_path: path });
+      await db.rpc('set_my_signature', { p_path: path, p_kind: 'uploaded' });
       toast('حُفظت صورة توقيعك.', 'ok');
       onSaved && onSaved(path);
     } catch (e) {
@@ -87,4 +101,58 @@ export function signatureUpload({ memberId, onSaved, label = 'أو ارفع صو
 
   return h('div.stack.sig-upload', { style: { gap: '6px' } },
     h('label.field', label, input), note, err);
+}
+
+
+// ---------------------------------------------------------------------
+// فحصُ صورة التوقيع (ملاحظة ٤٩٠)
+//
+//   التوقيعُ خطوطٌ سودٌ قليلةٌ على بياض: حبرُه يسيرٌ ولونُه واحد. فإذا
+//   كانت الصورةُ بلا حبرٍ تقريبًا فهي فارغة، وإذا كثر فيها اللونُ أو
+//   امتلأت بالحبر فهي صورةٌ لا توقيع — وأكثرُ ما وقع صورةٌ شخصية.
+//   والحكمُ هنا كاشفٌ للمراجِع لا قاضٍ: يُعرَض عليه ما اشتُبه فيه.
+// ---------------------------------------------------------------------
+export const SIG_VERDICT = {
+  ok:      ['مقبول', 'ok'],
+  blank:   ['فارغٌ أو شبهُ فارغ', 'bad'],
+  photo:   ['صورةٌ لا توقيع', 'bad'],
+  colored: ['صورةٌ ملوّنة', 'warn'],
+  heavy:   ['حبرٌ كثيفٌ — يُراجَع', 'warn'],
+  unread:  ['تعذَّر فحصُها', 'warn']
+};
+
+export function signatureQuality(url) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onerror = () => resolve({ verdict: 'unread' });
+    img.onload = () => {
+      try {
+        const W = 160, H = Math.max(1, Math.round(W * (img.height || 1) / (img.width || 1)));
+        const c = document.createElement('canvas');
+        c.width = W; c.height = H;
+        const x = c.getContext('2d', { willReadFrequently: true });
+        // على بياضٍ، فالـPNG الشفّافُ يُقرأ كما يُطبَع
+        x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+        x.drawImage(img, 0, 0, W, H);
+        const d = x.getImageData(0, 0, W, H).data;
+        let ink = 0, colored = 0, n = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          const r = d[i], g = d[i + 1], b = d[i + 2];
+          const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+          n++;
+          if (mx < 225) ink++;                       // ليس بياضًا
+          if (mx - mn > 42 && mx > 60) colored++;     // فيه لونٌ لا رمادٌ
+        }
+        const inkR = ink / n, colR = colored / n;
+        const verdict = inkR < 0.004 ? 'blank'
+          : colR > 0.16 ? 'photo'
+          : colR > 0.05 ? 'colored'
+          : inkR > 0.40 ? 'heavy'
+          : 'ok';
+        resolve({ verdict, ink: inkR, color: colR });
+      } catch { resolve({ verdict: 'unread' }); }
+    };
+    img.src = url;
+  });
 }

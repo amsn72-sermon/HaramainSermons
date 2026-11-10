@@ -1,9 +1,9 @@
 // بطاقات عمل فريق الترجمة: تصميمها بالسحب والإفلات وطباعتها (ملاحظتا ٨٥ و٨٦)
-import { h, toast, busy, escapeHtml, fmtDate, dialog } from '../ui.js';
+import { h, toast, busy, escapeHtml, fmtDate, dialog, confirm } from '../ui.js';
 import { db, storage } from '../sb.js';
 import { langName, roleLabel } from '../store.js';
 import { urlToDataUrl } from '../photo.js';
-import { CARD, HARAMAIN_LOGO, ITEM_LABEL, ITEM_ORDER, COLORS, PRESETS, PRESET_LAYOUT, DEFAULT_LAYOUT, normalizeLayout, clampLayout, photoH, itemText, itemStyle, bandStyle, ruleStyle, scaleStyle, logoExtra, newCustom, customLabel, CARD_FONTS, fontStack, cardVerifyUrl,
+import { CARD, cardSize, isPort, startCardClocks, LIVE_ITEMS, liveText, withExtras, HARAMAIN_LOGO, ITEM_LABEL, ITEM_ORDER, COLORS, PRESETS, PRESET_LAYOUT, DEFAULT_LAYOUT, normalizeLayout, clampLayout, photoH, itemText, itemStyle, bandStyle, ruleStyle, scaleStyle, logoExtra, newCustom, customLabel, CARD_FONTS, fontStack, cardVerifyUrl,
   SHAPE_KINDS, newShape, shapeLabel, shapeStyle, bgStyle, wmStyle } from '../carddesign.js';
 import { qrDataUri } from '../qr.js';
 import { unifiedPanel } from '../unipanel.js';
@@ -17,7 +17,8 @@ const round = v => Math.round(v * 10) / 10;
 
 export async function render(ctx) {
   const [members, priv, langRows, settingsRows, cardRows, keyRows] = await Promise.all([
-    db.select('profiles', { select: 'id,full_name,role,status,member_no,email,track', order: 'full_name.asc' }),
+    db.select('profiles', {
+      select: 'id,full_name,role,status,member_no,email,track,city', order: 'full_name.asc' }),
     db.select('profile_private', { select: 'id,photo_path' }).catch(() => []),
     db.select('member_languages', { select: 'member_id,language_code' }).catch(() => []),
     db.select('card_settings', { select: '*' }).catch(() => []),
@@ -52,7 +53,8 @@ export async function render(ctx) {
   };
 
   const pool = members.filter(m => m.status === 'active');
-  const picked = new Set(pool.filter(m => m.role === 'translator' && m.track !== 'field').map(m => m.id));
+  const FIELDY = m => ['field', 'answers'].includes(m.track);
+  const picked = new Set(pool.filter(m => m.role === 'translator' && !FIELDY(m)).map(m => m.id));
 
   const f = {
     title: h('input', { value: saved.title || 'بطاقة عمل', maxlength: 60 }),
@@ -81,6 +83,7 @@ export async function render(ctx) {
   const panel = h('div.cd-panel');
   const bandBox = h('div.stack');
   const fontBox = h('div');   // نوع الخط ظاهر دائمًا لا داخل التفاصيل المطوية
+  const orientBox = h('div.stack');
   const logoBox = h('div.stack');
   const signBox = h('div.stack');
   const sampleOf = () => pool.find(m => picked.has(m.id)) || pool[0] || null;
@@ -110,6 +113,9 @@ export async function render(ctx) {
         src: qrDataUri(cardVerifyUrl(member?.member_no ?? 0, member?.card_key || 'preview'),
           { margin: 0, dark: it.color || '#1c1a17' }),
         style: { width: '100%', height: '100%', display: 'block' } });
+    } else if (LIVE_ITEMS.includes(key)) {
+      // الوقتُ والتاريخُ يجريان في اللوحة كما يجريان في البطاقة
+      inner = document.createTextNode(liveText(key));
     } else {
       const text = itemText(key, {
         member: member || { full_name: 'اسم المترجم' }, cfg: cfg(),
@@ -120,24 +126,33 @@ export async function render(ctx) {
     }
 
     const box = h(`div.cd-item.editable.cd-${key}`, { style, 'data-key': key }, inner);
+    if (LIVE_ITEMS.includes(key)) box.setAttribute('data-live', key);
+    if (key === 'qr' && it.frame) {
+      box.classList.add('cd-qr', 'framed');
+      box.appendChild(h('i.cd-qr-corners', { 'aria-hidden': 'true' }));
+    }
     if (key === selected) box.classList.add('sel');
     box.addEventListener('pointerdown', e => startDrag(e, key, box));
     return box;
   }
 
+  let stopClock = null;
   function drawStage() {
     const member = sampleOf();
     const band = layout.band;
-    stage.style.width = px(CARD.w);
-    stage.style.height = px(CARD.h);
+    const C = cardSize(layout);
+    stage.style.width = px(C.w);
+    stage.style.height = px(C.h);
     stage.style.background = layout.card.bg;
     stage.style.borderColor = layout.card.border;
+    stage.style.setProperty('--cd-glow', layout.card.border || '#E2CEA1');
+    stage.classList.toggle('glow', layout.card.glow !== false);
     stage.style.fontFamily = fontStack(layout.font);   // نوع الخط العام للبطاقة (ملاحظة ١٠٠)
     const kids = [];
     // الخلفيةُ تحت الجميع، ثم الشريطُ والفواصل، ثم الأشكالُ والعلامة (٣٩٥)
     const bgs = scaleStyle(bgStyle(layout.bg), SCALE);
     if (bgs && customUrls.__bg) kids.push(h('img.cd-bg', { src: customUrls.__bg, alt: '', style: bgs }));
-    const bs = scaleStyle(bandStyle(band), SCALE);
+    const bs = scaleStyle(bandStyle(band, layout), SCALE);
     if (bs) kids.push(h('div.cd-band', { style: bs }));
     for (const k of ['top', 'bottom']) {
       const rs = scaleStyle(ruleStyle(layout.rules[k]), SCALE);
@@ -181,6 +196,9 @@ export async function render(ctx) {
       kids.push(box);
     }
     stage.replaceChildren(...kids);
+    // ساعةٌ واحدةٌ لا تتكرَّر مع كلِّ إعادة رسم
+    if (stopClock) stopClock();
+    stopClock = startCardClocks(stage);
     const img = stage.querySelector('.cd-photo-img');
     if (img && member && photoOf[member.id]) {
       storage.signedUrl('member-photos', photoOf[member.id], 600).then(u => { img.src = u; }).catch(() => {});
@@ -303,10 +321,10 @@ export async function render(ctx) {
           h('label.field', 'من اليسار (مم)', sx),
           h('label.field', 'من الأعلى (مم)', sy)),
         h('label.field', `العرض (${round(it.w)} مم)`,
-          sizeRange(it.w, 0.5, CARD.w, 0.5, v => { it.w = v; })),
+          sizeRange(it.w, 0.5, cardSize(layout).w, 0.5, v => { it.w = v; })),
         it.kind === 'line' ? null
           : h('label.field', `الارتفاع (${round(it.h)} مم)`,
-              sizeRange(it.h, 0.5, CARD.h, 0.5, v => { it.h = v; })),
+              sizeRange(it.h, 0.5, cardSize(layout).h, 0.5, v => { it.h = v; })),
         h('label.field', `سمكُ الخط (${round(it.stroke)} مم)`,
           sizeRange(it.stroke, 0.1, 4, 0.1, v => { it.stroke = v; })),
         it.kind === 'rect' || it.kind === 'frame'
@@ -330,7 +348,7 @@ export async function render(ctx) {
         h('label.field', 'من اليسار (مم)', posX),
         h('label.field', 'من الأعلى (مم)', posY)),
       h('label.field', `${selected === 'photo' || it.type === 'image' ? 'عرض الصورة' : 'عرض الحقل'} (${round(it.w)} مم)`,
-        sizeRange(it.w, 3, CARD.w, 0.5, v => { it.w = v; }))
+        sizeRange(it.w, 3, cardSize(layout).w, 0.5, v => { it.w = v; }))
     ];
 
     // نص العنصر المضاف يُكتب هنا
@@ -428,8 +446,8 @@ export async function render(ctx) {
       t.onclick = () => { r.show = !r.show; drawStage(); drawBand(); };
       return h('fieldset', h('legend', label),
         h('div.row', t),
-        h('label.field', `موضعه من الأعلى (${round(r.y)} مم)`, sizeRange(r.y, 0, CARD.h, 0.2, v => { r.y = v; drawBand(); })),
-        h('label.field', `عرضه (${round(r.w)} مم)`, sizeRange(r.w, 2, CARD.w, 0.5, v => { r.w = v; drawBand(); })),
+        h('label.field', `موضعه من الأعلى (${round(r.y)} مم)`, sizeRange(r.y, 0, cardSize(layout).h, 0.2, v => { r.y = v; drawBand(); })),
+        h('label.field', `عرضه (${round(r.w)} مم)`, sizeRange(r.w, 2, cardSize(layout).w, 0.5, v => { r.w = v; drawBand(); })),
         h('label.field', 'لونه', colorRow(r.color, v => { r.color = v; drawBand(); })));
     };
 
@@ -454,11 +472,23 @@ export async function render(ctx) {
   const applyPreset = h('button.btn.sm', { type: 'button' }, 'تطبيق القالب');
   applyPreset.onclick = () => {
     // القالبُ يبدّل المواضعَ والألوان، ويُبقي ما رفعه المستعمل بنفسه (٣٩٥)
-    const keep = { bg: layout.bg, wm: layout.wm, shapes: layout.shapes, custom: layout.custom };
-    layout = Object.assign(PRESET_LAYOUT[presetSel.value](), keep);
-    clampLayout(layout);
-    drawStage(); drawBand(); drawLogo(); drawBg(); drawShapes(); drawWm(); drawLayers();
-    toast('طُبّق القالب — عدّل عليه ثم احفظ.', 'ok');
+    const was = layout.orient || 'land';
+    const next = PRESET_LAYOUT[presetSel.value]();
+    const to = next.orient === 'port' ? 'port' : 'land';
+    // وتخطيطُ الاتجاه الآخر لا يُحفَظ إلا إن كان حقًّا للآخر: وإلّا صار
+    //   الاتجاهان واحدًا في المحفوظ، فطُمِس أحدُهما عند أوّل تبديل
+    const keep = { bg: layout.bg, wm: layout.wm, custom: layout.custom,
+      other: (layout.other && layout.other.orient && layout.other.orient !== to)
+        ? layout.other : null };
+    // والقالبُ قد يحمل اتجاهًا غيرَ الحاليِّ، فيتبدّل المقاسُ معه،
+    //   وأشكالُ القالب تُؤخَذ منه لأنها جزءٌ من تصميمه (ملاحظة ٤٨٧)
+    layout = clampLayout(normalizeLayout(Object.assign(next, keep,
+      { shapes: next.shapes || layout.shapes || [] })));
+    drawStage(); drawBand(); drawLogo(); drawSign(); drawBg(); drawShapes();
+    drawWm(); drawLayers(); drawOrient();
+    toast(was === to ? 'طُبّق القالب — عدّل عليه ثم احفظ.'
+      : `طُبّق القالب، وصار التصميمُ ${to === 'port' ? 'عموديًّا' : 'أفقيًّا'} — عدّل عليه ثم احفظ.`,
+      'ok');
   };
 
   // توقيعُ المسؤول: يُرفع صورةً ويوضع عنصرًا يُحرَّك بحرّية (ملاحظة ٢٨٣)
@@ -650,7 +680,7 @@ export async function render(ctx) {
       h('label.field', `حجمُ النص (${round(wm.size)} نقطة)`,
         sizeRange(wm.size, 4, 40, 0.5, v => { wm.size = v; })),
       h('label.field', `العرض (${round(wm.w)} مم)`,
-        sizeRange(wm.w, 6, CARD.w, 0.5, v => { wm.w = v; })),
+        sizeRange(wm.w, 6, cardSize(layout).w, 0.5, v => { wm.w = v; })),
       h('label.field', `الشفافية (${AR(Math.round((wm.fade || 0) * 100))}٪)`,
         sizeRange(wm.fade, 0.02, 1, 0.02, v => { wm.fade = v; })),
       h('label.field', `الميل (${AR(Math.round(wm.rot))} درجة)`,
@@ -712,13 +742,20 @@ export async function render(ctx) {
   };
   // ـــ القائمةُ تُقسَّم بالفرق، ولكلِّ فريقٍ علامةٌ واحدةٌ تُؤشِّر أعضاءه
   //   دفعةً واحدة، ثمَّ يُرفَع عمَّن شئت (ملاحظة ٣٩٤)
-  const TEAM_OF = m => (m.track === 'field' ? 'field'
-    : m.track === 'answers' ? 'answers'
+  //   وأهلُ الميدان — المكانيّون وإجابةُ السائلين — قسمٌ واحد، إذ
+  //   عملُهم واحدٌ وبطاقتُهم واحدة، ويُرشَّحون بمدينتهم (ملاحظة ٤٨٦)
+  const TEAM_OF = m => (['field', 'answers'].includes(m.track) ? 'field'
     : ['manager', 'coordinator', 'supervisor', 'field_lead', 'viewer'].includes(m.role)
       ? 'admins' : 'translators');
-  const TEAM_NAME = { admins: 'الإداريّون', translators: 'المترجمون التخصصيّون',
-    field: 'المرشدون المكانيّون', answers: 'إجابةُ السائلين' };
-  const TEAM_ORDER = ['admins', 'translators', 'field', 'answers'];
+  const TEAM_NAME = { translators: 'المترجمون المتخصصون',
+    field: 'المرشدون المكانيّون وإجابةُ السائلين', admins: 'الإداريّون' };
+  const TEAM_ORDER = ['translators', 'field', 'admins'];
+  const CITY_AR = { makkah: 'مكة المكرمة', madinah: 'المدينة المنورة' };
+  const NO_CITY = '\u0000none';
+  // مدينةُ قسم الميدان: مكةُ أو المدينةُ أو كلتاهما
+  let cityPick = '';
+  const inCity = m => (!cityPick
+    || (cityPick === NO_CITY ? !m.city : (m.city || '') === cityPick));
 
   // أسماءُ الفريق مطويّةٌ خلف سهم، وفيها بحثٌ بالاسم (ملاحظة ٤٠٢)
   const openTeam = new Set();
@@ -750,7 +787,23 @@ export async function render(ctx) {
         placeholder: 'ابحثْ بالاسم…', 'aria-label': `بحث في ${TEAM_NAME[k] || k}` });
       search.oninput = () => { teamQ[k] = search.value; drawList(); search.focus(); };
       const key = (teamQ[k] || '').trim();
-      const shown = key ? list.filter(m => (m.full_name || '').includes(key)) : list;
+      let shown = key ? list.filter(m => (m.full_name || '').includes(key)) : list;
+
+      // ومدينةُ أهل الميدان تُرشِّح أسماءَهم في قسمهم (ملاحظة ٤٨٦)
+      const cityOpts = k !== 'field' ? []
+        : [...new Set(list.map(m => m.city || ''))];
+      const citySel = (k !== 'field' || !cityOpts.filter(Boolean).length) ? null : (() => {
+        const sel = h('select',
+          h('option', { value: '', selected: cityPick === '' }, 'المدينتان معًا'),
+          ['makkah', 'madinah'].filter(c => cityOpts.includes(c))
+            .map(c => h('option', { value: c, selected: cityPick === c }, CITY_AR[c])),
+          cityOpts.includes('')
+            ? h('option', { value: NO_CITY, selected: cityPick === NO_CITY },
+                'بلا مدينةٍ مسجَّلة') : null);
+        sel.onchange = () => { cityPick = sel.value; drawList(); };
+        return h('label.field.tight', 'المدينة', sel);
+      })();
+      if (k === 'field') shown = shown.filter(inCity);
 
       return h('section.pick-team' + (shut ? '.shut' : ''),
         h('div.pick-team-head',
@@ -759,6 +812,7 @@ export async function render(ctx) {
             h('span.small.muted', ` ${AR(n)} من ${AR(list.length)}`)),
           arrow),
         shut ? null : h('div.pick-team-body',
+          citySel ? h('div.row.wrap', citySel) : null,
           h('label.field.pick-search', search),
           ...(shown.length ? shown.map(m => {
             const cb = h('input', { type: 'checkbox', checked: picked.has(m.id) ? true : null });
@@ -767,11 +821,17 @@ export async function render(ctx) {
               drawList(); count(); drawStage();
             };
             const card = issuedOf[m.id];
+            // شعارُ البطاقة ظاهرٌ: صدرت له أو لم تصدر، ثم حالُ عرضها
+            //   (ملاحظة ٤٨٦)
+            const gone = card && card.valid_until
+              && new Date(card.valid_until) < new Date(new Date().toDateString());
             return h('label.check', cb, h('span', m.full_name,
               h('span.small.muted', ` — ${roleLabel(m)}`),
+              m.city ? h('span.small.muted', ` · ${CITY_AR[m.city] || ''}`) : null,
               !photoOf[m.id] && h('span.badge.warn', 'بلا صورة'),
-              card && card.hidden
-                ? h('span.badge.warn', 'مخفيّة')
+              card ? h('span.badge.ok', '🪪 صدرت') : h('span.badge.bad', 'بلا بطاقة'),
+              card && card.hidden ? h('span.badge.warn', 'موقوفةُ العرض')
+                : card && gone ? h('span.badge.warn', 'منتهية')
                 : card ? h('span.badge.ok', 'ظاهرةٌ له') : null,
               card && card.valid_until
                 ? h('span.small.muted', ` حتى ${fmtDate(card.valid_until)}`) : null));
@@ -782,7 +842,7 @@ export async function render(ctx) {
   allBox.onchange = () => { picked.clear(); if (allBox.checked) pool.forEach(m => picked.add(m.id)); drawList(); count(); drawStage(); };
   const onlyTranslators = h('button.btn.sm.ghost', { type: 'button' }, 'المترجمون فقط');
   onlyTranslators.onclick = () => {
-    picked.clear(); pool.filter(m => m.role === 'translator' && m.track !== 'field').forEach(m => picked.add(m.id));
+    picked.clear(); pool.filter(m => m.role === 'translator' && !FIELDY(m)).forEach(m => picked.add(m.id));
     drawList(); count(); drawStage();
   };
 
@@ -874,6 +934,31 @@ export async function render(ctx) {
     } catch (e) { toast(e.message, 'bad'); }
   }
 
+  // ـــ ومفتاحٌ واحدٌ للفريق كلِّه: يوقف العرضَ عنهم جميعًا أو يُعيده
+  //   (ملاحظة ٤٨٦). وإيقافُ العرض يُغلِق معه بابَ التحقّق من الباركود،
+  //   فلا تُقرأ بطاقةٌ أوقفها صاحبُ الأمر.
+  const hideAllBtn = h('button.btn.sm.danger', { type: 'button' },
+    '⛔ أوقِفِ العرض عن الفريق كلِّه');
+  hideAllBtn.onclick = () => busy(hideAllBtn, () => setAllHidden(true));
+  const showAllBtn = h('button.btn.sm.ghost', { type: 'button' },
+    'أعِدِ العرض للفريق كلِّه');
+  showAllBtn.onclick = () => busy(showAllBtn, () => setAllHidden(false));
+  async function setAllHidden(on) {
+    const ok = await confirm(
+      on ? 'إيقافُ العرض عن الفريق كلِّه' : 'إعادةُ العرض للفريق كلِّه',
+      on ? 'يُوقَف عرضُ البطاقة عن كلِّ من صدرت له، فلا يراها في حسابه '
+         + 'ولا يُفتَح باركودُها في صفحة التحقّق.'
+         : 'يعود عرضُ البطاقة لكلِّ من صدرت له، ويُفتَح باركودُها.',
+      on ? 'أوقِفْ' : 'أعِدْ', on ? 'danger' : 'primary');
+    if (!ok) return;
+    try {
+      const n = Number(await db.rpc('hide_all_member_cards', { p_hidden: on })) || 0;
+      Object.keys(issuedOf).forEach(id => { issuedOf[id] = { ...issuedOf[id], hidden: on }; });
+      drawList();
+      toast(on ? `أُوقف عرضُ ${AR(n)} بطاقة.` : `أُعيد عرضُ ${AR(n)} بطاقة.`, 'ok');
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
   const whoBtn = h('button.btn.sm.ghost', { type: 'button' }, 'من تظهر له البطاقة؟');
   whoBtn.onclick = () => busy(whoBtn, async () => {
     let rows = [];
@@ -951,6 +1036,52 @@ export async function render(ctx) {
   drawList(); count(); drawBand(); drawLogo(); drawSign(); drawStage();
 
   // شريطُ أيقونات: كلُّ أيقونةٍ تفتح خياراتها وحدها، فلا تزدحم الشاشة
+  // ـــ لوحةُ الاتجاه (ملاحظة ٤٨٧)
+  //
+  //   التبديلُ يحفظ تخطيطَ الاتجاه الحاليِّ في `other` ويستعيد ما كان
+  //   محفوظًا للاتجاه الآخر، فإن لم يكن له تخطيطٌ بُني من القالب
+  //   المعتمَد لذلك الاتجاه. والمقاسُ يتبدّل بتبدّله، والقصُّ يحمي
+  //   العناصرَ من الخروج عن الحدّ.
+  function swapOrient(to) {
+    if ((layout.orient || 'land') === to) return;
+    const keep = JSON.parse(JSON.stringify({ ...layout, other: null }));
+    const saved2 = layout.other;
+    const base = saved2 && saved2.orient === to
+      ? normalizeLayout(saved2)
+      : normalizeLayout(withExtras(
+          to === 'port' ? PRESET_LAYOUT.haramain_v() : PRESET_LAYOUT.haramain_h()));
+    base.orient = to;
+    base.other = keep;
+    layout = clampLayout(base);
+    selected = 'name';
+    drawStage(); drawBand(); drawLogo(); drawSign(); drawBg(); drawShapes();
+    drawWm(); drawLayers();
+    toast(to === 'port' ? 'صار التصميمُ عموديًّا.' : 'صار التصميمُ أفقيًّا.', 'ok');
+  }
+
+  const drawOrient = () => {
+    const port = isPort(layout);
+    const bH = h('button.btn.sm', { type: 'button', class: port ? '' : 'primary' }, '▭ أفقيّ');
+    bH.onclick = () => { swapOrient('land'); drawOrient(); };
+    const bV = h('button.btn.sm', { type: 'button', class: port ? 'primary' : '' }, '▯ عموديّ');
+    bV.onclick = () => { swapOrient('port'); drawOrient(); };
+    const glow = h('input', { type: 'checkbox', checked: layout.card.glow !== false ? true : null });
+    glow.onchange = () => { layout.card.glow = glow.checked; drawStage(); };
+    const frame = h('input', { type: 'checkbox', checked: layout.items.qr.frame ? true : null });
+    frame.onchange = () => { layout.items.qr.frame = frame.checked; drawStage(); };
+    orientBox.replaceChildren(
+      h('p.small.muted', 'لكلِّ اتجاهٍ تخطيطُه المحفوظ: بدِّلْ ثم عُدْ فتجد عملَك كما تركتَه.'),
+      h('div.row.wrap', bH, bV),
+      h('p.small.muted', `المقاس الآن ${cardSize(layout).w} × ${cardSize(layout).h} مم.`),
+      h('hr'),
+      h('p.small.muted', 'وفي العرض على الشاشة يدور ضوءٌ على حافة البطاقة وحول '
+        + 'الباركود، ويجري الوقتُ بالثواني — فصورةُ الشاشة تنكشف بسكونها. '
+        + 'ولا شيءَ من ذلك في المطبوع.'),
+      h('label.check', glow, h('span', 'ضوءٌ يدور على حافة البطاقة')),
+      h('label.check', frame, h('span', 'إطارٌ مضيءٌ حول الباركود')));
+  };
+  drawOrient();
+
   // بكل الخيارات معًا (ملاحظة ١٩٩)
   // ـــ القوائمُ كلُّها في إطارٍ واحدٍ ثابتِ الأبعاد (ملاحظتا ٤٠٠ و٤٠١)
   const TABS = [
@@ -963,6 +1094,11 @@ export async function render(ctx) {
         h('label.field', 'اسم المسؤول', f.official_name),
         h('label.field', 'منصب المسؤول', f.official_title),
         h('label.field', 'صلاحية البطاقة حتى', f.valid_until)) },
+    // ـــ الاتجاه: أفقيٌّ أو عموديّ، ولكلِّ اتجاهٍ تخطيطُه المحفوظ
+    //   (ملاحظة ٤٨٧) — فمن بدَّل ثم عاد وجد عملَه كما تركه، ولا تخرج
+    //   العناصرُ عن حدود البطاقة بأوَّل تبديل
+    { key: 'orient', icon: '⇄', label: 'الاتجاه', hint: 'أفقيٌّ أو عموديّ، وتوهُّجُ الإطار',
+      make: () => { drawOrient(); return orientBox; } },
     { key: 'preset', icon: '▦', label: 'القوالب', hint: 'تصاميمُ جاهزةٌ يُبنى عليها',
       make: () => h('div.stack',
         h('p.small.muted', 'اختر أقربها إلى ما تريد ثم عدّل عليه.'),
@@ -1003,7 +1139,8 @@ export async function render(ctx) {
       h('label.check', allBox, h('b', 'تحديد الكل')),
       listBox,
       h('p.small.muted', 'الاعتماد يُظهر البطاقة في حساب صاحبها ضمن «بياناتي» ليبرزها عند الحاجة.'),
-      h('div.row.wrap', printBtn, issueBtn, revokeBtn, hideBtn, showBtn, whoBtn)));
+      h('div.row.wrap', printBtn, issueBtn, revokeBtn, hideBtn, showBtn, whoBtn),
+      h('div.row.wrap', { style: { marginTop: '6px' } }, hideAllBtn, showAllBtn)));
 }
 
 // بطاقة واحدة — من شاشة «بياناتي»
@@ -1042,7 +1179,9 @@ function printCards(rows, cfg, layout, logoData, customData = {}) {
       return `<div class="cd-item" style="${style};height:${it.w}mm">`
         + `<img src="${src}" alt="" style="width:100%;height:100%;display:block"></div>`;
     }
-    const text = itemText(key, {
+    // والوقتُ والتاريخُ في المطبوع: ساكنانِ بوقت الطباعة، فالورقةُ
+    //   ليست البطاقةَ الحيّة (ملاحظة ٤٨٧)
+    const text = LIVE_ITEMS.includes(key) ? liveText(key) : itemText(key, {
       member: row.member, cfg,
       roleLabel: roleLabel(row.member),
       langsText: row.langsText
@@ -1052,7 +1191,7 @@ function printCards(rows, cfg, layout, logoData, customData = {}) {
 
   const styleStr = o => o ? Object.entries(o)
     .map(([k, v]) => `${k.replace(/[A-Z]/g, c => '-' + c.toLowerCase())}:${v}`).join(';') : '';
-  const band = bandStyle(layout.band) ? `<div style="${styleStr(bandStyle(layout.band))}"></div>` : '';
+  const band = bandStyle(layout.band, layout) ? `<div style="${styleStr(bandStyle(layout.band, layout))}"></div>` : '';
   const rules = ['top', 'bottom']
     .map(k => ruleStyle(layout.rules[k]) ? `<div style="${styleStr(ruleStyle(layout.rules[k]))}"></div>` : '')
     .join('');
@@ -1090,7 +1229,8 @@ function printCards(rows, cfg, layout, logoData, customData = {}) {
 
   // صفحةُ A4 بهوامشَ ١٠مم تتّسع لـ٢٧٧مم: أربعةُ صفوفٍ من البطاقات
   // (٤×٥٤ + ٣×٤ = ٢٢٨مم) لا خمسةٌ، فالخمسةُ ٢٨٦مم وتفيض (ملاحظة ٢٨٠ ح)
-  const ROWS = Math.max(1, Math.floor((277 - 4) / (CARD.h + 4)));
+  const CP = cardSize(layout);
+  const ROWS = Math.max(1, Math.floor((277 - 4) / (CP.h + 4)));
   const perPage = ROWS * 2;
   const pages = [];
   for (let i = 0; i < rows.length; i += perPage) pages.push(rows.slice(i, i + perPage));
@@ -1104,9 +1244,9 @@ function printCards(rows, cfg, layout, logoData, customData = {}) {
   * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   body { margin: 0; font-family: 'HS', system-ui, sans-serif; background: #f3f3f3; color: #1c1a17; }
   .sheet { width: 190mm; height: 277mm; overflow: hidden; margin: 0 auto 8mm; background: #fff; padding: 2mm;
-           display: grid; grid-template-columns: repeat(2, ${CARD.w}mm); gap: 4mm 6mm;
+           display: grid; grid-template-columns: repeat(2, ${CP.w}mm); gap: 4mm 6mm;
            justify-content: center; align-content: start; }
-  .wcard { position: relative; width: ${CARD.w}mm; height: ${CARD.h}mm; overflow: hidden;
+  .wcard { position: relative; width: ${CP.w}mm; height: ${CP.h}mm; overflow: hidden;
            background: ${layout.card.bg}; border: .3mm solid ${layout.card.border}; border-radius: 2.5mm;
            font-family: ${fontStack(layout.font)}; }
   .cd-item { position: absolute; }

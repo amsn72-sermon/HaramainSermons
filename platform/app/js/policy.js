@@ -247,6 +247,12 @@ export const charterOf = profile => (isFieldMember(profile)
   ? { key: FIELD_KEY, version: FIELD_VERSION, doc: F10 }
   : { key: POLICY_KEY, version: POLICY_VERSION, doc: CUR });
 
+// هل عندنا نصُّ هذه النسخة؟ فنصُّ نسخةٍ لا نملكها لا يُعرَض تحت
+//   عنوانها نصًّا آخرَ، فيُحتجَّ على الرجل بما لم يُعرَض عليه
+export const hasCharterVersion = (key, v) => (key === FIELD_KEY
+  ? Object.prototype.hasOwnProperty.call(FIELD_VERSIONS, String(v || '').trim())
+  : Object.prototype.hasOwnProperty.call(POLICY_VERSIONS, String(v || '').trim()));
+
 // نصُّ نسخةٍ بعينها من ميثاقٍ بعينه
 export const charterDoc = (key, v) => (key === FIELD_KEY
   ? (FIELD_VERSIONS[String(v || '').trim()] || F10)

@@ -4,9 +4,10 @@ import { db, storage } from '../sb.js';
 import { state, STATUS_LABEL, TRACK_LABEL, CITY, NO_FATWA, langName, roleLabel } from '../store.js';
 import { PHOTO_RULES, preparePhoto, readStashed, clearStashed, dataUrlToBlob, urlToDataUrl } from '../photo.js';
 import { bankSection } from './bank.js';
-import { normalizeLayout, staticCard, HARAMAIN_LOGO, CARD } from '../carddesign.js';
+import { normalizeLayout, staticCard, startCardClocks, cardSize,
+         HARAMAIN_LOGO, CARD } from '../carddesign.js';
 import { nationalitySelect } from '../nationalities.js';
-import { signaturePad, signatureImg, signatureUpload } from '../signature.js';
+import { signaturePad, signatureImg } from '../signature.js';
 
 const ID_LABEL = { national: 'رقم الهوية أو الإقامة', passport: 'رقم جواز السفر' };
 
@@ -279,19 +280,31 @@ export async function render(ctx) {
         try { await db.rpc('set_my_signature', { p_path: null }); priv.signature_path = null; toast('حُذف التوقيع.', 'ok'); drawSig(); }
         catch (e) { toast(e.message, 'bad'); }
       });
+      // ومن كان توقيعُه صورةً مرفوعةً يُقال له ذلك هنا، فلا يُفاجَأ عند
+      //   أوّل تعميمٍ بأنّ عليه رسمَه (ملاحظة ٤٩٠)
+      const uploaded = priv.signature_kind && priv.signature_kind !== 'drawn';
       sigBox.replaceChildren(
         url ? signatureImg(url, 'توقيعك المحفوظ') : h('p.small.muted', 'تعذّر عرض التوقيع'),
         h('p.small.muted', priv.signature_at ? `حُفظ في ${fmtDateTime(priv.signature_at)}` : ''),
+        uploaded
+          ? h('p.small.warn', 'هذا التوقيعُ محفوظٌ عندنا صورةً مرفوعة، والمعتمَدُ '
+              + 'أن ترسمه بيدك — ارسمْه مرّةً من «تغيير التوقيع».')
+          : null,
         h('div.row', replace, remove));
     } else {
       const start = h('button.btn.primary', { type: 'button' }, 'رسم التوقيع');
       start.onclick = () => padUI();
       sigBox.replaceChildren(
-        h('p.small.muted', 'ارسم توقيعك مرة واحدة أو ارفع صورته، فيُدرَج تلقائيًّا كلما وقّعت بالعلم على المراسلات.'),
-        h('div.row', start),
-        signatureUpload({ memberId: me.id, onSaved: path => {
-          priv.signature_path = path; priv.signature_at = new Date().toISOString(); drawSig();
-        } }));
+        // وإن كانت الإدارةُ قد طلبت توقيعًا حيًّا بُيِّن سببُ المحو
+        priv.signature_redo_at
+          ? h('p.small.warn', 'طلبت إدارةُ المشروع أن ترسم توقيعَك بيدك، '
+              + 'فمُحي المحفوظُ عندك. ارسمْه هنا مرّةً واحدة.')
+          : null,
+        h('p.small.muted', 'التوقيعُ المعتمَدُ في المنصة إلكترونيٌّ: تكتب اسمَك الكامل، '
+          + 'ويُحفَظ معه إثباتُه. وبعضُ التعاميم تطلب رسمَ اليد زيادةً عليه، '
+          + 'فارسمْه هنا مرّةً بإصبعك أو بالفأرة يُدرَج لك حين يُطلَب. '
+          + 'ولا تُقبَل صورةٌ مرفوعة.'),
+        h('div.row', start));
     }
   };
   const padUI = () => {
@@ -304,7 +317,7 @@ export async function render(ctx) {
         const blob = await pad.toBlob();
         const path = `${me.id}/sig-${Date.now()}.png`;
         await storage.upload('signatures', path, blob);
-        await db.rpc('set_my_signature', { p_path: path });
+        await db.rpc('set_my_signature', { p_path: path, p_kind: 'drawn' });
         priv.signature_path = path; priv.signature_at = new Date().toISOString();
         toast('حُفظ توقيعك.', 'ok');
         drawSig();
@@ -312,10 +325,7 @@ export async function render(ctx) {
     });
     sigBox.replaceChildren(
       h('p.small.muted', 'ارسم توقيعك داخل الإطار بإصبعك على الجوال أو بالفأرة على الحاسب.'),
-      pad.el, h('div.row', save, clear),
-      signatureUpload({ memberId: me.id, onSaved: path => {
-        priv.signature_path = path; priv.signature_at = new Date().toISOString(); drawSig();
-      } }));
+      pad.el, h('div.row', save, clear));
   };
   drawSig();
 
@@ -479,6 +489,14 @@ export async function render(ctx) {
 // بطاقة العمل: تظهر للعضو بعد اعتمادها، يستعرضها ويبرزها عند الحاجة (ملاحظة ٨٧)
 // ---------------------------------------------------------------------
 async function cardSection(me, priv, langs, issued, settings) {
+  // والموقوفةُ عرضُها لا تظهر لصاحبها، ولا يُفتَح باركودُها في صفحة
+  //   التحقّق — فالإيقافُ في الحقيقة لا في الشاشة (ملاحظة ٤٨٦)
+  if (issued && issued.hidden) {
+    return h('div.card.stack',
+      h('h3', 'بطاقة العمل'),
+      h('p.small.muted', 'عرضُ بطاقتك موقوفٌ الآن من إدارة المشروع. '
+        + 'راجعْها إن احتجتَ إليها.'));
+  }
   if (!issued || !settings) {
     return h('div.card.stack',
       h('h3', 'بطاقة العمل'),
@@ -516,14 +534,21 @@ async function cardSection(me, priv, langs, issued, settings) {
       try { customUrls[key] = await storage.signedUrl('brand', p, 600); } catch { /* تُتجاوز */ }
     }));
 
-  const build = scale => staticCard(h, { layout, member: me, cfg, roleLabel: myRoleLabel, langsText, logoSrc, photoUrl, customUrls, scale });
+  const build = scale => {
+    const el = staticCard(h, { layout, member: me, cfg, roleLabel: myRoleLabel,
+      langsText, logoSrc, photoUrl, customUrls, scale });
+    // ووقتُها يجري ما دامت في الصفحة، فيُعرَف الحيُّ من صورة الشاشة
+    //   (ملاحظة ٤٨٧)
+    startCardClocks(el);
+    return el;
+  };
 
   const expired = validUntil && new Date(validUntil) < new Date(new Date().toDateString());
   const showBtn = h('button.btn.primary', { type: 'button' }, 'إبراز البطاقة');
   showBtn.onclick = () => dialog({
     // تكبير يملأ الشاشة دون أن يتجاوزها — تُبرز على الجوال كما على الحاسب
     title: cfg.title,
-    body: h('div.card-show', build(Math.max(3.2, Math.min(10, (Math.min(window.innerWidth, 760) - 76) / CARD.w))),
+    body: h('div.card-show', build(Math.max(3.2, Math.min(10, (Math.min(window.innerWidth, 760) - 76) / cardSize(layout).w))),
       h('p.small.muted', `${me.full_name} — ${myRoleLabel}${cfg.valid_until_text ? ` · سارية حتى ${cfg.valid_until_text}` : ''}`)),
     buttons: [{ label: 'إغلاق', value: null }]
   });
