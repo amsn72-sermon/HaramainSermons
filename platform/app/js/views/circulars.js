@@ -198,14 +198,19 @@ export async function render(ctx) {
     }
     const signed = list.filter(r => r.acked_at);
     const waiting = list.filter(r => !r.acked_at);
+    // كشفٌ واحدٌ متَّصل: الموقِّعون بأسمائهم أوّلًا ثمَّ من لم يوقِّع،
+    //   في الشاشة والطباعة سواءً (ملاحظة ٤٩٧)
+    const roster = [...list].sort((a, b) =>
+      (a.acked_at ? 0 : 1) - (b.acked_at ? 0 : 1)
+      || String(a.full_name || '').localeCompare(String(b.full_name || ''), 'ar'));
 
-    const tableOf = (items, kind) => h('div.table-wrap', h('table.responsive',
-      h('thead', h('tr', ['العضو', 'الدور', 'الاطّلاع', kind === 'signed' ? 'التوقيع بالعلم' : 'الحال'].map(t => h('th', t)))),
+    const tableOf = items => h('div.table-wrap', h('table.responsive',
+      h('thead', h('tr', ['العضو', 'الدور', 'الاطّلاع', 'التوقيع بالعلم'].map(t => h('th', t)))),
       h('tbody', items.map(r => h('tr',
         h('td', { 'data-label': 'العضو' }, r.full_name || '—', r.member_no ? h('div.small.muted', r.member_no) : null),
         h('td', { 'data-label': 'الدور' }, ROLE_LABEL[r.role] || '—'),
         h('td', { 'data-label': 'الاطّلاع' }, r.read_at ? fmtDateTime(r.read_at) : h('span.muted', 'لم يفتحها')),
-        kind === 'signed'
+        r.acked_at
           ? h('td', { 'data-label': 'التوقيع' },
               h('span.badge.ok', 'وقّع'), h('span.sub', `${r.signed_name || ''} — ${fmtDateTime(r.acked_at)}`),
               r.signature_path ? sigCell(r.signature_path) : null,
@@ -226,8 +231,10 @@ export async function render(ctx) {
         h('p.small.muted', `أرسلها ${c.sender?.full_name || '—'} — ${fmtDateTime(c.sent_at)}`
           + (c.edited_at ? ` · عُدّلت ${fmtDateTime(c.edited_at)}` : '')
           + (c.reminded_at ? ` · آخر تذكير ${fmtDateTime(c.reminded_at)}` : '')),
-        waiting.length ? h('div.stack', h('h3', `لم يوقّعوا (${waiting.length})`), tableOf(waiting, 'waiting')) : null,
-        signed.length ? h('div.stack', h('h3', `وقّعوا (${signed.length})`), tableOf(signed, 'signed')) : null),
+        roster.length ? h('div.stack',
+          h('h3', `الكشف (${roster.length})`),
+          h('p.small.muted', 'الموقِّعون بأسمائهم أوّلًا، ثمَّ من لم يوقِّع بعد.'),
+          tableOf(roster)) : null),
       buttons: [
         { label: 'تصدير الكشف', value: 'export' },
         { label: 'إغلاق', value: null }
@@ -236,7 +243,7 @@ export async function render(ctx) {
     if (v !== 'export') return;
 
     const sheet = [['العضو', 'الدور', 'الاطّلاع', 'التوقيع بالعلم', 'الاسم الموقَّع به'],
-      ...list.map(r => [r.full_name || '—', ROLE_LABEL[r.role] || '—',
+      ...roster.map(r => [r.full_name || '—', ROLE_LABEL[r.role] || '—',
         r.read_at ? fmtDateTime(r.read_at) : 'لم يفتحها',
         r.acked_at ? fmtDateTime(r.acked_at) : 'لم يوقّع', r.signed_name || ''])];
     try {

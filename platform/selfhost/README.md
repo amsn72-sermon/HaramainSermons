@@ -166,3 +166,57 @@ sudo sh backup.sh --install-cron <namespace>            # يوميًا 2:30 فج
 | تحديثات Ubuntu الأمنية | `sudo apt-get update && sudo apt-get upgrade -y` شهريًا |
 
 فعّل من Oracle: **Monitoring ← Alarms** على استهلاك القرص فوق ٨٠٪ والمعالج فوق ٩٠٪، مع تنبيه بالبريد.
+
+## ٧. مصحفُ الإدراج بالرسم العثماني (ملاحظة ٥٠٠)
+
+جدولا `quran_suras` و`quran_ayat` يُنشَآن بالهجرة ويبقيان فارغين حتى يُحمَّل النصُّ مرّةً واحدة.
+ولا يُستدعى النصُّ من شبكةٍ خارجية في أثناء العمل: يُحمَّل في خادم الرياض ويبقى فيه.
+
+نزّل نصَّ تنزيل العثمانيَّ (`quran-uthmani.txt` من tanzil.net، صيغة: `سورة|آية|النص`) على جهازك، ثم ارفعه إلى الخادم:
+
+```
+scp -o ProxyCommand="ssh -W %h:%p bastion" quran-uthmani.txt ubuntu@haramain-api-2:/tmp/
+```
+
+ثم على الخادم (`ubuntu@haramain-api-2`):
+
+```
+sudo docker cp /tmp/quran-uthmani.txt supabase-db:/tmp/quran.txt
+```
+
+```
+sudo docker exec -i supabase-db psql -U supabase_admin -d postgres -c "create temp table q(line text); \copy q from '/tmp/quran.txt' with (format text); insert into public.quran_ayat (sura, aya, text_uthmani, text_plain) select split_part(line,'|',1)::int, split_part(line,'|',2)::int, split_part(line,'|',3), '' from q where line like '%|%|%' on conflict (sura,aya) do update set text_uthmani = excluded.text_uthmani;"
+```
+
+ثم أسماءُ السور وعددُ آيها:
+
+```
+sudo docker exec -i supabase-db psql -U supabase_admin -d postgres -c "insert into public.quran_suras (sura, name_ar, ayat) select sura, 'سورة ' || sura, count(*) from public.quran_ayat group by sura on conflict (sura) do update set ayat = excluded.ayat;"
+```
+
+وللتأكُّد من اكتمال التحميل (المنتظَر ٦٢٣٦ آية):
+
+```
+sudo docker exec -i supabase-db psql -U supabase_admin -d postgres -c "select public.quran_ready();"
+```
+
+ولا يظهر زرُّ «آية» في المحرر قبل اكتمال العدد.
+
+## ٨. بريدُ المشروع بهويّته (ملاحظة ٥٠١)
+
+أضِفْ إلى `/opt/haramain/supabase/.env` عنوانَ المرسِل الرسميَّ:
+
+```
+MAIL_FROM=trans@uqu.edu.sa
+MAIL_FROM_NAME=مشروع خادم الحرمين الشريفين لترجمة خطب الحرمين
+MAIL_REPLY_TO=trans@uqu.edu.sa
+```
+
+فإن قَبِل خادمُ الجامعة الاستيثاقَ بهذا العنوان خرج البريدُ باسمه. وإن لم يقبل،
+احذفْ `MAIL_FROM` وأبقِ `MAIL_REPLY_TO`: يخرج البريدُ من المرسِل القديم ويعود الردُّ إلى بريد المشروع.
+
+وتُجرَّب الإعداداتُ قبل الاعتماد برسالةٍ واحدة:
+
+```
+sudo PROJECT=/opt/haramain/supabase python3 ~/HaramainSermons/platform/selfhost/notify.py --test your@email
+```

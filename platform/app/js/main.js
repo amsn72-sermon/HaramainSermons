@@ -18,6 +18,9 @@ const routes = [
   ['/verify-card', () => import('./views/cardverify.js'), false],
   // التحقّقُ من وثيقة إثبات التوقيع على الميثاق بباركودها (ملاحظة ٤٢٨)
   ['/verify-sign', () => import('./views/signverify.js'), false],
+  // كشفُ التواقيع المطبوعُ يُفتَح بباركود رأسه، لإداريٍّ يملك مفتاحَه،
+  //   ويُسجَّل فتحُه (ملاحظة ٤٩٨)
+  ['/app/roster', () => import('./views/roster.js'), true, true],
   ['/initiative', () => import('./views/about.js').then(m => ({ render: m.initiative })), false],
   ['/policy', () => import('./views/policy.js'), true],
   ['/mfa', () => import('./views/mfa.js'), true],
@@ -52,6 +55,8 @@ const routes = [
   ['/app/workflow', () => import('./views/workflow.js'), true, true],
   ['/app/archive', () => import('./views/archive.js'), true, 'reports'],
   ['/app/circulars', () => import('./views/circulars.js'), true],
+  // بريدُ المشروع: رسالةٌ بهويّته إلى من يُختار (ملاحظة ٥٠١)
+  ['/app/mail', () => import('./views/mail.js'), true, true],
   ['/app/me', () => import('./views/me.js'), true],
   ['/app/audio-guide', () => import('./views/audioguide.js'), true],
   ['/app/bank-accounts', () => import('./views/staff.js'), true, true],
@@ -86,6 +91,8 @@ const PERM_OF = {
   '/app/staff': 'tm_view', '/app/staff/admins': 'tm_view', '/app/team': 'tm_view',
   '/app/field': 'tm_view', '/app/answers': 'tm_view',
   '/app/cards': 'cards',
+  '/app/roster': 'roster_view',
+  '/app/mail': 'circulars',
   '/app/payroll': 'pay_view',
   '/app/bank-accounts': 'bank_view',
   '/app/shifts': 'sh_view', '/app/sites': 'sh_sites',

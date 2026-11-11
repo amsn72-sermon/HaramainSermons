@@ -39,6 +39,19 @@ const TYPE_ICON = { 'خطب': '🕌', 'دروس علمية': '📖', 'كتب': '
   'منشورات': '📰', 'إعلانات': '📢', 'توجيهات': '📋' };
 const SUB_ICON = '🗒';
 const SCOPE_LABEL = { makkah: 'المسجد الحرام', madinah: 'المسجد النبوي', general: 'مادة عامة' };
+const MOSQUE_ICON = { makkah: '🕋', madinah: '🕌' };
+
+// ـــ انسدالُ الصفوف كما في أرشيف الخطب سواءً (ملاحظة ٤٩٥)
+//
+//   أرشيفُ الخطب يجمع نسخَ اللغات تحت خطبتها، ويُطوى البابُ ويُفتَح
+//   بسهم، وتبقى حالُه محفوظةً في الجهاز فلا يُعيد المستخدمُ فتحَ ما
+//   فتح. فصار أرشيفُ الترجمة مثلَه: لغاتُ العمل الواحد تحت عنوانه.
+const FOLD_KEY = 'hs.archive.fold';
+const readFold = () => {
+  try { return JSON.parse(localStorage.getItem(FOLD_KEY) || '{}') || {}; }
+  catch { return {}; }
+};
+const writeFold = v => { try { localStorage.setItem(FOLD_KEY, JSON.stringify(v)); } catch {} };
 
 const two = n => String(n).padStart(2, '0');
 const monthOf = v => (v ? String(v).slice(0, 7) : '');
@@ -662,6 +675,65 @@ export async function render(ctx) {
         }), { class: 'danger' })));
   };
 
+  // ـــ بابُ العمل: عنوانٌ واحدٌ فوق لغاته، يُطوى ويُفتَح (ملاحظة ٤٩٥)
+  const workHead = (items, arrow) => {
+    const m = items[0].material;
+    const langs = new Set(items.map(t => t.language_code)).size;
+    const pub = items.filter(t => t.is_published).length;
+    const when = m.sermon_date ? fmtSermonDate(m.sermon_date) : '';
+    return h('div.mosque-head',
+      h('b.mh-mosque', m.mosque
+        ? `${MOSQUE_ICON[m.mosque] || '📄'} ${SCOPE_LABEL[m.mosque] || ''}`
+        : '📄 مادةٌ عامة'),
+      h('b.mh-title', { title: m.title || '' }, m.title || '—'),
+      m.khateeb?.name ? h('span.mh-khateeb.small.muted', m.khateeb.name) : null,
+      when ? h('span.mh-when.small.muted', when) : null,
+      h('span.badge', { class: pub === items.length ? 'ok' : pub ? 'warn' : '' },
+        `${AR(langs)} لغة · ${AR(pub)} منشورة`),
+      h('span.row.head-acts', { style: { marginInlineStart: 'auto' } },
+        // تصديرُ الأصل وترجماتِه معًا: شأنُ العمل كلِّه لا شأنَ لغةٍ منه
+        iconBtn('pair', 'تصديرٌ مقابِل: الأصل وترجماته',
+          e => busy(e.currentTarget, () => alignedOf(items[0]))),
+        arrow));
+  };
+
+  const workGroup = (items, no) => {
+    const mid = items[0].material?.id || items[0].id;
+    const shut = readFold()[mid] === 1;
+    const inner = h('ol.archive.work-body', { hidden: shut },
+      ...items.map((t, i) => rowEl(t, no + i)));
+    const arrow = h('button.fold-btn', { type: 'button',
+      'aria-expanded': shut ? 'false' : 'true',
+      title: shut ? 'افتحْ لغاتِ هذا العمل' : 'اطوِ لغاتِ هذا العمل' }, shut ? '▾' : '▴');
+    arrow.onclick = () => {
+      const now = !inner.hidden;
+      inner.hidden = now;
+      arrow.textContent = now ? '▾' : '▴';
+      arrow.setAttribute('aria-expanded', now ? 'false' : 'true');
+      const f = readFold(); f[mid] = now ? 1 : 0; writeFold(f);
+    };
+    return h('section.mosque-group', { class: shut ? 'shut' : '' },
+      workHead(items, arrow), inner);
+  };
+
+  // قائمةٌ منسدلةٌ: الأعمالُ على ترتيبها، ولغاتُ كلِّ عملٍ تحته
+  const foldedList = list => {
+    const order = [];
+    const by = new Map();
+    for (const t of list) {
+      const k = t.material?.id || t.id;
+      if (!by.has(k)) { by.set(k, []); order.push(k); }
+      by.get(k).push(t);
+    }
+    let n = 1;
+    return h('div.arch-works', order.map(k => {
+      const g = by.get(k);
+      const el = workGroup(g, n);
+      n += g.length;
+      return el;
+    }));
+  };
+
   const trashRow = t => h('li.arch-row.is-trashed', { title: fileName(t.material, t.language_code, t.material.khateeb?.name) },
     h('span.arch-n', '—'),
     h('span.arch-name', h('b', `${heading(t.material)} (${t.material.title})`),
@@ -680,6 +752,77 @@ export async function render(ctx) {
   // ----------------------------------------------------------------
   // البطاقات: نوعُ عملٍ في كل بطاقة، وفيها عدده وآخر عمل ولغاته
   // ----------------------------------------------------------------
+  // ـــ بطاقاتُ شجرة التاريخ على هيئة أرشيف الخطب سواءً (ملاحظة ٤٩٥):
+  //   العامُ بطاقةٌ كبيرةٌ فيها رقمُه وشريطُ تمامه وإحصاؤه، والشهرُ
+  //   بطاقةٌ في شبكةٍ بترتيبه واسمِه وإحصائه، والجمعةُ مثلُها بيومها
+  //   ومسجديها. فالشاشتان واحدةٌ في العين وإن اختلفت مادّتُهما.
+  const AR = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn');
+  const H_ORDER = ['الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس',
+    'السابع', 'الثامن', 'التاسع', 'العاشر', 'الحادي عشر', 'الثاني عشر'];
+  const monthOrder = m => H_ORDER[(Number(m) || 1) - 1] || AR(m);
+  const ARY = n => String(n ?? '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+
+  // تمامُ الباب: نسبةُ ما أُنجز من لغاته الأساسية في جُمَعه
+  const statsOf = items => {
+    const langs = new Set(items.map(t => t.language_code));
+    const days = new Set(items.map(t => hijOf(t)?.key).filter(Boolean));
+    const mosques = new Set(items.map(t => t.material?.mosque).filter(Boolean));
+    return { n: items.length, langs: langs.size, days: days.size, mosques };
+  };
+
+  // بطاقةُ عام: كبطاقة العام في أرشيف الخطب
+  const yearTile = (y, items, onclick) => {
+    const st = statsOf(items);
+    // الجُمَعُ في العام اثنتان وخمسون، وما أُدرك منها يُقاس عليه
+    const pct = Math.min(100, Math.round((st.days / 52) * 100));
+    const tone = pct >= 90 ? 'ok' : pct >= 50 ? 'warn' : 'bad';
+    return h('button.year-tile', { type: 'button', onclick,
+      'aria-label': `العام ${y} هجري: ${st.n} ترجمة` },
+      h('b.year-no', ARY(y)),
+      h('span.year-h', 'هـ'),
+      h('div.year-bar', { title: `أُدرك ${AR(pct)}٪ من جُمَع العام` },
+        h('span', { style: { width: `${Math.max(2, pct)}%` }, class: tone })),
+      h('div.year-stats',
+        h('span.year-stat.ok', h('b', AR(st.n)), h('span', 'ترجمة')),
+        h('span.year-stat', h('b', AR(st.days)), h('span', 'جمعة')),
+        h('span.year-stat', h('b', AR(st.langs)), h('span', 'لغة'))));
+  };
+
+  // بطاقةُ شهر: كبطاقة الشهر في أرشيف الخطب
+  const monthTile = (mo, items, onclick) => {
+    const st = statsOf(items);
+    const first = [...new Set(items.map(t => hijOf(t)?.key).filter(Boolean))].sort()[0];
+    const firstOn = first
+      ? `${AR(Number(first.split('-')[2]))} ${monthName(mo)}`
+      : monthName(mo);
+    return h('button.month-tile', { type: 'button', onclick,
+      title: `الشهرُ ${monthOrder(mo)} — ${firstOn} · ${AR(st.days)} جُمَع` },
+      h('div.m-top',
+        h('span.m-ord', `الشهرُ ${monthOrder(mo)}`),
+        h('span.m-pct.ok', `${AR(st.days)} جُمَع`)),
+      h('b.m-name', firstOn),
+      h('div.m-stats',
+        h('span.badge.ok', `${AR(st.n)} ترجمة`),
+        h('span.badge', { class: st.langs ? 'ok' : '' }, `${AR(st.langs)} لغة`)));
+  };
+
+  // بطاقةُ جمعة: يومُها ومسجداها وإحصاؤها
+  const dayTile = (key, items, onclick) => {
+    const st = statsOf(items);
+    const day = Number(key.split('-')[2]);
+    const where = [st.mosques.has('makkah') ? 'المسجد الحرام' : null,
+      st.mosques.has('madinah') ? 'المسجد النبوي' : null].filter(Boolean).join(' · ');
+    return h('button.month-tile', { type: 'button', onclick,
+      title: `${day} ${monthName(level.mo)} — ${AR(st.n)} ترجمة` },
+      h('div.m-top',
+        h('span.m-ord', 'جمعة'),
+        h('span.m-pct.ok', `${AR(st.n)} ترجمة`)),
+      h('b.m-name', `${AR(day)} ${monthName(level.mo)}`),
+      h('div.m-stats',
+        where ? h('span.badge.ok', where) : h('span.badge', 'بلا مسجد'),
+        h('span.badge', { class: st.langs ? 'ok' : '' }, `${AR(st.langs)} لغة`)));
+  };
+
   function tile({ key, label, emoji, items, onclick, dateBy }) {
     const langs = new Set(items.map(t => t.language_code));
     // في شجرة التاريخ يُؤرَّخ الباب بتاريخ المادة، لا بتاريخ الاعتماد
@@ -782,33 +925,28 @@ export async function render(ctx) {
         const byYear = groupBy(dated, t => hijOf(t).y);
         const keys = [...byYear.keys()].sort((a, b) => Number(b) - Number(a));
         view = keys.length
-          ? h('div.stack', h('div.kpis.arch-tiles', keys.map(k => tile({
-              key: k, label: `${k}هـ`, emoji: '🗓', items: byYear.get(k), dateBy: 'material',
-              onclick: () => goDate(k, '', '')
-            }))), h('p.small.muted', 'اختر السنة، ثم الشهر، ثم الجمعة — وفي كلِّ باب عدَدُ أعماله.'))
+          ? h('div.stack',
+              h('div.year-grid', keys.map(k =>
+                yearTile(k, byYear.get(k), () => goDate(k, '', '')))),
+              h('p.small.muted', 'اختر العام، ثم الشهر، ثم الجمعة — وفي كلِّ بابٍ إحصاؤه.'))
           : emptyState('لا أعمال مؤرَّخة', 'وسّع المدة أو امسح البحث.');
       } else if (!level.mo) {
         const byMonth = groupBy(inDate(dated), t => hijOf(t).m);
         const keys = [...byMonth.keys()].sort((a, b) => Number(a) - Number(b));
         view = keys.length
-          ? h('div.kpis.arch-tiles', keys.map(k => tile({
-              key: k, label: monthName(k), emoji: '📆', items: byMonth.get(k), dateBy: 'material',
-              onclick: () => goDate(level.y, k, '')
-            })))
+          ? h('div.month-grid', keys.map(k =>
+              monthTile(k, byMonth.get(k), () => goDate(level.y, k, ''))))
           : emptyState('لا أعمال في هذه السنة', 'وسّع المدة أو امسح البحث.');
       } else if (!level.d) {
         const byDay = groupBy(inDate(dated), t => hijOf(t).key);
         const keys = [...byDay.keys()].sort();
         view = keys.length
-          ? h('div.kpis.arch-tiles', keys.map(k => tile({
-              key: k, label: `${Number(k.split('-')[2])} ${monthName(level.mo)}`,
-              emoji: '🕌', items: byDay.get(k), dateBy: 'material',
-              onclick: () => goDate(level.y, level.mo, k)
-            })))
+          ? h('div.month-grid', keys.map(k =>
+              dayTile(k, byDay.get(k), () => goDate(level.y, level.mo, k))))
           : emptyState('لا أعمال في هذا الشهر', 'وسّع المدة أو امسح البحث.');
       } else {
         view = list.length
-          ? h('ol.archive', list.map((t, i) => rowEl(t, i + 1)))
+          ? foldedList(list)
           : emptyState('لا أعمال في هذه الجمعة', 'وسّع المدة أو امسح البحث.');
       }
     } else if (!level.type) {
@@ -841,7 +979,7 @@ export async function render(ctx) {
         : emptyState('لا خطب في هذه المدة', 'وسّع المدة أو امسح البحث.');
     } else {
       view = list.length
-        ? h('ol.archive', list.map((t, i) => rowEl(t, list.length - i)))
+        ? foldedList(list)
         : emptyState('لا نتائج مطابقة', 'وسّع المدة أو امسح البحث.');
     }
 

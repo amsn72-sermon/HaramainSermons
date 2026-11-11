@@ -302,6 +302,23 @@ export async function workspace(ctx) {
     saveState.textContent = 'محفوظة ' + fmtDateTime(new Date());
     saveBtn && saveBtn.classList.remove('primary');
     if (!silent) toast('حُفظت الترجمة.', 'ok');
+    if (!silent) reviewAyatOf(editor.html);
+  }
+
+  // ـــ مراجعةُ الآيات بعد الحفظ: الموسومُ يُقابَل بأصله، والمكتوبُ
+  //   بالأيدي يُعرَض على المترجم ليُدرِجَه بالرسم العثمانيّ — عَرضًا
+  //   لا منعًا، والحفظُ قد تمَّ (ملاحظة ٥٠٠)
+  async function reviewAyatOf(html) {
+    try {
+      const m2 = await import('../quran.js');
+      const r = await m2.reviewAyat(html, editor.text || '');
+      if (!r) return;
+      await dialog({
+        title: 'مراجعةُ الآيات',
+        body: m2.ayatReport(r),
+        buttons: [{ label: 'فهمت', kind: 'primary', value: true }]
+      });
+    } catch { /* المراجعةُ لا تُعطِّل الحفظ */ }
   }
   // زر حفظ ثابت مع أدوات المحرر: يبقى أمام المترجم وهو ينظر إلى ملف الأصل
   const saveBtn = canEdit ? h('button.btn.sm', { type: 'button', title: 'حفظ الآن (Ctrl/⌘ + S)' },

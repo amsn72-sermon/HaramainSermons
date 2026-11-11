@@ -2,9 +2,18 @@
 // تُستخدم قبل الحفظ وقبل العرض، فلا يمر نص مُدرج من خارج المحرر كما هو.
 const TAGS = new Set(['P', 'BR', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'UL', 'OL', 'LI', 'H2', 'H3', 'SPAN', 'DIV', 'BLOCKQUOTE', 'FONT',
   'SUP', 'SUB', 'HR', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TD', 'TH']);
-const STYLE_PROPS = new Set(['color', 'background-color', 'text-align', 'direction', 'font-weight', 'font-style', 'text-decoration', 'font-size', 'font-family',
-  'line-height', 'margin-left', 'margin-right', 'padding-left', 'padding-right', 'text-indent', 'vertical-align']);
+// ـــ توحيدُ خطِّ المتن: المقاسُ والتباعدُ والخطُّ من الكليشة لا من
+//   الصقِّ ولا من اختيار المترجم (ملاحظة ٤٩٩)
+//
+//   تُركت الحريةُ للمترجمين في المقاس فجاء بعضُهم بعشرين وبعضُهم
+//   بأربعة عشر، فاختلفت الورقةُ عن الورقة في عملٍ واحد. والنصُّ يُلصَق
+//   من وورد فيحمل معه مقاساتِ مصدره وخطوطَه. فصارت هذه الخصائصُ تُنزَع
+//   عند الحفظ والعرض جميعًا، ويبقى المقاسُ واحدًا في المنصة والطباعة.
+const STYLE_PROPS = new Set(['color', 'background-color', 'text-align', 'direction', 'font-weight', 'font-style', 'text-decoration',
+  'margin-left', 'margin-right', 'padding-left', 'padding-right', 'text-indent', 'vertical-align']);
 const SAFE_VALUE = /^[#a-z0-9(),.%\s'"-]+$/i;
+// الصفوفُ المسموحةُ في متن الترجمة: صندوقُ الآية وترجمتُها (ملاحظة ٥٠٠)
+const CLASSES = new Set(['aya', 'aya-tr', 'aya-ref']);
 // الورقة بيضاء دائمًا: نحذف النص الأبيض (يختفي) والخلفية البيضاء (رقع)
 const INK = /^(#000(000)?|black|windowtext|rgba?\(\s*0\s*,\s*0\s*,\s*0\s*(,\s*1(\.0*)?\s*)?\)|initial|inherit|currentcolor)$/i;
 const PAPER = /^(#fff(fff)?|white|window|transparent|rgba?\(\s*255\s*,\s*255\s*,\s*255\s*(,\s*1(\.0*)?\s*)?\)|rgba\(.*,\s*0\s*\)|initial|inherit)$/i;
@@ -39,8 +48,18 @@ function walk(node) {
       const n = attr.name.toLowerCase();
       if (n === 'style') { const s = cleanStyle(attr.value); s ? child.setAttribute('style', s) : child.removeAttribute('style'); }
       else if (n === 'dir' && /^(rtl|ltr|auto)$/i.test(attr.value)) continue;
+      // ـــ صفوفٌ معدودةٌ تبقى: صندوقُ الآية وترجمتُها ومرجعُها
+      //   (ملاحظتا ٤٩٩ و٥٠٠)، وما عداها يسقط
+      else if (n === 'class') {
+        const keep = String(attr.value || '').split(/\s+/).filter(c => CLASSES.has(c));
+        if (keep.length) child.setAttribute('class', keep.join(' '));
+        else child.removeAttribute('class');
+      }
+      // ومرجعُ الآية يُحفَظ معها ليُراجَع في الخادم: «سورة:آية» أو مداها
+      else if (n === 'data-aya' && /^\d{1,3}:\d{1,3}(-\d{1,3})?$/.test(attr.value)) continue;
       else if (n === 'align' && /^(right|left|center|justify)$/i.test(attr.value)) continue;
-      else if (child.tagName === 'FONT' && (n === 'color' || n === 'face' || n === 'size') && SAFE_VALUE.test(attr.value) && !(n === 'color' && PAPER.test(attr.value.trim()))) continue;
+      // ووسمُ FONT: يبقى لونُه وحدَه، ويسقط مقاسُه ووجهُه (ملاحظة ٤٩٩)
+      else if (child.tagName === 'FONT' && n === 'color' && SAFE_VALUE.test(attr.value) && !PAPER.test(attr.value.trim())) continue;
       else if ((child.tagName === 'TD' || child.tagName === 'TH') && (n === 'colspan' || n === 'rowspan') && /^[1-9][0-9]?$/.test(attr.value)) continue;
       else child.removeAttribute(attr.name);
     }

@@ -52,32 +52,41 @@ export const DOC_CSS = `
   .doc table.roster td, .doc table.roster th { padding: 1mm 1.4mm; }
   /* جداولُ الكشف تتلاحق بلا فراغٍ بينها، ورأسُها يتكرّر (ملاحظة ٤٦٢) */
   .doc table.roster + table.roster { margin-top: 0; }
-  .doc tr, .doc td, .doc th { break-inside: avoid; page-break-inside: avoid; }`;
+  .doc tr, .doc td, .doc th { break-inside: avoid; page-break-inside: avoid; }
+  /* الجدولُ يُغلَق بخطٍّ أسفلَ آخر صفٍّ في الصفحة فلا يبقى مفتوحًا
+     (ملاحظة ٤٩٦) */
+  .doc table.roster { border-bottom: .25mm solid #bc9661; }
+  /* ورأسُ الكشف المكرَّرُ في أعلى الصفحات التالية */
+  .doc .repeat-head-fixed table { border-collapse: collapse; }
+  .doc .repeat-foot-fixed { position: absolute; inset-inline: 0; bottom: 0;
+    height: 0; border-top: .25mm solid #bc9661; }
+  .doc .repeat-head-fixed th { border: .25mm solid #bc9661;
+    background: rgb(188 150 97 / 16%); color: #8a6835; font-weight: 700;
+    padding: 1mm 1.4mm; font-size: 9pt; }`;
 
-// ما وُسِم بـ«keep» لا يُقطَع بين صفحتين: إن وقع القطعُ في وسطه نزل
-//   كلُّه إلى الصفحة التالية — ما لم يكن أطولَ من الصفحة أصلًا.
-function keepWhole(flow, starts, boxPx) {
+// ما لا يُقطَع بين صفحتين: الكتلةُ الموسومةُ بـ«keep»، وكلُّ صفٍّ في
+//   جدول. فإن وقع القطعُ في وسط واحدٍ منها نزل كلُّه إلى الصفحة التالية.
+//
+//   وكان هذا يُحسَب بعد تقسيم الصفحات فيُزحزَح مبدأُ صفحةٍ وحدَها،
+//   وبقيَ مبدأُ التي بعدها على ما كان، فيصير بينهما أطولَ من الصفحة،
+//   فيُقصّ الزائدُ من نافذتها ولا يظهر في التي بعدها — فتسقط صفوفٌ
+//   كاملةٌ من الكشف ولا يدري أحد (ملاحظة ٤٩٦). فصار الحسابُ في
+//   التقسيم نفسِه، متتابعًا: كلُّ صفحةٍ تبدأ حيث انتهت التي قبلها.
+function keepBlocks(flow, boxPx) {
   const top0 = flow.getBoundingClientRect().top;
-  const keeps = [...flow.querySelectorAll('.keep')].map(el => {
+  const box = el => {
     const r = el.getBoundingClientRect();
     return { top: r.top - top0, bottom: r.bottom - top0 };
-  }).filter(k => k.bottom - k.top < boxPx - 2);
-  if (!keeps.length) return starts;
-  const out = [starts[0]];
-  for (let i = 1; i < starts.length; i++) {
-    let s = starts[i];
-    for (const k of keeps) {
-      if (s > k.top + 0.5 && s < k.bottom - 0.5) { s = Math.floor(k.top); break; }
-    }
-    // لا يُسمَح بتراجعٍ إلى ما قبل بداية الصفحة السابقة
-    if (s <= out[out.length - 1] + 1) s = starts[i];
-    out.push(s);
-  }
-  return out;
+  };
+  return [...flow.querySelectorAll('.keep, tr')]
+    .map(box)
+    .filter(k => k.bottom - k.top > 1 && k.bottom - k.top < boxPx - 2)
+    .sort((a, b) => a.top - b.top);
 }
 
 // html: متنُ المستند. title: عنوانُ النافذة واسمُ الملف عند الحفظ PDF.
-export function printOnLetterhead(html, { title = 'مستند', autoPrint = true } = {}) {
+export function printOnLetterhead(html, { title = 'مستند', autoPrint = true,
+                                          repeatHead = '.repeat-head' } = {}) {
   const w = window.open('', '_blank');
   if (!w) return false;
   w.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
@@ -127,9 +136,31 @@ ${DOC_CSS}
     const boxPx = probe.getBoundingClientRect().height;
     probe.remove();
 
-    const paged = flowStarts(flow, { doc: d, boxPx, total: await settledHeight(flow) });
+    // ـــ رأسُ الجدول يُكرَّر في أعلى الصفحة إذا انقسم جدولُه عليها، لا
+    //   في كلِّ صفحة: فالصفحةُ التي لا جدولَ فيها لا رأسَ لها
+    //   (ملاحظة ٤٩٦)
+    const top0 = flow.getBoundingClientRect().top;
+    const span = el => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top - top0, bottom: r.bottom - top0 };
+    };
+    const headEls = repeatHead ? [...flow.querySelectorAll(repeatHead)] : [];
+    const tables = headEls.map(hd => {
+      const tb = hd.parentElement?.querySelector('tbody');
+      if (!tb) return null;
+      const s2 = span(tb);
+      return { head: hd, headH: Math.ceil(hd.getBoundingClientRect().height), ...s2 };
+    }).filter(Boolean);
+    const headH = tables.reduce((m, t) => Math.max(m, t.headH), 0);
+    const usable = Math.max(40, boxPx - headH);
+    // الجدولُ الذي يبدأ داخلَه مبدأُ هذه الصفحة
+    const tableAt = y => tables.find(t => y > t.top + 1 && y < t.bottom - 1) || null;
+
+    const total0 = await settledHeight(flow);
+    const paged = flowStarts(flow, { doc: d, boxPx: usable, total: total0,
+      keeps: keepBlocks(flow, usable) });
     const total = paged.total;
-    const starts = keepWhole(flow, paged.starts, boxPx);
+    const starts = paged.starts;
 
     // الكليشةُ العاملةُ: إصدارُ الهيئة المعتمَد إن بُدِّل (ملاحظة ٤٥٨)
     const lhUrl = (state.brand && state.brand.letterhead && state.brand.letterhead.url)
@@ -139,16 +170,65 @@ ${DOC_CSS}
       const img = d.createElement('img');
       img.className = 'lh'; img.alt = ''; img.src = lhUrl;
       const clone = flow.cloneNode(true);
-      clone.style.top = `${-start}px`;
+      const tbl = i > 0 ? tableAt(start) : null;
+      const lift = tbl ? tbl.headH : 0;
+      clone.style.top = `${-start + lift}px`;
       const win = d.createElement('div'); win.className = 'win'; win.append(clone);
-      const end = i + 1 < starts.length ? starts[i + 1] : Math.min(total, start + boxPx);
-      win.style.height = `${Math.max(0, Math.min(end - start, boxPx))}px`;
+      // ورأسُ الجدول فوقه، منسوخًا كما هو
+      if (lift) {
+        const hd = tbl.head.cloneNode(true);
+        const wrap = d.createElement('div');
+        wrap.className = 'doc repeat-head-fixed';
+        wrap.style.cssText = `position:absolute;top:0;inset-inline-start:0;width:100%;`
+          + `height:${lift}px;overflow:hidden;background:#fff`;
+        const t2 = d.createElement('table');
+        t2.className = tbl.head.closest('table')?.className || '';
+        t2.style.width = '100%';
+        t2.append(hd);
+        wrap.append(t2);
+        win.prepend(wrap);
+      }
+      const end = i + 1 < starts.length ? starts[i + 1] : Math.min(total, start + usable);
+      // ولا تُقصُّ النافذةُ دون ما بين الصفحتين، فما يُقصُّ يسقط
+      win.style.height = `${Math.max(0, Math.min(end - start, usable) + lift)}px`;
+      // وإن انتهت الصفحةُ وسطَ جدولٍ أُغلق بخطٍّ في أسفلها، فلا يبقى
+      //   الجدولُ مفتوحًا على بياض الورقة (ملاحظة ٤٩٦)
+      if (i + 1 < starts.length && tableAt(end)) {
+        const foot = d.createElement('div');
+        foot.className = 'doc repeat-foot-fixed';
+        foot.style.cssText = 'position:absolute;left:0;right:0;bottom:0;height:0;'
+          + 'border-top:.25mm solid #bc9661';
+        win.append(foot);
+      }
       const num = d.createElement('div'); num.className = 'pageno';
       num.textContent = `${i + 1} / ${starts.length}`;
       const sheet = d.createElement('div'); sheet.className = 'sheet';
       sheet.append(img, win, num);
       return sheet;
     }));
+    // ـــ حارسُ العدّ: صفوفُ المصدر تُقابَل بالمدى الذي غطَّته الصفحات،
+    //   فإن سقط صفٌّ لم يُطبَع الكشفُ وقيل سببُه (ملاحظة ٤٩٦)
+    const rows = [...flow.querySelectorAll('tbody tr')];
+    if (rows.length) {
+      const covered = starts.map((st, i) => ({
+        a: st, b: i + 1 < starts.length ? starts[i + 1] : Math.min(total, st + usable)
+      }));
+      const lost = rows.filter(tr => {
+        const r = tr.getBoundingClientRect();
+        const a = r.top - top0, b = r.bottom - top0;
+        return !covered.some(c => a >= c.a - 2 && b <= c.b + 2);
+      });
+      if (lost.length) {
+        d.body.innerHTML = '<div style="font:14pt/1.9 sans-serif;direction:rtl;'
+          + 'padding:28mm 22mm;color:#8a1c1c">'
+          + '<h2>لم يكتمل تقسيمُ الصفحات</h2>'
+          + `<p>سقط ${lost.length} صفًّا من ${rows.length} عند التقسيم، `
+          + 'فلم يُفتَح الكشفُ لئلّا تُطبَع ورقةٌ ناقصةٌ وتُحسَب تامّة.</p>'
+          + '<p>أعِدِ المحاولة، فإن تكرّر فأبلغْ إدارةَ المشروع.</p></div>';
+        return;
+      }
+    }
+
     d.getElementById('measure')?.remove();
     if (autoPrint) setTimeout(() => { try { w.print(); } catch { /* يطبع بنفسه */ } }, 400);
   };

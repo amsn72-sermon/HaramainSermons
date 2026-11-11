@@ -19,7 +19,7 @@ import { h, fill, fmtHijri, fmtDate, fmtDateTime, toast, dialog } from './ui.js'
 import { db } from './sb.js';
 import { qrDataUri } from './qr.js';
 import { printOnLetterhead } from './lhprint.js';
-import { policyBreachClause, charterDoc, isFieldMember,
+import { policyBreachClause, charterDoc, isFieldMember, policyPlainText,
          FIELD_KEY, POLICY_KEY, POLICY_VERSION } from './policy.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, ch =>
@@ -48,6 +48,10 @@ const AUTHORITY = 'مشروع خادم الحرمين الشريفين لترج�
 // رابطُ صفحة التحقُّق العامّة التي يفتحها الباركود (ملاحظة ٤٢٨)
 export const signVerifyUrl = code =>
   `${location.origin}/verify-sign?c=${encodeURIComponent(code || '')}`;
+
+// ورمزُ الكشف كلِّه: يفتح صفحتَه الداخليةَ في المنصة (ملاحظة ٤٩٨)
+export const rosterVerifyUrl = code =>
+  `${location.origin}/app/roster?c=${encodeURIComponent(code || '')}`;
 
 // سجلُّ توقيعِ عضوٍ: نسخُه كلُّها، الأحدثُ أولًا
 export async function signatureRecords(memberId, { key = POLICY_KEY } = {}) {
@@ -135,22 +139,22 @@ export async function proofFor(memberId, version = null, key = POLICY_KEY) {
 // ---------------------------------------------------------------------
 // كشفُ الموقِّعين: نصُّ الميثاق ثم جدولُ من اختير (ملاحظة ٤٢٩)
 // ---------------------------------------------------------------------
-// الكشفُ يُقطَّع جداولَ صغيرةً كلٌّ برأسه، وكلُّ جدولٍ كتلةٌ لا تُقطَع:
-//   فلا ينقسم صفُّ عضوٍ على صفحتين، ويتكرّر الرأسُ في كلِّ صفحة
-//   (ملاحظة ٤٦٢)
-const chunk = (rows, n) => {
-  const out = [];
-  rows.forEach((r, i) => {
-    if (i % n === 0) out.push([]);
-    out[out.length - 1].push({ r, i });
-  });
-  return out;
-};
+// كان الكشفُ يُقطَّع جداولَ صغيرةً كلٌّ برأسه ليتكرَّر الرأسُ (ملاحظة ٤٦٢)،
+//   فجاء الرأسُ في وسط الصفحة حيث ابتدأ جدولٌ جديد، وسقطت صفوفٌ بين
+//   جدولين عند التقسيم. فصار جدولًا واحدًا، وصفُّه وحدةٌ لا تُقسَم،
+//   ورأسُه يُنسَخ في أعلى كلِّ صفحةٍ تاليةٍ من المقسِّم (ملاحظة ٤٩٦).
 
 export function rosterHtml(rows, { version = POLICY_VERSION, key = POLICY_KEY,
-                                   note = '', head = '', band = '' } = {}) {
+                                   note = '', head = '', band = '', code = '' } = {}) {
   const n = rows.length;
   const signed = rows.filter(r => r.signed).length;
+  // الموقِّعون أوّلًا بالاسم، ثمَّ من وقَّع نسخةً سابقةً، ثمَّ من لم يوقِّعْ
+  //   — في الورقة كما في الشاشة (ملاحظة ٤٩٧)
+  rows = [...rows].sort((a, b) => {
+    const rank = r => (r.signed ? 0 : r.prev ? 1 : 2);
+    return rank(a) - rank(b)
+      || String(a.full_name || '').localeCompare(String(b.full_name || ''), 'ar');
+  });
 
   // التبويبُ بالفريق ثم المدينة: ولا تُطبَع عناوينُ الأبواب إذا كان
   //   الكشفُ بابًا واحدًا، فالعنوانُ حينئذٍ تكرارٌ لرأس الكشف
@@ -170,12 +174,16 @@ export function rosterHtml(rows, { version = POLICY_VERSION, key = POLICY_KEY,
   });
   const many = groups.length > 1;
 
-  const table = part => `<table class="roster keep">
-  <thead><tr>
+  // رأسُ الكشف: يُكتَب مرّةً، ويُنسَخ في أعلى كلِّ صفحةٍ تاليةٍ من
+  //   المقسِّم نفسِه — فلا يظهر في وسط صفحة (ملاحظة ٤٩٦)
+  const HEAD = `<thead class="repeat-head"><tr>
     <th style="width:9mm">م</th><th>العضو</th><th style="width:26mm">رقمُ الهوية</th>
     <th style="width:20mm">الحال</th><th style="width:16mm">النسخة</th>
     <th style="width:32mm">تاريخُ التوقيع</th><th style="width:20mm">التحقُّق</th>
-  </tr></thead>
+  </tr></thead>`;
+
+  const table = part => `<table class="roster">
+  ${HEAD}
   <tbody>
     ${part.map(({ r, i }) => {
       // باركودُ كلِّ عضوٍ في صفِّه، يُفتَح به إثباتُه وحدَه (ملاحظة ٤٣٢)
@@ -200,18 +208,23 @@ export function rosterHtml(rows, { version = POLICY_VERSION, key = POLICY_KEY,
 ${charterHtml(version, key)}
 <h2>كشفُ التوقيع على الميثاق</h2>
 ${head ? `<p class="note">${esc(head)}</p>` : ''}
+${code ? `<div class="seal keep"><div class="code">رمزُ الكشف
+  <div class="no">${esc(code)}</div>
+  <div style="font-size:8.5pt;color:#6b6257">كشفٌ داخليٌّ لا يُنشر —
+    يُفتَح بمسحه لمن أُذن له</div></div>
+  <div class="qr"><img src="${qrDataUri(rosterVerifyUrl(code), { margin: 1, dark: '#1d2b3a' })}"
+    alt="${esc(code)}"><div>تحقَّقْ من الكشف</div></div></div>` : ''}
 <p class="note">${esc(note || `عددُ من في الكشف ${AR(n)}، وقَّع منهم ${AR(signed)}.`)}
   وتاريخُ الكشف ${esc(fmtDate(new Date()))}.</p>
-${groups.map(g => {
+${groups.map((g, gi) => {
   const sg = g.rows.filter(r => r.signed).length;
   const title = many
     ? `<h3>${esc(band || trackName(g.track))} — ${esc(cityName(g.city))}`
       + ` <span class="cnt">(${AR(g.rows.length)}، وقَّع منهم ${AR(sg)})</span></h3>`
     : '';
-  const parts = chunk(g.rows, 9).map(table);
-  // عنوانُ الباب يلزم جدولَه الأوَّل فلا يبقى وحدَه في ذيل صفحة
-  const first = `<div class="keep">${title}${parts[0] || ''}</div>`;
-  return first + parts.slice(1).join('');
+  // جدولٌ واحدٌ لكلِّ باب، وترقيمُه متَّصلٌ في الكشف كلِّه
+  const base = groups.slice(0, gi).reduce((a, x) => a + x.rows.length, 0);
+  return title + table(g.rows.map((r, j) => ({ r, i: base + j })));
 }).join('')}
 <p class="note">هذا الكشفُ بيانٌ بمن وقَّع على الميثاق المعروض أعلاه وتاريخِ توقيعه.
   ويُمسَح باركودُ كلِّ صفٍّ فيُفتَح إثباتُ صاحبه وحدَه. وتفصيلُ التوقيع —
@@ -224,6 +237,43 @@ export function printRoster(rows, opts = {}) {
   const ok = printOnLetterhead(rosterHtml(rows, opts), { title: 'كشف التوقيع على الميثاق' });
   if (!ok) toast('امنعْ حجبَ النوافذ ليُفتح الكشف.', 'bad');
   return ok;
+}
+
+// ـــ باركودُ رأس الكشف: صورةٌ محفوظةٌ لما طُبع (ملاحظة ٤٩٨)
+//
+//   تُحفَظ صورةُ الكشف في الخادم — نصُّ الميثاق ونطاقُه وأسماءُ أهله
+//   وحالُ كلِّ واحدٍ — ويُرَدُّ رمزُها فيُطبَع في الرأس. فمن مسحه من
+//   الإداريين فُتح له الكشفُ كما طُبع، ومن لا مفتاحَ له رُدَّ وسُجِّلت
+//   محاولتُه. وباركوداتُ الصفوف على حالها، كلٌّ يفتح وثيقةَ صاحبه.
+export async function saveRoster(rows, { key = POLICY_KEY, version = POLICY_VERSION,
+                                         band = '', head = '', title = '' } = {}) {
+  try {
+    const cities = [...new Set(rows.map(r => r.city || ''))].filter(Boolean);
+    const code = await db.rpc('make_roster', {
+      p_key: key, p_version: version, p_band: band || null,
+      p_city: cities.length === 1 ? cities[0] : null,
+      p_title: title || 'كشفُ التوقيع على الميثاق', p_note: head || null,
+      p_doc: policyPlainText(version, key),
+      p_rows: rows.map(r => ({
+        name: r.full_name, member_no: r.member_no || null,
+        national_id: r.national_id || null, track: r.track || '', city: r.city || '',
+        signed: !!r.signed, prev: !!r.prev,
+        version: r.policy_version || '', accepted_at: r.accepted_at || null,
+        proof_code: r.proof_code || ''
+      }))
+    });
+    return typeof code === 'string' ? code : (code && code.make_roster) || '';
+  } catch (e) {
+    // وتعذُّرُ الحفظِ لا يمنع الطباعةَ: يُطبَع الكشفُ بلا باركود رأس
+    toast('تعذَّر حفظُ صورة الكشف، فطُبع بلا باركود رأس: ' + (e.message || ''), 'warn');
+    return '';
+  }
+}
+
+export async function printRosterSaved(rows, opts = {}) {
+  if (!rows.length) { toast('اختَرْ عضوًا واحدًا على الأقل.', 'warn'); return false; }
+  const code = await saveRoster(rows, opts);
+  return printRoster(rows, { ...opts, code });
 }
 
 // كشفُ الموقِّعين من القاعدة: فيه الهويةُ ورمزُ الوثيقة (ملاحظتا ٤٣٢ و٤٣٣)
@@ -399,5 +449,5 @@ export async function rosterDialog(people, { key = POLICY_KEY,
       { label: 'إلغاء', value: null }]
   });
   if (!res) return false;
-  return printRoster(res, { key, version, band, head: headLine(res) });
+  return printRosterSaved(res, { key, version, band, head: headLine(res) });
 }

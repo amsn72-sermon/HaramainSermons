@@ -64,7 +64,7 @@ const NAV_PERM = {
   '/app/workflow': 'st_workflow',
   '/app/glossary': 'glossary', '/app/glossary/watch': 'glossary',
   '/app/contract': 'ctr_view',
-  '/app/circulars': 'circ_read',
+  '/app/circulars': 'circ_read', '/app/mail': 'circulars',
   '/app/stats': 'rp_stats', '/app/archive': 'rp_archive'
 };
 
@@ -147,7 +147,10 @@ export function staffShell(view, path) {
       link('/app/charter', 'ميثاق العمل'),
       link('/app/certificates', 'الشهادات'),
       link('/app/training', 'التدريب والتأهيل'),
-      circ ? mail : null])]);
+      circ ? mail : null,
+      // بريدُ المشروع: رسالةٌ إلى بريد العضو، غيرُ التعميم الموقَّع عليه
+      //   (ملاحظة ٥٠١)
+      circ ? link('/app/mail', 'بريدُ المشروع') : null])]);
 
   const termsGroup = group('المصطلحات', [
     link('/app/glossary', 'الدليل الإرشادي'),

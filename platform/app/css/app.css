@@ -240,9 +240,10 @@ td .sub { display: block; color: var(--muted); font-size: .82rem; }
   border-top: 1px dashed rgb(188 150 97 / 45%); }
 .lh-num span { font-size: calc(var(--pt) * 7); color: rgb(107 98 87 / 75%); letter-spacing: .3px; }
 .lh-body .area { min-height: 100%; outline: none; padding-bottom: 1em; }
-/* أساسُ متن الطباعة: ١٢ نقطةً بتباعد ١٫٨ — تستعمله نوافذُ الطباعة
-   ويستعمله المحررُ في قياسه الخفيِّ، فيتَّحد المقياسان (ملاحظة ٤٣٠) */
-.print-body { --pt: 1pt; font-size: 12pt; line-height: 1.8; }
+/* أساسُ متن الطباعة: أربعَ عشرةَ نقطةً بتباعد ١٫٩ — تستعمله نوافذُ
+   الطباعة ويستعمله المحررُ في قياسه الخفيِّ، فيتَّحد المقياسان
+   (ملاحظتا ٤٣٠ و٤٩٩) */
+.print-body { --pt: 1pt; font-size: 14pt; line-height: 1.9; }
 /* صندوقُ قياسٍ بمقاس الطباعة الحقيقيِّ خارجَ الشاشة: به تُحسَب فواصلُ
    صفحات المحرر كما تقع في PDF بالضبط، لا بمقاس العرض */
 .lh-measure { position: absolute; visibility: hidden; pointer-events: none;
@@ -250,7 +251,20 @@ td .sub { display: block; color: var(--muted); font-size: .82rem; }
 .lh-measure .area { min-height: 0; padding-bottom: 0; }
 .lh-measure .lh-guides, .lh-measure .lh-num { display: none; }
 .lh-body p, .print-body p { margin: 0 0 .6em; }
-.lh-body h2, .print-body h2 { font-size: 1.35em; margin: .4em 0; } .lh-body h3, .print-body h3 { font-size: 1.15em; margin: .4em 0; }
+/* العناوينُ خمسَ عشرةَ نقطةً بتباعد ١٫٤، والآياتُ خمسَ عشرةَ بتباعد ٢
+   — مقاسٌ واحدٌ في القديم والجديد (ملاحظة ٤٩٩) */
+.lh-body h2, .print-body h2 { font-size: 15pt; line-height: 1.4; margin: .5em 0 .35em; }
+.lh-body h3, .print-body h3 { font-size: 15pt; line-height: 1.4; margin: .45em 0 .3em; font-weight: 600; }
+.lh-body .aya, .print-body .aya { font-size: 15pt; line-height: 2; }
+/* الآيةُ المدرَجةُ بالرسم العثماني: فقرةٌ مغلقةٌ لا تُحرَّر، ومرجعُها
+   بعدها، وترجمتُها في السطر الذي يليها (ملاحظة ٥٠٠) */
+.aya { font-family: 'KFGQPC HAFS Uthmanic Script', 'KFGQPC Uthmanic Script HAFS',
+  'Amiri Quran', 'Haramain Naskh', 'Traditional Arabic', serif;
+  text-align: center; margin: .5em 0 .2em; }
+.aya-ref { font-size: .72em; color: #6b6257; font-family: inherit; }
+.aya-tr { margin-top: 0; }
+.aya-pick { font-family: 'KFGQPC HAFS Uthmanic Script', 'Amiri Quran',
+  'Haramain Naskh', 'Traditional Arabic', serif; font-size: 1.1em; line-height: 2; }
 .lh-body blockquote, .print-body blockquote { margin: .4em 2em; }
 .a4 .area:empty::before { color: #9aa1a8; }
 .editor.readonly .lh-body { cursor: default; }
@@ -312,6 +326,15 @@ ol.marks li { line-height: 1.6; }
 
 /* ---------- الأرشيف: سطر لكل مادة ---------- */
 ol.archive { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+/* أبوابُ الأرشيف المنسدلة: لغاتُ العمل تحت عنوانه (ملاحظة ٤٩٥) */
+.arch-works { display: grid; gap: 10px; }
+.arch-works > .mosque-group { border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); overflow: hidden; }
+.arch-works > .mosque-group > .mosque-head { background: var(--soft); gap: 10px;
+  border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.arch-works > .mosque-group.shut > .mosque-head { border-bottom: 0; }
+.arch-works ol.work-body { border: 0; border-radius: 0; background: transparent; }
+.arch-works .mh-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .arch-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); min-height: 52px; }
 .arch-row:last-child { border-bottom: 0; }
 .arch-row:hover { background: var(--soft); }

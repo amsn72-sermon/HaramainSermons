@@ -9934,3 +9934,244 @@ select set_config('request.headers', '', true);
 
 do $$ begin raise notice
   'PASS: التوقيعُ على التعميم بوجهيه، ومعه بصمتُه وعنوانُه وجهازُه'; end $$;
+
+-- =====================================================================
+-- ٤٩٨ — باركودُ رأس الكشف: صورةٌ محفوظةٌ لا تُفتَح إلّا بمفتاحها، ويُسجَّل فتحُها
+-- =====================================================================
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$
+declare v_code text; v jsonb; v_n int;
+begin
+  v_code := public.make_roster('field', '1.0', 'المرشدون المكانيون', 'makkah',
+    'كشفُ تجربة', 'ملاحظةٌ في ذيل الكشف', 'نصُّ الميثاق المحفوظ',
+    jsonb_build_array(
+      jsonb_build_object('name', 'عضوٌ وقَّع', 'signed', true,  'national_id', '2400000001'),
+      jsonb_build_object('name', 'عضوٌ لم يوقِّع', 'signed', false, 'national_id', '2400000002')));
+  if v_code is null or v_code !~ '^RS-[0-9A-F]{10}$' then
+    raise exception 'FAIL: رمزُ الكشف لم يُولَّد على وجهه (%)', v_code;
+  end if;
+
+  v := public.roster_proof(v_code);
+  if not (v ->> 'found')::boolean then raise exception 'FAIL: الكشفُ لم يُفتَح لصاحب المفتاح'; end if;
+  if (v ->> 'n_rows')::int <> 2 or (v ->> 'n_signed')::int <> 1 then
+    raise exception 'FAIL: عدُّ الصفوف أو الموقِّعين في الصورة خطأ';
+  end if;
+  if coalesce(v ->> 'doc_text', '') = '' then
+    raise exception 'FAIL: نصُّ الميثاق لم يُحفَظ مع الصورة';
+  end if;
+
+  -- ورمزٌ لا وجودَ له: لا يُفتَح ولا يُفشي
+  if ((public.roster_proof('RS-DEADBEEF00')) ->> 'found')::boolean then
+    raise exception 'FAIL: رمزٌ موضوعٌ فُتح به كشف';
+  end if;
+
+  -- وكلُّ فتحٍ مسجَّل
+  select count(*) into v_n from public.roster_log(v_code);
+  if v_n < 1 then raise exception 'FAIL: فتحُ الكشف لم يُسجَّل'; end if;
+
+  perform set_config('app.test_roster', v_code, false);
+end $$;
+commit;
+
+-- ـ ومن لا يملك المفتاح: لا يُنشئ ولا يفتح، وفتحُه مسجَّلٌ عليه
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000d', true);
+do $$
+declare v_code text := current_setting('app.test_roster', true); v_ok boolean := false;
+begin
+  begin
+    perform public.make_roster('field', '1.0', null, null, 'كشفٌ مسروق', null, null,
+      jsonb_build_array(jsonb_build_object('name', 'فلان', 'signed', true)));
+    v_ok := true;
+  exception when insufficient_privilege then null; end;
+  if v_ok then raise exception 'FAIL: عضوٌ بلا مفتاحٍ أنشأ كشفًا'; end if;
+
+  -- والمنعُ ردٌّ لا خطأٌ، لتبقى محاولتُه مسجَّلةً عليه
+  if coalesce((public.roster_proof(v_code) ->> 'found')::boolean, false) then
+    raise exception 'FAIL: عضوٌ بلا مفتاحٍ فتح كشفًا';
+  end if;
+  if not coalesce((public.roster_proof(v_code) ->> 'denied')::boolean, false) then
+    raise exception 'FAIL: المنعُ لم يُبيَّن للمستدعي';
+  end if;
+
+  if exists (select 1 from public.roster_snapshots) then
+    raise exception 'FAIL: جدولُ صور الكشوف مفتوحٌ لغير أهله';
+  end if;
+end $$;
+commit;
+
+-- ـ ومحاولتُه مسجَّلةٌ في سجلّ الكشف تُرى عند صاحب المفتاح
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$
+declare v_code text := current_setting('app.test_roster', true); v_n int;
+begin
+  select count(*) into v_n from public.roster_log(v_code) where not ok;
+  if v_n < 1 then raise exception 'FAIL: محاولةُ غير المأذون لم تُسجَّل'; end if;
+end $$;
+commit;
+
+do $$ begin raise notice
+  'PASS: باركودُ رأس الكشف: صورتُه محفوظةٌ ومحروسةٌ وفتحُها مسجَّل'; end $$;
+
+-- =====================================================================
+-- ٤٩٩ — توحيدُ خطِّ المتن: النزعُ عند الحفظ، والأصلُ محفوظٌ يُرَدُّ إليه
+-- =====================================================================
+do $$
+declare v_in text; v_out text;
+begin
+  v_in := '<p style="font-size:20pt; color:#111; line-height:2.4">نصٌّ</p>'
+       || '<font size="5" face="Arial" color="#333">كلمة</font>'
+       || '<p style="font-family:Calibri">آخر</p>';
+  v_out := public.strip_inline_type(v_in);
+  if v_out ~* 'font-size|line-height|font-family|face=|size=' then
+    raise exception 'FAIL: المقاسُ أو التباعدُ أو الوجهُ بقي في النصّ: %', v_out;
+  end if;
+  if v_out !~ 'color:#111' or v_out !~ 'color="#333"' then
+    raise exception 'FAIL: اللونُ نُزع وهو مُبقًى: %', v_out;
+  end if;
+  if v_out ~ 'style\s*=\s*"\s*"' then
+    raise exception 'FAIL: سمةُ style الفارغةُ لم تُنظَّف: %', v_out;
+  end if;
+end $$;
+
+-- ـ وما يُحفَظ في المسار يُنزَع في الخادم ولو جاء من متصفِّحٍ قديم
+do $$
+declare v_id uuid; v_html text; v_raw text;
+begin
+  select id into v_id from public.tracks limit 1;
+  if v_id is null then raise exception 'FAIL: لا مسارَ للتجربة'; end if;
+  update public.tracks
+     set translation_html = '<p style="font-size:22pt">متنٌ كبير</p>'
+   where id = v_id;
+  select translation_html into v_html from public.tracks where id = v_id;
+  if v_html ~* 'font-size' then
+    raise exception 'FAIL: الحفظُ في الخادم لم يُوحِّد المقاس: %', v_html;
+  end if;
+
+  -- والأصلُ يُحفَظ عند التسوية الأولى فيُرَدُّ إليه
+  update public.tracks
+     set translation_html_raw = '<p style="font-size:22pt">متنٌ كبير</p>',
+         typography_fixed_at = now()
+   where id = v_id;
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', false);
+  if not public.restore_raw_html(v_id) then
+    raise exception 'FAIL: الردُّ إلى الأصل لم يقع';
+  end if;
+  select translation_html into v_raw from public.tracks where id = v_id;
+  if v_raw !~* 'font-size:22pt' then
+    raise exception 'FAIL: الأصلُ لم يُرَدَّ كما كان: %', v_raw;
+  end if;
+end $$;
+
+do $$ begin raise notice
+  'PASS: توحيدُ خطِّ المتن ونزعُه في الخادم، والأصلُ محفوظٌ يُرَدُّ إليه'; end $$;
+
+-- =====================================================================
+-- ٥٠٠ — إدراجُ الآيات: التجريدُ والانتقاءُ والمقابلةُ وكشفُ المكتوب بالأيدي
+-- =====================================================================
+-- مصحفٌ مصغَّرٌ للتجربة: آيتان، فالتحميلُ الكاملُ خارجَ الهجرة ويُحمَّل بيد مسؤول
+insert into public.quran_suras (sura, name_ar, ayat)
+values (112, 'الإخلاص', 4) on conflict (sura) do nothing;
+insert into public.quran_ayat (sura, aya, text_uthmani, text_plain)
+values (112, 1, 'قُلْ هُوَ ٱللَّهُ أَحَدٌ', ''),
+       (112, 2, 'ٱللَّهُ ٱلصَّمَدُ', '')
+on conflict (sura, aya) do nothing;
+
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$
+declare v jsonb; v_n int;
+begin
+  -- أ) التجريدُ يُسقِط الشكلَ ويوحِّد الهمزة
+  if public.ar_plain('قُلْ هُوَ ٱللَّهُ أَحَدٌ') <> 'قل هو الله احد' then
+    raise exception 'FAIL: التجريدُ على غير وجهه: [%]',
+      public.ar_plain('قُلْ هُوَ ٱللَّهُ أَحَدٌ');
+  end if;
+
+  -- ب) الانتقاءُ بالمرجع وبالبحث
+  select count(*) into v_n from public.quran_pick(112, 1, 2, null, 20);
+  if v_n <> 2 then raise exception 'FAIL: الانتقاءُ بالمرجع لم يُصِبْ (%)', v_n; end if;
+  select count(*) into v_n from public.quran_pick(null, null, null, 'الصمد', 20);
+  if v_n < 1 then raise exception 'FAIL: البحثُ في النصِّ لم يجد'; end if;
+
+  -- ج) الموسومُ المطابقُ يمرّ، والمخالفُ يُرَدّ
+  v := public.check_ayat(jsonb_build_array(jsonb_build_object(
+         'ref', '112:1', 'text', '﴿قُلْ هُوَ ٱللَّهُ أَحَدٌ﴾')), null);
+  if jsonb_array_length(v -> 'bad') <> 0 then
+    raise exception 'FAIL: آيةٌ صحيحةٌ رُدَّت: %', v;
+  end if;
+  v := public.check_ayat(jsonb_build_array(jsonb_build_object(
+         'ref', '112:1', 'text', 'قل هو الله الصمد')), null);
+  if jsonb_array_length(v -> 'bad') <> 1 then
+    raise exception 'FAIL: آيةٌ خولفت فلم تُرَدَّ: %', v;
+  end if;
+
+  -- د) المكتوبُ بالأيدي يُكشَف
+  v := public.check_ayat('[]'::jsonb,
+    'قال تعالى قل هو الله احد الله الصمد وهذا من أعظم ما يُتلى في الخطبة', 12);
+  if jsonb_array_length(v -> 'typed') < 1 then
+    raise exception 'FAIL: نصٌّ قرآنيٌّ كُتب بالأيدي فلم يُكشَف: %', v;
+  end if;
+end $$;
+commit;
+
+do $$ begin raise notice
+  'PASS: إدراجُ الآيات بالرسم العثمانيِّ ومقابلتُها وكشفُ المكتوب بالأيدي'; end $$;
+
+-- =====================================================================
+-- ٥٠١ — بريدُ المشروع: اختيارُ المخاطَبين، والإرسالُ بنسختيه، والسجلّ
+-- =====================================================================
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$
+declare v_all int; v_tr int; v_n int; v_html text;
+begin
+  select count(*) into v_all from public.mail_audience('all', null);
+  select count(*) into v_tr  from public.mail_audience('translators', null);
+  if v_all < 1 then raise exception 'FAIL: لا مخاطَبين في الفريق كلِّه'; end if;
+  if v_tr > v_all then raise exception 'FAIL: المترجمون أكثرُ من الفريق كلِّه'; end if;
+
+  v_n := public.send_mail('تذكيرٌ باستكمال البيانات',
+    'نصٌّ مجرَّدٌ لمن لا يقبل التنسيق.',
+    '<table><tr><td>نصٌّ منسَّقٌ بهويّة المشروع</td></tr></table>', 'all', null, null);
+  if v_n <> v_all then raise exception 'FAIL: عددُ المرسَل إليهم خالف عددَ المخاطَبين'; end if;
+
+  select body_html into v_html from public.notifications
+   where kind = 'mail' and subject = 'تذكيرٌ باستكمال البيانات' limit 1;
+  if coalesce(v_html, '') = '' then
+    raise exception 'FAIL: النسخةُ المنسَّقةُ لم تُحفَظ مع الرسالة';
+  end if;
+
+  -- والموضوعُ الفارغُ يُرَدّ
+  begin
+    perform public.send_mail('', 'نصّ', null, 'all', null, null);
+    raise exception 'FAIL: رسالةٌ بلا موضوعٍ قُبلت';
+  exception when others then
+    if sqlerrm like 'FAIL:%' then raise; end if;
+  end;
+
+  select count(*) into v_n from public.mail_log(50);
+  if v_n < 1 then raise exception 'FAIL: سجلُّ البريد خالٍ بعد الإرسال'; end if;
+end $$;
+commit;
+
+-- ـ ومن لا يملك مفتاحَ المراسلات لا يُرسل ولا يرى المخاطَبين
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000d', true);
+do $$
+declare v_ok boolean := false; v_n int;
+begin
+  begin
+    perform public.send_mail('موضوع', 'نصّ', null, 'all', null, null);
+    v_ok := true;
+  exception when insufficient_privilege then null; end;
+  if v_ok then raise exception 'FAIL: عضوٌ بلا مفتاحٍ أرسل بريدًا'; end if;
+  select count(*) into v_n from public.mail_audience('all', null);
+  if v_n <> 0 then raise exception 'FAIL: عضوٌ بلا مفتاحٍ رأى المخاطَبين'; end if;
+end $$;
+commit;
+
+do $$ begin raise notice
+  'PASS: بريدُ المشروع: المخاطَبون والإرسالُ بنسختيه والسجلّ'; end $$;

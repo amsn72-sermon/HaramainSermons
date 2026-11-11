@@ -305,6 +305,28 @@ export function contentBottom(flow, { skip = SKIP } = {}) {
   return bottom;
 }
 
+// ـــ فسحةُ الحبر تحت خطِّ السطر (ملاحظة ٤٩٦)
+//
+//   القياسُ يأخذ أسفلَ صندوق السطر، وحبرُ بعض الخطوط ينزل تحته: ذيولُ
+//   النسخ التعليق في الأردية والفارسية تهبط هبوطًا بيّنًا، والحركاتُ
+//   السفلى في العربية كذلك. فإذا وقع القطعُ على أسفل الصندوق بالضبط
+//   قُصَّ ما تحته، فيرى القارئُ نصفَ سطرٍ في ذيل الصفحة. فيُحجَز قدرٌ
+//   تحت كلِّ قطعٍ نسبةً من أكبر قياسِ خطٍّ في التدفُّق، فلا يُقَصُّ حبر.
+export function inkBleed(flow) {
+  try {
+    const w = (flow.ownerDocument || document).defaultView || window;
+    let px = 0;
+    const els = [flow, ...flow.querySelectorAll(
+      'p, div, li, td, th, span, h1, h2, h3, h4, blockquote')];
+    for (const el of els) {
+      const fs = parseFloat(w.getComputedStyle(el).fontSize) || 0;
+      if (fs > px) px = fs;
+      if (px >= 48) break;
+    }
+    return Math.min(14, Math.max(3, Math.round(px * 0.22)));
+  } catch { return 3; }
+}
+
 // مواضعُ بدايات الصفحات: لا يُقطَع سطرٌ بين صفحتين، ولا يُترَك عنوانٌ
 //   وحدَه في ذيل صفحة (ملاحظتا ٤٣٠ و٤٣٧)
 //
@@ -313,25 +335,35 @@ export function contentBottom(flow, { skip = SKIP } = {}) {
 //   بأكثرَ مما تسع، فتُقَصُّ الزيادةُ ولا تظهر في التالية، فيسقط سطرٌ
 //   من المستند صمتًا (ملاحظة ٤٣٧). فالسحبُ هنا يستأنف الحسابَ من موضعه،
 //   فلا تتجاوز صفحةٌ سعتَها أبدًا.
-export function pageStarts(bottoms, total, boxPx, keeps = null) {
+export function pageStarts(bottoms, total, boxPx, keeps = null, bleed = 0) {
   const starts = [0];
   if (!(boxPx > 0)) return starts;
+  const room = Math.max(1, boxPx - Math.max(0, bleed));
   let guard = 0;
-  while (starts[starts.length - 1] + boxPx < total - 1 && guard++ < 2000) {
+  while (starts[starts.length - 1] + room < total - 1 && guard++ < 2000) {
     const start = starts[starts.length - 1];
-    const limit = Math.round(start + boxPx);
+    // حدُّ الصفحة محجوزًا منه فسحةُ الحبر، فلا يُقَصُّ ذيلُ آخر سطر
+    const limit = Math.round(start + room);
     // سماحةُ بكسلين: فرقُ التدوير بين قياس الشاشة وقياس الطباعة لا يُزحزح
     //   سطرًا بين صفحتين، وفسحةُ الأمان تحتمل هذا القدر (ملاحظة ٤٣٠)
     const fit = bottoms.filter(b => b > start + 1 && b <= limit + 2);
     // آخر سطر يكتمل داخل الصفحة، وإن لم يكتمل أي سطر قطعنا عند حد الصفحة
     let cut = fit.length ? fit[fit.length - 1] : limit;
-    // العنوانُ الذي انتهى عند القطع ينزل كلُّه إلى الصفحة التالية
+    // ما لا يُقسَم — عنوانٌ أو صفُّ جدول — إن وقع القطعُ في وسطه نزل
+    //   كلُّه إلى الصفحة التالية (ملاحظتا ٤٣٠ و٤٩٦)
     if (keeps) {
-      for (const k of keeps) {
-        if (k.bottom > cut + 2 || k.bottom < cut - 8) continue;
-        const top = Math.floor(k.top);
-        if (top > start + 1 && top < cut) { cut = top; }
-        break;
+      // أوّلًا: كتلةٌ يقع القطعُ في وسطها — تنزل كاملةً إلى التالية.
+      //   وتُقدَّم على غيرها، وإلّا بقي صفٌّ مقسومًا على صفحتين لأنَّ
+      //   عنوانًا سبقه استوفى الشرطَ الآخر فقُطع البحث عنده (ملاحظة ٤٩٦)
+      const cross = keeps.find(k => k.top < cut - 0.5 && k.bottom > cut + 0.5
+        && Math.floor(k.top) > start + 1);
+      if (cross) {
+        cut = Math.floor(cross.top);
+      } else {
+        // ثمَّ: كتلةٌ انتهت عند القطع — العنوانُ لا يُفرَد عمّا بعده
+        const ends = keeps.find(k => k.head && k.bottom <= cut + 2 && k.bottom >= cut - 8
+          && Math.floor(k.top) > start + 1 && Math.floor(k.top) < cut);
+        if (ends) cut = Math.floor(ends.top);
       }
     }
     if (!(cut > start + 1)) cut = limit;          // حِرزٌ من الدوران
@@ -438,13 +470,18 @@ export function headingBlocks(flow) {
 // بداياتُ صفحاتِ تدفُّقٍ: القياسُ والقطعُ وحفظُ العنوان مع كلامه — دالّةٌ
 //   واحدةٌ يستعملها المحررُ والتصديرُ والمجمَّعُ والمستنداتُ، فلا يشذُّ
 //   مُخرَجٌ عن مُخرَج (ملاحظات ٤٢٣ و٤٣٠ و٤٣٧)
-export function flowStarts(flow, { doc = null, boxPx, total = null } = {}) {
+export function flowStarts(flow, { doc = null, boxPx, total = null, keeps = null,
+  bleed = null } = {}) {
   const bottoms = lineBottoms(flow, { doc });
   // المحتوى قد يتجاوز صندوقَه (عائمٌ أو مزاحٌ)، فيُؤخَذ أبعدُ الاثنين
   //   حتى لا يسقط ذيلُ المستند (ملاحظة ٤٣٧)
   const base = total == null ? flow.getBoundingClientRect().height : total;
   const end = Math.max(base, bottoms[bottoms.length - 1] || 0);
-  return { starts: pageStarts(bottoms, end, boxPx, headingBlocks(flow)), total: end };
+  // كتلُ العناوين دائمًا، ومعها ما يُمرَّر من كتلٍ أخرى — كصفوف الجداول
+  const blocks = [...headingBlocks(flow).map(k => ({ ...k, head: true })),
+    ...(keeps || [])].sort((a, b) => a.top - b.top);
+  const gap = bleed == null ? inkBleed(flow) : bleed;
+  return { starts: pageStarts(bottoms, end, boxPx, blocks, gap), total: end, bleed: gap };
 }
 
 // بداياتُ صفحات صندوقِ كتابةٍ قائمٍ في الصفحة — بالحساب نفسِه الذي يُصدِّر
@@ -452,7 +489,7 @@ export function bodyStarts(body) {
   const boxPx = body.clientHeight || 1;
   const bottoms = lineBottoms(body);
   const total = Math.max(contentBottom(body), bottoms[bottoms.length - 1] || 0);
-  const starts = pageStarts(bottoms, total, boxPx, headingBlocks(body));
+  const starts = pageStarts(bottoms, total, boxPx, headingBlocks(body), inkBleed(body));
   return { starts, boxPx, total };
 }
 

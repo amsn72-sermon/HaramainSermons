@@ -240,7 +240,14 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 .pageno { position: absolute; top: ${P.top + WIN_H}mm; inset-inline-start: ${P.side}mm; width: ${BOX_W}mm; height: ${NUM_H}mm;
   display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #6b6257; letter-spacing: .5px; direction: ltr; }
 .flow { position: absolute; top: 0; inset-inline-start: 0; width: ${BOX_W}mm; }
-.print-body { --pt: 1pt; font-size: 12pt; line-height: 1.8; }
+/* مقاسُ المتن موحَّدٌ: أربعَ عشرةَ نقطةً بتباعد ١٫٩ (ملاحظة ٤٩٩) */
+.print-body { --pt: 1pt; font-size: 14pt; line-height: 1.9; }
+.print-body h2 { font-size: 15pt; line-height: 1.4; }
+.print-body h3 { font-size: 15pt; line-height: 1.4; font-weight: 600; }
+.print-body .aya { font-size: 15pt; line-height: 2; text-align: center; margin: .5em 0 .2em;
+  font-family: 'KFGQPC HAFS Uthmanic Script', 'Amiri Quran', 'Haramain Naskh', 'Traditional Arabic', serif; }
+.print-body .aya-ref { font-size: .72em; color: #6b6257; }
+.print-body .aya-tr { margin-top: 0; }
 .print-body .data-card { font-size: ${CARD.size}pt;${CARD.font ? ` font-family: ${CARD.font};` : ''} }
 .data-card tr.tr-row td { font-size: 9.5pt; color: #5a6a78; unicode-bidi: plaintext; }
 #measure { position: absolute; visibility: hidden; top: -10000mm; inset-inline-start: 0; width: ${BOX_W}mm; }

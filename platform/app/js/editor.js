@@ -1,10 +1,8 @@
 // محرر الترجمة: ورقة A4 على كليشة الهيئة بمساحة كتابة ثابتة، مع أدوات تنسيق متقدمة وتنقية لما يُلصق.
-import { h } from './ui.js';
+import { h, toast } from './ui.js';
 import { sanitize } from './sanitize.js';
 import { letterheadPage, PAGE, BOX, flowStarts, fontsSettled } from './page.js';
 
-const PT_SIZES = [9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28];
-const LINE_HEIGHTS = [['1', 'مفرد'], ['1.15', '1.15'], ['1.5', '1.5'], ['1.8', '1.8'], ['2', 'مزدوج'], ['2.5', '2.5']];
 const BLOCKS = 'P,H2,H3,BLOCKQUOTE,LI,DIV,TD,TH';
 
 // تُنتظَر خطوطُ الصفحة مرّةً واحدةً لكلِّ الجلسة (ملاحظة ٤٣٠)
@@ -35,6 +33,12 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
     'aria-label': label, 'data-placeholder': placeholder, spellcheck: 'true'
   });
   area.innerHTML = sanitize(html);
+  // الآيةُ المدرَجةُ لا تُحرَّر: وسمُ الإغلاق تُسقِطه التنقيةُ عند
+  //   الحفظ، فيُعاد عند كلِّ عرضٍ من صفِّها (ملاحظة ٥٠٠)
+  const lockAyat = () => {
+    area.querySelectorAll('.aya').forEach(el => { el.contentEditable = 'false'; });
+  };
+  lockAyat();
   const { page, body, num } = plain ? { page: area, body: area, num: null } : letterheadPage(top, area);
   const pages = h('span.small.muted.pages-est');
   const changed = () => { updatePages(); onChange && onChange(); };
@@ -134,15 +138,6 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
   }
   const cmd = (name, value = null) => { focus(); document.execCommand('styleWithCSS', false, false); document.execCommand(name, false, value); changed(); };
 
-  // تحويل ناتج fontSize المؤقت (size=7) إلى حجم بالنقاط نسبةً لحجم الصفحة الأساسي (12pt)
-  function fontSizePt(pt) {
-    cmd('fontSize', '7');
-    area.querySelectorAll('font[size="7"]').forEach(f => {
-      const s = h('span', { style: { fontSize: `${(pt / 12).toFixed(4).replace(/0+$/, '')}em` } });
-      s.append(...f.childNodes); f.replaceWith(s);
-    });
-    changed();
-  }
   function selectedBlocks() {
     const sel = getSelection();
     if (!sel.rangeCount || !area.contains(sel.anchorNode)) return [];
@@ -151,18 +146,6 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
     if (all.length) return all;
     const start = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
     return [start.closest(BLOCKS)].filter(b => b && area.contains(b));
-  }
-  function lineHeight(v) {
-    const saved = lastRange && area.contains(lastRange.startContainer)
-      ? [offsetOf(lastRange.startContainer, lastRange.startOffset), offsetOf(lastRange.endContainer, lastRange.endOffset)] : null;
-    ensureBlocks();
-    area.focus();
-    if (saved) {
-      const r = document.createRange(); r.setStart(...pointAt(saved[0])); r.setEnd(...pointAt(saved[1]));
-      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
-    }
-    selectedBlocks().forEach(b => { b.style.lineHeight = v; });
-    changed();
   }
   // إزالة التظليل عن التحديد كاملًا (لا يكفي removeFormat في بعض المتصفحات)
   function clearHighlight() {
@@ -190,16 +173,25 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
   const btn = (text, title, fn, cls) => h('button', { type: 'button', title, 'aria-label': title, class: cls, onmousedown: e => e.preventDefault(), onclick: fn }, text);
   const sel = (title, options, fn) => h('select', { 'aria-label': title, title, onchange: e => { fn(e.target.value); e.target.selectedIndex = 0; } },
     options.map(([v, t]) => h('option', { value: v }, t)));
+  // الآيةُ تُدرَج مغلقةً لا تُحرَّر، ويُفتَح تحتها سطرُ ترجمتها (ملاحظة ٥٠٠)
+  async function insertAya() {
+    try {
+      const m = await import('./quran.js');
+      const html = await m.ayaPick();
+      if (html) { cmd('insertHTML', html); lockAyat(); }
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
   const color = (title, value, fn) => h('label.color', { title }, h('input', { type: 'color', value, 'aria-label': title, onchange: e => fn(e.target.value) }));
   const sep = () => h('span.sep', { 'aria-hidden': 'true' });
 
   const tools = h('div.tools', { role: 'toolbar', 'aria-label': 'تنسيق النص' },
-    // الخطوط: ومنها خطُّ النسخ المرفقُ بالمنصة، وTraditional Arabic
-    //   بالاسم لمن كان عنده مثبَّتًا — وسلسلةُ التراجع واحدة (ملاحظة ٤٢٤)
-    sel('الخط', FONT_CHOICES, v => v && cmd('fontName', v)),
-    sel('حجم الخط', [['', 'الحجم'], ...PT_SIZES.map(p => [String(p), `${p} pt`])], v => v && fontSizePt(Number(v))),
+    // ـــ الخطُّ والمقاسُ والتباعدُ لم تبقَ اختيارًا: صارت من الكليشة
+    //   وحدَها — أربعَ عشرةَ نقطةً بتباعد ١٫٩ — فلا تختلف ورقةٌ عن ورقة
+    //   (ملاحظة ٤٩٩). ويبقى للمترجم نوعُ الفقرة: متنٌ أو عنوان
     sel('نوع الفقرة', [['', 'الفقرة'], ['p', 'نص عادي'], ['h2', 'عنوان رئيسي'], ['h3', 'عنوان فرعي'], ['blockquote', 'اقتباس']], v => v && cmd('formatBlock', v)),
-    sel('تباعد الأسطر', [['', 'التباعد'], ...LINE_HEIGHTS], v => v && lineHeight(v)),
+    // ـــ إدراجُ الآية بالرسم العثمانيِّ من مصحف المنصة (ملاحظة ٥٠٠)
+    btn('﴿آية﴾', 'إدراجُ آيةٍ بالرسم العثماني', () => insertAya()),
     sep(),
     btn('B', 'عريض (Ctrl+B)', () => cmd('bold'), 'b'),
     btn('I', 'مائل (Ctrl+I)', () => cmd('italic'), 'i'),
@@ -270,7 +262,7 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
   return {
     el, page, tools: readOnly ? null : tools,
     get html() { return sanitize(area.innerHTML); },
-    set html(v) { area.innerHTML = sanitize(v); updatePages(); },
+    set html(v) { area.innerHTML = sanitize(v); lockAyat(); updatePages(); },
     get text() { return (area.textContent || '').trim(); },
     focus() { area.focus(); }
   };

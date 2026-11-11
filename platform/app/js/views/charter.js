@@ -98,6 +98,14 @@ export async function render(ctx) {
     const signed = people.filter(m => signOf[m.id]);
     const waiting = people.filter(m => !signOf[m.id]);
 
+    // ـــ كشفٌ واحدٌ متَّصل: من وقَّع النسخةَ الجاريةَ أوّلًا بالاسم، ثمَّ
+    //   من وقَّع نسخةً سابقةً، ثمَّ من لم يوقِّع — في الشاشة والطباعة
+    //   سواءً، فلا يبحث القارئُ عن الاسم في كشفين (ملاحظة ٤٩٧)
+    const rank = m => (signOf[m.id] ? 0 : prevOf[m.id] ? 1 : 2);
+    const byName = (a, b) => rank(a) - rank(b)
+      || String(a.full_name || '').localeCompare(String(b.full_name || ''), 'ar');
+    const roster = [...people].sort(byName);
+
     // زرُّ وثيقة الإثبات: يُطبَع بنصِّ النسخة التي وقَّعها هو (ملاحظة ٤٢٧)
     const proofBtn = (m, sg) => {
       const b = h('button.btn.xs', { type: 'button',
@@ -129,7 +137,7 @@ export async function render(ctx) {
 
     const sheet = () => [
       ['العضو', 'الفريق', 'المدينة', 'الرقم', 'الحال', 'الاسم الموقَّع به', 'تاريخ التوقيع'],
-      ...people.map(m => {
+      ...roster.map(m => {
         const sg = signOf[m.id];
         const old = !sg ? prevOf[m.id] : null;
         const rec = sg || old;
@@ -200,16 +208,14 @@ export async function render(ctx) {
 
       people.length ? null : h('p.muted', 'لا أعضاءَ في هذا الميثاق بعد.'),
 
-      waiting.length ? h('div.card.stack',
-        h('h3', `لم يوقّعوا بعد (${waiting.length})`),
-        h('p.small.muted', 'العضو يُطالَب بالميثاق عند أول دخول، ولا يتابع عمله قبل توقيعه. '
+      roster.length ? h('div.card.stack',
+        h('h3', `كشفُ الميثاق (${roster.length})`),
+        h('p.small.muted', 'الموقِّعون بأسمائهم أوّلًا، ثمَّ من وقَّع نسخةً سابقة، '
+          + 'ثمَّ من لم يوقِّع بعد — والترتيبُ نفسُه في الكشف المطبوع. '
+          + 'والعضو يُطالَب بالميثاق عند أول دخول، ولا يتابع عمله قبل توقيعه. '
           + `والنسخةُ الجاريةُ ${ch.version}: من وقَّع نسخةً سابقةً يُطالَب بها من جديد، `
           + 'ويبقى توقيعُه الأولُ بنصِّه وتاريخه، فيُحتجُّ عليه به فيما كان قبلها.'),
-        table(waiting)) : null,
-
-      h('div.card.stack',
-        h('h3', `وقّعوا (${signed.length})`),
-        signed.length ? table(signed) : h('p.muted', 'لم يوقّع أحد بعد.')),
+        table(roster)) : null,
 
       moved.length ? h('details.cd-more',
         h('summary', `وقَّعوا هذا الميثاق ثم نُقلوا إلى فريقٍ آخر (${moved.length})`),
