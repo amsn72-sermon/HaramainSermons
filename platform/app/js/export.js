@@ -1,6 +1,7 @@
 // تصدير الترجمة على كليشة الهيئة مع بطاقة البيانات الثابتة:
 // Word (.docx) عبر مكتبة docx المحلية، وPDF عبر طباعة المتصفح. المقاسات من page.js.
 import { h, fmtHijri } from './ui.js';
+import { BUILD } from './version.js';
 import { sanitize } from './sanitize.js';
 import { langDir, state } from './store.js';
 import { PAGE, BOX, LETTERHEAD, cardColumns, cardRowsTr, fileName, docVerifyUrl,
@@ -229,7 +230,7 @@ export function printTranslations(items, { autoPrint = true, name = null, lh = n
   const SAFE_H = BOX.safeH;                 // فسحة أمان تمنع قصّ السطر الأخير (ملاحظتا ٧١ و٧٩)
   const WIN_H = BOX_H - NUM_H - SAFE_H;
   w.document.write(`<!doctype html><html lang="${first.track.language_code}" dir="${dir}" data-theme="light"><head><meta charset="utf-8"><title></title>
-<link rel="stylesheet" href="${location.origin}/css/app.css"><style>
+<link rel="stylesheet" href="${location.origin}/css/app.css?v=${BUILD}"><style>
 @page { size: A4; margin: 0; }
 html, body { margin: 0; background: #fff !important; color: #111 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 /* فاصل قبل كل صفحة تالية لا بعد كل صفحة، وإلا أنتج المتصفح صفحة بيضاء بينها (ملاحظة ٤٨) */
@@ -245,8 +246,9 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 .print-body h2 { font-size: 15pt; line-height: 1.4; }
 .print-body h3 { font-size: 15pt; line-height: 1.4; font-weight: 600; }
 .print-body .aya { display: inline; unicode-bidi: isolate; font-size: 15pt; line-height: 2;
-  font-family: 'Haramain Uthmani', 'KFGQPC HAFS Uthmanic Script', 'Amiri Quran',
-  'Haramain Naskh', 'Traditional Arabic', serif; }
+  font-family: 'Haramain Uthmani', 'KFGQPC DOORI Uthmanic Script',
+  'KFGQPC HAFS Uthmanic Script', 'Amiri Quran', 'Haramain Naskh',
+  'Traditional Arabic', serif; }
 .print-body .aya-ref { font-size: .72em; color: #6b6257; }
 .print-body .aya-tr { font-size: 14pt; font-style: italic; }
 .print-body .data-card { font-size: ${CARD.size}pt;${CARD.font ? ` font-family: ${CARD.font};` : ''} }

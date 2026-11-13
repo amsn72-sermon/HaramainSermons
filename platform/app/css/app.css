@@ -265,12 +265,12 @@ td .sub { display: block; color: var(--muted); font-size: .82rem; }
    مستقلّة، فتتبع محاذاةَ فقرتها ويُتِمُّ المترجمُ كلامَه بعدها في سطرها
    (ملاحظات ٥٠٠ و٨ و٩ من الدفعة التالية) */
 .aya { display: inline; unicode-bidi: isolate;
-  font-family: 'Haramain Uthmani', 'KFGQPC HAFS Uthmanic Script',
-  'KFGQPC Uthmanic Script HAFS', 'Amiri Quran', 'Haramain Naskh',
-  'Traditional Arabic', serif; }
+  font-family: 'Haramain Uthmani', 'KFGQPC DOORI Uthmanic Script',
+  'KFGQPC HAFS Uthmanic Script', 'KFGQPC Uthmanic Script HAFS',
+  'Amiri Quran', 'Haramain Naskh', 'Traditional Arabic', serif; }
 .aya-ref { font-size: .72em; color: #6b6257; font-family: inherit; }
 .aya-tr { font-style: italic; }
-.aya-pick { font-family: 'Haramain Uthmani', 'KFGQPC HAFS Uthmanic Script', 'Amiri Quran',
+.aya-pick { font-family: 'Haramain Uthmani', 'KFGQPC DOORI Uthmanic Script', 'Amiri Quran',
   'Haramain Naskh', 'Traditional Arabic', serif; font-size: 1.1em; line-height: 2; }
 .lh-body blockquote, .print-body blockquote { margin: .4em 2em; }
 .a4 .area:empty::before { color: #9aa1a8; }

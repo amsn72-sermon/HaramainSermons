@@ -1,6 +1,7 @@
 // تصدير مجمَّع على هيئة كتاب: غلافٌ وفهرسٌ وخطبٌ مرقَّمة على كليشة الهيئة (ملاحظة ١٥٢)
 //   يُبنى في نافذة مستقلة كما تُبنى ورقة الطباعة، ثم يُطبع أو يُحفظ PDF.
 import { state } from './store.js';
+import { BUILD } from './version.js';
 import { PAGE, LETTERHEAD, cardColumns, heading, docVerifyUrl,
   DOC_STAMP_CSS, docStampNode, BOX, flowStarts, fontsSettled, settledHeight } from './page.js';
 import { sanitize } from './sanitize.js';
@@ -39,7 +40,7 @@ export function printBook(items, meta, { autoPrint = true } = {}) {
   const WIN_H = BOX_H - NUM_H - SAFE_H;
 
   w.document.write(`<!doctype html><html lang="ar" dir="rtl" data-theme="light"><head><meta charset="utf-8"><title></title>
-<link rel="stylesheet" href="${location.origin}/css/app.css"><style>
+<link rel="stylesheet" href="${location.origin}/css/app.css?v=${BUILD}"><style>
 @page { size: A4; margin: 0; }
 html, body { margin: 0; background: #fff !important; color: #111 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .sheet { position: relative; width: ${P.w}mm; height: ${P.h}mm; overflow: hidden; background: #fff; }
