@@ -39,6 +39,31 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
     area.querySelectorAll('.aya').forEach(el => { el.contentEditable = 'false'; });
   };
   lockAyat();
+  // والنقرُ على الآية يضع المؤشِّرَ بعدها لا داخلَها، فيُستأنَف الكلامُ
+  //   في سطرها وتعمل أزرارُ المحاذاة على فقرتها (ملاحظتا ٨ و٩)
+  const caretAfter = node => {
+    try {
+      // المؤشِّرُ يُوضَع داخلَ عقدةٍ نصّيّةٍ بعد القطعة المغلقة، لا بعدها
+      //   عنصريًّا: المتصفِّحُ لا يقبل الكتابةَ ولا التنسيقَ إن كان
+      //   الاختيارُ على حافّة عنصرٍ غيرِ محرَّر (ملاحظتا ٨ و٩)
+      let next = node.nextSibling;
+      if (!next || next.nodeType !== 3) {
+        next = document.createTextNode('\u00A0');
+        node.after(next);
+      }
+      const r = document.createRange();
+      r.setStart(next, next.nodeValue.length);
+      r.collapse(true);
+      const sel = getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    } catch { /* لا يُعطَّل التحريرُ إن تعذَّر الوضع */ }
+  };
+  area.addEventListener('click', ev => {
+    if (readOnly) return;
+    const a = ev.target && ev.target.closest ? ev.target.closest('.aya') : null;
+    if (a && area.contains(a)) { caretAfter(a); area.focus(); }
+  });
   const { page, body, num } = plain ? { page: area, body: area, num: null } : letterheadPage(top, area);
   const pages = h('span.small.muted.pages-est');
   const changed = () => { updatePages(); onChange && onChange(); };
@@ -138,6 +163,26 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
   }
   const cmd = (name, value = null) => { focus(); document.execCommand('styleWithCSS', false, false); document.execCommand(name, false, value); changed(); };
 
+  // ـــ المحاذاةُ بأيدينا لا بأمر المتصفِّح (ملاحظة ٩)
+  //
+  //   أمرُ `justify*` في المتصفِّح يمتنع عن الفقرة التي فيها قطعةٌ
+  //   مغلقةٌ عن التحرير — كفقرةِ آيةٍ مدرَجة — فيرجع «نجح» ولا يُغيِّر
+  //   شيئًا. فصارت المحاذاةُ تُكتَب على الفقرة نفسِها، فتعمل في كلِّ
+  //   حال: في الآية وفي غيرها.
+  function align(v) {
+    focus();
+    let blocks = selectedBlocks();
+    if (!blocks.length && lastRange && area.contains(lastRange.startContainer)) {
+      const n = lastRange.startContainer;
+      const el = n.nodeType === 1 ? n : n.parentElement;
+      const b = el && el.closest(BLOCKS);
+      if (b && area.contains(b)) blocks = [b];
+    }
+    if (!blocks.length) { ensureBlocks(); blocks = [...area.children].filter(x => x.matches(BLOCKS)); }
+    blocks.forEach(b => { b.style.textAlign = v; });
+    changed();
+  }
+
   function selectedBlocks() {
     const sel = getSelection();
     if (!sel.rangeCount || !area.contains(sel.anchorNode)) return [];
@@ -178,7 +223,34 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
     try {
       const m = await import('./quran.js');
       const html = await m.ayaPick(lang);
-      if (html) { cmd('insertHTML', html); lockAyat(); }
+      if (!html) return;
+      // ـــ علامةٌ تُدرَج مع الآية ليُوضَع المؤشِّرُ بعدها (ملاحظة ٨)
+      //
+      //   الآيةُ قطعةٌ مغلقةٌ عن التحرير، والمتصفِّحُ بعد الإدراج يترك
+      //   المؤشِّرَ داخلَها أو عند حافّتها، فلا يُكتَب بعدها ولا تعمل
+      //   أزرارُ المحاذاة لأنَّ الاختيارَ ليس في فقرةٍ محرَّرة. فتُدرَج
+      //   معها علامةٌ، ثمَّ تُستبدَل بفراغٍ ويُوضَع المؤشِّرُ بعده، فيصير
+      //   الاستئنافُ في سطرها كما يُستأنَف بعد أيِّ كلمة.
+      cmd('insertHTML', html + '<span data-ayac="1"></span>');
+      // وقد يُخرِج المتصفِّحُ المُدرَجَ من فقرته عند الإدراج، فيُعاد لفُّ
+      //   ما ليس في فقرةٍ قبل وضع المؤشِّر
+      ensureBlocks();
+      lockAyat();
+      const mark = area.querySelector('[data-ayac]');
+      if (mark) {
+        const space = document.createTextNode('\u00A0');
+        mark.replaceWith(space);
+        try {
+          const r = document.createRange();
+          r.setStart(space, space.nodeValue.length);
+          r.collapse(true);
+          const sel = getSelection();
+          sel.removeAllRanges();
+          sel.addRange(r);
+        } catch { /* متصفِّحٌ لم يقبل الوضع: يبقى المؤشِّرُ حيث تركه */ }
+      }
+      area.focus();
+      changed();
     } catch (e) { toast(e.message, 'bad'); }
   }
 
@@ -203,10 +275,10 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
     color('تظليل', '#fff3b0', v => cmd('hiliteColor', v)),
     btn('⌧', 'إزالة التظليل', () => clearHighlight()),
     sep(),
-    btn('⇥', 'محاذاة لليمين', () => cmd('justifyRight')),
-    btn('≡', 'توسيط', () => cmd('justifyCenter')),
-    btn('⇤', 'محاذاة لليسار', () => cmd('justifyLeft')),
-    btn('☰', 'ضبط', () => cmd('justifyFull')),
+    btn('⇥', 'محاذاة لليمين', () => align('right')),
+    btn('≡', 'توسيط', () => align('center')),
+    btn('⇤', 'محاذاة لليسار', () => align('left')),
+    btn('☰', 'ضبط', () => align('justify')),
     btn('•', 'قائمة نقطية', () => cmd('insertUnorderedList')),
     btn('1.', 'قائمة مرقمة', () => cmd('insertOrderedList')),
     btn('⇲', 'زيادة المسافة البادئة', () => cmd('indent')),
