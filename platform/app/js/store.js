@@ -148,6 +148,7 @@ export const PERM_LABEL = {
   banks: 'الحسابات المصرفية',
   circulars: 'المراسلات الداخلية',
   roster_view: 'كشوفُ التواقيع المطبوعة وفتحُها بالباركود',
+  arch_fix: 'تنسيقُ النسخ المؤرشفة على الكليشة',
   shifts: 'الحضور والانصراف',
   evaluation: 'تقييم المرشدين المكانيين',
   interpretation: 'سجلّ الترجمة الفورية',
@@ -159,7 +160,7 @@ export const PERM_LABEL = {
 };
 export const PERM_KEYS = Object.keys(PERM_LABEL);
 // الأصلُ في المفاتيح الفتح، إلا ما لا يُستدرك فأصلُه المنع (ملاحظة ٢١٤)
-export const PERM_CLOSED = ['delete_member', 'roster_view'];
+export const PERM_CLOSED = ['delete_member', 'roster_view', 'arch_fix'];
 
 // الصلاحياتُ مفصَّلةٌ الآن: سبعٌ وأربعون مفردةً تحت رؤوسها، يُفصل فيها
 // في الخادم وتُقرأ هنا جاهزةً. وما لم يصل بعدُ يُقاس على الأصل القديم،

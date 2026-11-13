@@ -7247,7 +7247,9 @@ declare v_open text[]; v_want text[] := array[
   'sync_channels',
   -- أصلُ خطبة عرفة: معرّفُ مقطعٍ علنيٍّ على يوتيوب (ملاحظة ٤٧٦)
   'arafah_originals',
-  'verify_doc'];
+  'verify_doc',
+  -- دعوةُ البديل: يفتحها برمزها السرِّيِّ ولا حسابَ له بعد (ملاحظة ٥٠٢)
+  'sub_invite_open'];
   v_extra text[]; v_gone text[]; v_x text;
 begin
   select coalesce(array_agg(distinct p.proname order by p.proname), '{}')
@@ -10175,3 +10177,258 @@ commit;
 
 do $$ begin raise notice
   'PASS: بريدُ المشروع: المخاطَبون والإرسالُ بنسختيه والسجلّ'; end $$;
+
+-- =====================================================================
+-- ٥٠٢ — المخاطَبون بمحورين، وتذكيرُ من لم يوقِّع الميثاق
+-- =====================================================================
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$
+declare v_all int; v_mk int; v_none int; v_n int; v_again int; v_ids uuid[];
+begin
+  select count(*) into v_all from public.mail_audience('all', null);
+  select count(*) into v_mk  from public.mail_audience('all', 'makkah');
+  select count(*) into v_none from public.mail_audience('all', 'none');
+  if v_mk > v_all or v_none > v_all then
+    raise exception 'FAIL: المدينةُ وسَّعت المخاطَبين بدل أن تُضيِّقهم';
+  end if;
+  -- والمحوران معًا لا يُبدِّل أحدُهما الآخر
+  if (select count(*) from public.mail_audience('field', 'makkah'))
+     > (select count(*) from public.mail_audience('field', null)) then
+    raise exception 'FAIL: الفئةُ مع المدينة أوسعُ من الفئة وحدَها';
+  end if;
+
+  -- ـ التذكير: من لم يوقِّعْ يُذكَّر، ومن وقَّع لا يُذكَّر
+  select array_agg(id) into v_ids from public.profiles where status = 'active';
+  v_n := public.remind_charter(v_ids, 'policy', null);
+  if v_n < 1 then raise exception 'FAIL: لم يُذكَّر أحدٌ ممّن لم يوقِّع'; end if;
+  if exists (select 1 from public.charter_reminders c
+              join public.policy_acceptances a on a.member_id = c.member_id
+             where coalesce(a.policy_key, 'policy') = 'policy') then
+    raise exception 'FAIL: ذُكِّر من وقَّع الميثاقَ أصلًا';
+  end if;
+
+  -- ولا يُذكَّر في اليوم مرّتين
+  v_again := public.remind_charter(v_ids, 'policy', null);
+  if v_again <> 0 then raise exception 'FAIL: التذكيرُ تكرَّر في اليوم نفسِه (%)', v_again; end if;
+
+  -- وآخرُ تذكيرٍ يُرى في الكشف
+  select count(*) into v_n from public.charter_reminded('policy');
+  if v_n < 1 then raise exception 'FAIL: كشفُ التذكير خالٍ'; end if;
+end $$;
+commit;
+
+-- ـ ومن لا يملك تعديلَ الفريق لا يُذكِّر
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000d', true);
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    perform public.remind_charter(array['00000000-0000-0000-0000-00000000000c'::uuid],
+      'policy', null);
+    v_ok := true;
+  exception when insufficient_privilege then null; end;
+  if v_ok then raise exception 'FAIL: عضوٌ بلا صلاحيةٍ أرسل تذكيرًا'; end if;
+end $$;
+commit;
+
+do $$ begin raise notice
+  'PASS: المخاطَبون بالفئة والمدينة، وتذكيرُ من لم يوقِّع مرّةً في اليوم'; end $$;
+
+-- =====================================================================
+-- ٥٠٢ — تنسيقُ نسخةٍ مؤرشفة: بمفتاحه، والنصُّ السابقُ محفوظٌ يُرَدُّ إليه
+-- =====================================================================
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$
+declare v_t uuid; v jsonb; v_h bigint; v_now text;
+begin
+  select id into v_t from public.tracks
+   where translation_html is not null and deleted_at is null limit 1;
+  if v_t is null then
+    select id into v_t from public.tracks where deleted_at is null limit 1;
+    update public.tracks set translation_html = '<p>نصٌّ قديم</p>' where id = v_t;
+  end if;
+
+  v := public.fix_text(v_t);
+  if v is null or coalesce(v ->> 'html', '') = '' then
+    raise exception 'FAIL: صاحبُ المفتاح لم يقرأِ النصَّ للإصلاح';
+  end if;
+
+  perform public.fix_translation(v_t, '<p>نصٌّ منسَّقٌ جديد</p>', 'إصلاحُ تنسيق');
+  select translation_html into v_now from public.tracks where id = v_t;
+  if v_now !~ 'منسَّقٌ جديد' then raise exception 'FAIL: الحفظُ لم يقع'; end if;
+
+  select id into v_h from public.track_text_history
+   where track_id = v_t order by at desc limit 1;
+  if v_h is null then raise exception 'FAIL: النصُّ السابقُ لم يُحفَظ'; end if;
+
+  -- والردُّ إلى الصورة السابقة يرجع بالنصِّ القديم
+  if not public.fix_restore(v_h) then raise exception 'FAIL: الردُّ لم يقع'; end if;
+  select translation_html into v_now from public.tracks where id = v_t;
+  if v_now ~ 'منسَّقٌ جديد' then raise exception 'FAIL: النصُّ لم يُرَدَّ إلى صورته'; end if;
+
+  if (select count(*) from public.fix_history(v_t)) < 2 then
+    raise exception 'FAIL: سجلُّ الإصلاح ناقص';
+  end if;
+end $$;
+commit;
+
+-- ـ ومن لا مفتاحَ له لا يقرأ ولا يُصلِح
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000d', true);
+do $$
+declare v_t uuid; v_ok boolean := false;
+begin
+  select id into v_t from public.tracks where deleted_at is null limit 1;
+  if public.fix_text(v_t) is not null then
+    raise exception 'FAIL: عضوٌ بلا مفتاحٍ قرأ نصَّ الإصلاح';
+  end if;
+  begin
+    perform public.fix_translation(v_t, '<p>عبث</p>', null);
+    v_ok := true;
+  exception when insufficient_privilege then null; end;
+  if v_ok then raise exception 'FAIL: عضوٌ بلا مفتاحٍ عدَّل نسخةً مؤرشفة'; end if;
+end $$;
+commit;
+
+do $$ begin raise notice
+  'PASS: تنسيقُ النسخ المؤرشفة بمفتاحه، وسجلُّ نصوصها يُرَدُّ إليه'; end $$;
+
+-- =====================================================================
+-- ٥٠٢ — ترجمةُ الآية المعتمَدة: تُدرَج بنصِّها، ولكلِّ لغةٍ واحدة
+-- =====================================================================
+insert into public.quran_tr (lang, sura, aya, text) values
+  ('en', 112, 1, 'Say, He is Allah, One.'),
+  ('en', 112, 2, 'Allah, the Eternal Refuge.')
+on conflict (lang, sura, aya) do update set text = excluded.text;
+insert into public.quran_tr_editions (lang, title, translator, source, ayat)
+values ('en', 'الترجمة المعتمدة', 'مجمع الملك فهد', 'تحميل يدوي', 2)
+on conflict (lang) do update set title = excluded.title;
+
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$
+declare r record; v_n int;
+begin
+  -- الترجمةُ تأتي مع الآية إن طُلبت بلغتها
+  select * into r from public.quran_pick(112, 1, 1, null, 5, 'en');
+  if coalesce(r.tr, '') = '' then
+    raise exception 'FAIL: الترجمةُ المعتمَدةُ لم تأتِ مع الآية';
+  end if;
+  if r.text_uthmani !~ 'قُلْ' then raise exception 'FAIL: نصُّ الآية اختلّ'; end if;
+
+  -- ولغةٌ لا ترجمةَ لها: تأتي الآيةُ وحدَها بلا شيءٍ مكانها
+  select * into r from public.quran_pick(112, 1, 1, null, 5, 'ur');
+  if coalesce(r.tr, '') <> '' then
+    raise exception 'FAIL: ظهرت ترجمةٌ للغةٍ لم تُحمَّل لها ترجمة';
+  end if;
+
+  -- وبيانُ اللغات المحمَّلة يُقرأ
+  select count(*) into v_n from public.quran_tr_ready() where lang = 'en';
+  if v_n <> 1 then raise exception 'FAIL: بيانُ الترجمة المعتمَدة لم يُقرأ'; end if;
+end $$;
+commit;
+
+do $$ begin raise notice
+  'PASS: ترجمةُ الآية المعتمَدةُ تُدرَج بنصِّها، ولغةٌ بلا ترجمةٍ تُترَك'; end $$;
+
+-- =====================================================================
+-- ٥٠٢ — الإجازةُ والبديل: قبولان لا واحد، ورمزٌ سرِّيٌّ لا يُستعمل مرّتين
+-- =====================================================================
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c', true);
+do $$
+declare v_id uuid; v_ok boolean := false;
+begin
+  v_id := public.request_leave(current_date + 7, current_date + 14, 'سفر',
+    true, 'بديلٌ تجريبيّ', '0500000000');
+  if v_id is null then raise exception 'FAIL: الطلبُ لم يُنشَأ'; end if;
+  perform set_config('app.test_leave', v_id::text, false);
+
+  -- ولا يُترَك طلبان معلَّقان
+  begin
+    perform public.request_leave(current_date + 20, current_date + 21, 'آخر', false, null, null);
+    v_ok := true;
+  exception when others then
+    if sqlerrm like 'FAIL:%' then raise; end if;
+  end;
+  if v_ok then raise exception 'FAIL: قُبل طلبٌ ثانٍ والأولُ معلَّق'; end if;
+
+  -- والنهايةُ قبل البداية تُرَدّ
+  v_ok := false;
+  begin
+    perform public.request_leave(current_date + 9, current_date + 2, null, false, null, null);
+    v_ok := true;
+  exception when others then
+    if sqlerrm like 'FAIL:%' then raise; end if;
+  end;
+  if v_ok then raise exception 'FAIL: قُبلت مدّةٌ مقلوبة'; end if;
+
+  if (select count(*) from public.my_leaves()) < 1 then
+    raise exception 'FAIL: العضوُ لا يرى طلبَه';
+  end if;
+end $$;
+commit;
+
+-- ـ القرار: الإجازةُ تُقبَل والبديلُ يُقبَل، فيُنشَأ رمزُه
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$
+declare v_id uuid := current_setting('app.test_leave', true)::uuid; v jsonb; v_t text;
+begin
+  if (select count(*) from public.leave_sheet('pending')) < 1 then
+    raise exception 'FAIL: الإدارةُ لا ترى الطلبات المعلَّقة';
+  end if;
+
+  v := public.decide_leave(v_id, 'approved', 'approved', 'موفَّقًا');
+  if coalesce(v ->> 'token', '') = '' then
+    raise exception 'FAIL: لم يُنشَأ رمزُ البديل عند قبوله: %', v;
+  end if;
+  v_t := v ->> 'token';
+  if length(v_t) < 32 then raise exception 'FAIL: رمزُ البديل قصيرٌ يُخمَّن'; end if;
+  perform set_config('app.test_sub_token', v_t, false);
+
+  -- والدعوةُ تُفتَح بالرمز، وتُرَدُّ برمزٍ موضوع
+  if not ((public.sub_invite_open(v_t)) ->> 'ok')::boolean then
+    raise exception 'FAIL: الدعوةُ لم تُفتَحْ برمزها';
+  end if;
+  if ((public.sub_invite_open(repeat('0', 64))) ->> 'ok')::boolean then
+    raise exception 'FAIL: رمزٌ موضوعٌ فتح دعوة';
+  end if;
+end $$;
+commit;
+
+-- ـ البديلُ يربط نفسَه، ثمَّ لا يُستعمل الرمزُ مرّةً أخرى
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000d', true);
+do $$
+declare v_t text := current_setting('app.test_sub_token', true); v jsonb;
+begin
+  v := public.sub_invite_claim(v_t);
+  if not (v ->> 'ok')::boolean then raise exception 'FAIL: البديلُ لم يُربَط: %', v; end if;
+  v := public.sub_invite_claim(v_t);
+  if (v ->> 'ok')::boolean then raise exception 'FAIL: الرمزُ استُعمل مرّتين'; end if;
+end $$;
+commit;
+
+-- ـ ومن لا يملك تعديلَ الفريق لا يبتُّ في إجازة
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000d', true);
+do $$
+declare v_id uuid := current_setting('app.test_leave', true)::uuid; v_ok boolean := false;
+begin
+  begin
+    perform public.decide_leave(v_id, 'rejected', null, null);
+    v_ok := true;
+  exception when insufficient_privilege then null; end;
+  if v_ok then raise exception 'FAIL: عضوٌ بلا صلاحيةٍ بتَّ في إجازة'; end if;
+  if (select count(*) from public.leave_sheet(null)) <> 0 then
+    raise exception 'FAIL: عضوٌ بلا صلاحيةٍ رأى كشفَ الإجازات';
+  end if;
+end $$;
+commit;
+
+do $$ begin raise notice
+  'PASS: الإجازةُ والبديل: القبولان، والرمزُ السرِّيُّ لا يُستعمل مرّتين'; end $$;

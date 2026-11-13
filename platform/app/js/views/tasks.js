@@ -286,6 +286,7 @@ export async function workspace(ctx) {
   let dirty = false;
   const saveState = h('span.small.muted', t.translation_html ? 'محفوظة' : 'مسودة فارغة');
   const editor = createEditor({ html: t.translation_html || '', dir, readOnly: !canEdit, detachTools: true,
+    lang: t.language_code,
     label: `الترجمة (${langName(t.language_code)})`, top: dataCard(m, t.language_code, m.khateeb?.name),
     placeholder: canEdit ? 'اكتب الترجمة هنا…' : 'لم تُكتب الترجمة بعد.',
     onChange: () => { dirty = true; saveState.textContent = 'تعديلات غير محفوظة'; onEdit(); } });

@@ -27,7 +27,7 @@ export const FONT_CHOICES = [
   ['Verdana', 'Verdana']
 ];
 
-export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب هنا…', readOnly = false, label = 'النص', onChange, top = null, plain = false, detachTools = false } = {}) {
+export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب هنا…', readOnly = false, label = 'النص', onChange, top = null, plain = false, detachTools = false, lang = '' } = {}) {
   const area = h('div.area', {
     contenteditable: readOnly ? 'false' : 'true', dir, role: 'textbox', 'aria-multiline': 'true',
     'aria-label': label, 'data-placeholder': placeholder, spellcheck: 'true'
@@ -177,7 +177,7 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
   async function insertAya() {
     try {
       const m = await import('./quran.js');
-      const html = await m.ayaPick();
+      const html = await m.ayaPick(lang);
       if (html) { cmd('insertHTML', html); lockAyat(); }
     } catch (e) { toast(e.message, 'bad'); }
   }

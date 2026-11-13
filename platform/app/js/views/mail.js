@@ -12,15 +12,22 @@ import { mailBody, mailFrame } from '../mailtpl.js';
 
 const AR = n => Number(n || 0).toLocaleString('ar-SA-u-nu-latn');
 const CITY = { makkah: 'مكة المكرمة', madinah: 'المدينة المنورة' };
+// المحورُ الأول: الفئة. والمدينةُ محورٌ ثانٍ يُضيِّقها ولا يُبدِّلها
+//   (ملاحظة ٥ من دفعة ٥٠٢)
 const AUDIENCE = [
   ['all', 'الفريقُ كلُّه'],
   ['translators', 'المترجمون المتخصصون'],
   ['field', 'المرشدون المكانيون'],
   ['answers', 'المجيبون عن الأسئلة'],
   ['admins', 'الحساباتُ الإدارية'],
-  ['city', 'مدينةٌ بعينها'],
   ['nodata', 'من نقصت بياناتُه'],
   ['unsigned', 'من لم يوقِّع الميثاق']
+];
+const CITIES = [
+  ['', 'المدنُ كلُّها'],
+  ['makkah', 'مكة المكرمة'],
+  ['madinah', 'المدينة المنورة'],
+  ['none', 'بلا مدينةٍ مسجَّلة']
 ];
 
 export async function render() {
@@ -32,39 +39,70 @@ export async function render() {
     'aria-label': 'موضوع الرسالة' });
   const body = h('textarea', { rows: 10, placeholder: 'نصُّ الرسالة…',
     'aria-label': 'نص الرسالة' });
-  const audience = h('select', { 'aria-label': 'المخاطَبون' },
+  const audience = h('select', { 'aria-label': 'الفئة' },
     AUDIENCE.map(([v, t]) => h('option', { value: v }, t)));
   const city = h('select', { 'aria-label': 'المدينة' },
-    h('option', { value: 'makkah' }, 'مكة المكرمة'),
-    h('option', { value: 'madinah' }, 'المدينة المنورة'));
-  const cityBox = h('label.field.tight', { hidden: true }, 'المدينة', city);
+    CITIES.map(([v, t]) => h('option', { value: v }, t)));
+  const cityBox = h('label.field.tight', 'المدينة', city);
   const who = h('div.stack');
   const logBox = h('div.stack');
   let people = [];
+  // ـــ انتقاءُ أفرادٍ بأعيانهم فوق المحورين: إن لم يُنتقَ أحدٌ ذهبت
+  //   الرسالةُ إلى المعروضين كلِّهم، وإن انتُقي واحدٌ فأكثرُ خُصَّ بها
+  const chosen = new Set();
+  const q = h('input', { type: 'search', placeholder: 'ابحثْ باسمٍ أو بريد',
+    'aria-label': 'البحث عن عضو' });
+
+  // المعروضون بعد المحورين والبحث
+  const shown = () => {
+    const k = q.value.trim().toLowerCase();
+    return !k ? people : people.filter(p =>
+      String(p.full_name || '').toLowerCase().includes(k)
+      || String(p.email || '').toLowerCase().includes(k));
+  };
+
+  const paintWho = () => {
+    const list = shown();
+    const picked = people.filter(p => chosen.has(p.id));
+    const target = picked.length || list.length;
+    fill(who,
+      h('p.small',
+        h('b', `${AR(target)} مخاطَبًا`),
+        picked.length ? ' — منتقَون بأعيانهم'
+          : people.length ? '' : ' — لا أحدَ بهذا الاختيار'),
+      people.length ? h('div.row.wrap', { style: { gap: '6px', margin: '6px 0' } },
+        h('button.btn.xs', { type: 'button',
+          onclick: () => { shown().forEach(p => chosen.add(p.id)); paintWho(); } },
+          'انتقِ المعروض'),
+        h('button.btn.xs.ghost', { type: 'button',
+          onclick: () => { chosen.clear(); paintWho(); } },
+          'ألغِ الانتقاء — والرسالةُ للجميع')) : null,
+      people.length ? h('div.pick-list', list.slice(0, 400).map(p => {
+        const on = h('input', { type: 'checkbox', checked: chosen.has(p.id),
+          'aria-label': p.full_name });
+        on.onchange = () => { on.checked ? chosen.add(p.id) : chosen.delete(p.id); paintWho(); };
+        return h('label.check.pick-row', on,
+          h('span', p.full_name,
+            h('span.small.muted', ` · ${p.email}`
+              + (p.city ? ` · ${CITY[p.city] || p.city}` : ''))));
+      })) : null);
+  };
 
   const loadWho = async () => {
     fill(who, h('p.small.muted', 'يُحصَى المخاطَبون…'));
     try {
       const r = await db.rpc('mail_audience', {
-        p_audience: audience.value,
-        p_city: audience.value === 'city' ? city.value : null
+        p_audience: audience.value, p_city: city.value || null
       });
       people = Array.isArray(r) ? r : [];
-      fill(who,
-        h('p.small', h('b', `${AR(people.length)} مخاطَبًا`),
-          people.length ? '' : ' — لا أحدَ بهذا الاختيار'),
-        people.length
-          ? h('details.cd-more', h('summary', 'أسماءُ المخاطَبين'),
-              h('ul.small.muted', people.slice(0, 400).map(p =>
-                h('li', `${p.full_name} — ${p.email}`))))
-          : null);
+      // وتبديلُ المحورين يُفرِّغ الانتقاءَ، فلا تذهب رسالةٌ إلى من خرج منه
+      chosen.clear();
+      paintWho();
     } catch (e) { fill(who, h('p.bad', e.message)); }
   };
-  audience.onchange = () => {
-    cityBox.hidden = audience.value !== 'city';
-    loadWho();
-  };
+  audience.onchange = loadWho;
   city.onchange = loadWho;
+  q.oninput = paintWho;
 
   // ـــ المعاينة: الرسالةُ كما تصل، في إطارٍ معزول
   const preview = () => {
@@ -90,10 +128,15 @@ export async function render() {
     const txt = body.value.trim();
     if (!sub || !txt) { toast('الموضوعُ والنصُّ لا يُتركان.', 'warn'); return; }
     if (!people.length) { toast('لا مخاطَبين بهذا الاختيار.', 'warn'); return; }
+    const picked = people.filter(p => chosen.has(p.id));
+    const n0 = picked.length || people.length;
     const ok = await dialog({
       title: 'تأكيدُ الإرسال',
       body: h('div.stack',
-        h('p', `تُرسَل «${sub}» إلى ${AR(people.length)} مخاطَبًا.`),
+        h('p', `تُرسَل «${sub}» إلى ${AR(n0)} مخاطَبًا`
+          + (picked.length
+            ? (picked.length === 1 ? `: ${picked[0].full_name}.` : ' منتقَين بأعيانهم.')
+            : '.')),
         h('p.small.muted', 'ويخرج البريدُ من الخادم في دقيقته، '
           + 'ويُسجَّل ما وصل وما تعثَّر.')),
       buttons: [{ label: 'أرسِلْ', kind: 'primary', value: true },
@@ -104,9 +147,8 @@ export async function render() {
       try {
         const n = await db.rpc('send_mail', {
           p_subject: sub, p_body: txt, p_html: mailBody(txt),
-          p_audience: audience.value,
-          p_city: audience.value === 'city' ? city.value : null,
-          p_members: null
+          p_audience: audience.value, p_city: city.value || null,
+          p_members: picked.length ? picked.map(p => p.id) : null
         });
         toast(`أُضيفت الرسالةُ إلى الطابور لـ${AR(n)} مخاطَبًا.`, 'ok');
         subject.value = ''; body.value = '';
@@ -150,7 +192,10 @@ export async function render() {
         + 'وما يُوقَّع عليه بالعلم فبابُه «التعاميم».'))),
     h('div.card.stack',
       h('div.row.wrap',
-        h('label.field.tight', 'المخاطَبون', audience), cityBox),
+        h('label.field.tight', 'الفئة', audience), cityBox,
+        h('label.field.tight', 'بحثٌ بالاسم', q)),
+      h('p.small.muted', 'الفئةُ والمدينةُ معًا، ثمَّ انتقِ أفرادًا بأعيانهم إن شئت '
+        + '— وإن لم تنتقِ أحدًا ذهبت الرسالةُ إلى المعروضين كلِّهم.'),
       who,
       h('label.field', 'الموضوع', subject),
       h('label.field', 'النص', body),

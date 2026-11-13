@@ -2,7 +2,7 @@
 // بأنواعها، ثم قائمة الأعمال — وفي كل مستوى بحثٌ وفلترة وتصدير (ملاحظتا ١٣٧ و١٣٨)
 import { h, toast, busy, dialog, emptyState, fmtDate, fmtDateTime, fmtSermonDate, fmtHijri } from '../ui.js';
 import { db, storage } from '../sb.js';
-import { state, langName, hadLateness, isManager, MATERIAL_TYPES, SERMON_TYPES } from '../store.js';
+import { state, langName, hadLateness, isManager, can, MATERIAL_TYPES, SERMON_TYPES } from '../store.js';
 import { downloadDocx, printTranslation } from '../export.js';
 import { heading, fileName, applyPattern } from '../page.js';
 import { exportExcel, exportPdf, exportWord } from '../teamexport.js';
@@ -25,6 +25,7 @@ const ICONS = {
   trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
   undo: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
   marks: '<path d="M4 4h16v16H4z"/><path d="M7 9h10M7 13h6"/><path d="M15 17l2 2 4-4"/>',
+  pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
   // التصديرُ المقابِل: سطرٌ فوق سطر (ملاحظة ٢٥٢)
   pair: '<path d="M3 5h18"/><path d="M3 9h12"/><path d="M3 15h18"/><path d="M3 19h12"/>'
 };
@@ -661,6 +662,13 @@ export async function render(ctx) {
         t.material.source_pdf_path
           ? h('a.icon-btn', { href: `/app/revise/${t.material.id}`, title: 'التحديدات على الأصل',
               'aria-label': 'التحديدات على الأصل' }, icon('marks'))
+          : null,
+        // فتحُ النسخة على الكليشة لإصلاح تنسيقها، لمن مُنح مفتاحَه
+        //   (ملاحظة ٦ من دفعة ٥٠٢)
+        can('arch_fix')
+          ? h('a.icon-btn', { href: `/app/fix/${t.id}`,
+              title: 'افتحْها على الكليشة لتُنسَّق وتُحفَظ',
+              'aria-label': 'تنسيقٌ على الكليشة' }, icon('pen'))
           : null,
         iconBtn('redo', 'إعادة تنشيط الخطبة للتعديل على أصلها', e => busy(e.currentTarget,
           () => reopenDialog(t.material, m => { if (m === 'annotate') ctx.navigate(`/app/revise/${t.material.id}`); else ctx.navigate('/app/archive', { replace: true }); }))

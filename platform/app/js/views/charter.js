@@ -6,7 +6,7 @@
 //   الساحات والأبواب — الإرشادِ المكانيِّ وإجابةِ السائلين. فهذه
 //   الشاشةُ تعرضهما معًا، كلَّ ميثاقٍ بأهله وتواقيعهم، ولا يُخلَط أحدُهما
 //   بالآخر. ومن وقَّع ميثاقَ المترجمين لا يُطالَب بغيره.
-import { h, fill, toast, busy, fmtDate, fmtDateTime } from '../ui.js';
+import { h, fill, toast, busy, confirm, fmtDate, fmtDateTime } from '../ui.js';
 import { db } from '../sb.js';
 import { isAdmin, isManager, roleLabel } from '../store.js';
 import { POLICY_KEY, POLICY_VERSION, FIELD_KEY, FIELD_VERSION,
@@ -115,6 +115,21 @@ export async function render(ctx) {
       return b;
     };
 
+    // تذكيرُ عضوٍ بعينه من صفِّه (ملاحظة ١٠ من دفعة ٥٠٢)
+    const oneRemindBtn = m => {
+      const b = h('button.btn.xs', { type: 'button',
+        title: `تذكيرُ ${m.full_name} بالتوقيع على الميثاق` }, '🔔 ذكِّرْه');
+      b.onclick = () => busy(b, async () => {
+        try {
+          const n = await db.rpc('remind_charter',
+            { p_members: [m.id], p_key: ch.key, p_version: ch.version });
+          toast(Number(n) > 0 ? 'أُرسِل التذكير.'
+            : 'لم يُرسَل — إمّا وقَّع، وإمّا ذُكِّر اليوم.', Number(n) > 0 ? 'ok' : 'warn');
+        } catch (e) { toast(e.message, 'bad'); }
+      });
+      return b;
+    };
+
     const rowsOf = list => list.map(m => {
       const sg = signOf[m.id];
       const old = !sg ? prevOf[m.id] : null;
@@ -132,7 +147,8 @@ export async function render(ctx) {
                 h('div.small.muted', `ينتظر توقيع ${ch.version}`))
             : h('span.badge.bad', 'لم يوقّع')),
         h('td', { 'data-label': 'التاريخ' }, rec ? fmtDateTime(rec.accepted_at) : '—'),
-        h('td', { 'data-label': 'الإثبات' }, rec && isManager() ? proofBtn(m, rec) : '—'));
+        h('td', { 'data-label': 'الإثبات' }, rec && isManager() ? proofBtn(m, rec)
+          : !sg && isAdmin() ? oneRemindBtn(m) : '—'));
     });
 
     const sheet = () => [
@@ -156,6 +172,31 @@ export async function render(ctx) {
 
     // كشفٌ كاملٌ على كليشة الهيئة: الميثاقُ منسَّقًا ثم جدولُ من يُختار،
     //   ويُرشَّح بالفريق والمدينة ويُبوَّب بهما (ملاحظتا ٤٢٩ و٤٨٠)
+    // ـــ تذكيرُ من لم يوقِّع: في المعروض وحدَه لا في الفريق كلِّه
+    //   (ملاحظة ١٠ من دفعة ٥٠٢). ومن وقَّع لا يُذكَّر، ومن ذُكِّر اليومَ
+    //   لا يُذكَّر ثانيةً — والخادمُ هو الذي يحسم ذلك لا الشاشة
+    const remindBtn = waiting.length
+      ? h('button.btn.sm', { type: 'button',
+          title: 'يُرسَل إلى من لم يوقِّعوا في هذا الباب بعد ترشيحه' },
+          `🔔 ذكِّرْ من لم يوقِّع (${waiting.length})`)
+      : null;
+    if (remindBtn) {
+      remindBtn.onclick = () => busy(remindBtn, async () => {
+        const ok = await confirm('تذكيرُ من لم يوقِّع',
+          `يُرسَل تذكيرٌ إلى ${waiting.length} عضوًا في «${ch.tab}»`
+          + `${cityPick ? '' : ''} ممّن لم يوقِّعوا النسخةَ ${ch.version}. `
+          + 'ولا يُذكَّر من ذُكِّر اليوم.', 'أرسِلِ التذكير');
+        if (!ok) return;
+        try {
+          const n = await db.rpc('remind_charter', {
+            p_members: waiting.map(m => m.id), p_key: ch.key, p_version: ch.version
+          });
+          toast(Number(n) > 0 ? `ذُكِّر ${n} عضوًا.`
+            : 'لم يُذكَّر أحد — إمّا وقَّعوا، وإمّا ذُكِّروا اليوم.', Number(n) > 0 ? 'ok' : 'warn');
+        } catch (e) { toast(e.message, 'bad'); }
+      });
+    }
+
     const rosterBtn = h('button.btn.sm.primary', { type: 'button' }, '🖨 طباعةُ الكشف');
     rosterBtn.onclick = () => busy(rosterBtn, async () => {
       // الكشفُ من القاعدة: فيه الهويةُ ورمزُ الوثيقة (ملاحظتا ٤٣٢ و٤٣٣)
@@ -198,7 +239,7 @@ export async function render(ctx) {
           h('span', 'لم يوقّعوا'), h('b', String(waiting.length)))),
 
       h('div.row.wrap', { style: { margin: '12px 0' } },
-        rosterBtn,
+        rosterBtn, remindBtn,
         h('button.btn.sm', { type: 'button', onclick: () => exportExcel(sheet(), title) },
           'تصدير Excel'),
         wordBtn,

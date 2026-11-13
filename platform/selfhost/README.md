@@ -148,7 +148,9 @@ sudo sh -c 'openssl rand -base64 48 > /root/.haramain-backup-key && chmod 600 /r
 sudo cat /root/.haramain-backup-key     # احفظه في مكان آمن خارج الخادم
 cd ~/HaramainSermons/platform/selfhost
 sudo OCI_NAMESPACE=<namespace> sh backup.sh            # تجربة
-sudo sh backup.sh --install-cron <namespace>            # يوميًا 2:30 فجرًا بتوقيت الرياض
+sudo sh backup.sh --install-cron <namespace>            # يوميّة 2:30 فجرًا + نسخة الأحد الأسبوعية
+sudo sh backup.sh --install-cron <namespace> daily      # يوميّة وحدها
+sudo sh backup.sh --install-cron <namespace> weekly     # أسبوعية الأحد وحدها
 ```
 
 **مفتاح التشفير** هو الوحيد القادر على فك النسخ. إن ضاع مع الخادم ضاعت النسخ معه.
@@ -219,4 +221,32 @@ MAIL_REPLY_TO=trans@uqu.edu.sa
 
 ```
 sudo PROJECT=/opt/haramain/supabase python3 ~/HaramainSermons/platform/selfhost/notify.py --test your@email
+```
+
+## ٩. ترجماتُ الآيات المعتمَدة (ملاحظة ٥٠٢)
+
+لكلِّ لغةٍ ترجمةٌ واحدةٌ معتمَدة، تُحمَّل كما حُمِّل نصُّ المصحف: ملفٌّ كلُّ سطرٍ فيه `سورة|آية|النص`.
+
+انقلِ الملفَّ وسكربتَ التحميل إلى الخادم:
+
+```
+scp quran-tr-en.txt load-quran-tr.sql ubuntu@haramain-api-2:/tmp/
+```
+
+ثمَّ على الخادم، لكلِّ لغةٍ دفعةٌ واحدة (مثالُ الإنجليزية):
+
+```
+sudo docker cp /tmp/quran-tr-en.txt supabase-db:/tmp/tr.txt && sudo docker cp /tmp/load-quran-tr.sql supabase-db:/tmp/load-tr.sql
+```
+
+```
+sudo docker exec -i supabase-db psql -U supabase_admin -d postgres -v lang=en -v title='اسم الترجمة المعتمدة' -v translator='اسم المترجم' -v source='المصدر' -f /tmp/load-tr.sql
+```
+
+وتحميلُ لغةٍ ثانيةً يرفع ترجمتَها السابقةَ ويحلُّ الجديدُ محلَّها، فلا تجتمع ترجمتان للغةٍ واحدة.
+
+ويُرى المحمَّلُ كلُّه بهذا:
+
+```
+sudo docker exec -i supabase-db psql -U supabase_admin -d postgres -c "select lang, title, ayat from public.quran_tr_editions order by lang;"
 ```

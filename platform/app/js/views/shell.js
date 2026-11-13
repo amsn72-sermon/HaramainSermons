@@ -150,7 +150,8 @@ export function staffShell(view, path) {
       circ ? mail : null,
       // بريدُ المشروع: رسالةٌ إلى بريد العضو، غيرُ التعميم الموقَّع عليه
       //   (ملاحظة ٥٠١)
-      circ ? link('/app/mail', 'بريدُ المشروع') : null])]);
+      circ ? link('/app/mail', 'بريدُ المشروع') : null,
+      link('/app/leave', 'الإجازاتُ والبدلاء')])]);
 
   const termsGroup = group('المصطلحات', [
     link('/app/glossary', 'الدليل الإرشادي'),
@@ -187,6 +188,7 @@ export function staffShell(view, path) {
            isTeamLead() ? link('/app/sites', 'فريقي ومواقعه') : null], { open: true }),
          broadcast, mineGroup([mail])]
       : [group('عملي', [link('/app/tasks', 'مهامي'), mail,
+           link('/app/leave', 'إجازاتي'),
            link('/app/rooms', 'القاعات واللقاءات'),
            link('/app/training', 'التدريب والتأهيل'),
            isTeamLead() ? link('/app/sites', 'فريقي ومواقعه') : null], { open: true }),

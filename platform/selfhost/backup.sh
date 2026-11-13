@@ -21,13 +21,34 @@ PROFILE="${PROFILE:-oci}"
 KEYFILE="/root/.haramain-backup-key"
 KEEP_LOCAL_DAYS=3
 
+# ـــ الجدولةُ التلقائيّة (ملاحظة ٧ من دفعة ٥٠٢)
+#
+#   نسخةٌ كلَّ ليلةٍ في 2:30 فجرًا بتوقيت الرياض، فأقصى ما يضيع يومٌ
+#   واحدٌ لا أسبوع. ومعها نسخةُ الأحد تُعَلَّم أسبوعيّةً فتُحفَظ في
+#   مجلَّدٍ مستقلٍّ أطولَ مدّةً، فيبقى لكلِّ أسبوعٍ شاهدٌ ولو مُسحت
+#   اليوميّاتُ. ولا تدخُّلَ بعدها من أحد.
 if [ "$1" = "--install-cron" ]; then
-    [ -n "$2" ] || { echo "الاستخدام: sh backup.sh --install-cron <namespace>" >&2; exit 1; }
+    [ -n "$2" ] || { echo "الاستخدام: sh backup.sh --install-cron <namespace> [daily|weekly|both]" >&2; exit 1; }
+    MODE="${3:-both}"
     SELF="$(cd "$(dirname "$0")" && pwd)/backup.sh"
-    # 02:30 بتوقيت الرياض = 23:30 UTC
-    echo "30 23 * * * root OCI_NAMESPACE=$2 PROJECT=$PROJECT REGION=$REGION PROFILE=$PROFILE sh $SELF >> /var/log/haramain-backup.log 2>&1" > /etc/cron.d/haramain-backup
+    ENV_LINE="OCI_NAMESPACE=$2 PROJECT=$PROJECT REGION=$REGION PROFILE=$PROFILE"
+    LOG=">> /var/log/haramain-backup.log 2>&1"
+    : > /etc/cron.d/haramain-backup
+    # 02:30 بتوقيت الرياض = 23:30 UTC. ويومُ الأحد في الرياض يبدأ ليلةَ
+    #   السبت بـUTC، فالأحدُ الأسبوعيُّ يُكتَب بـ6 (السبت UTC)
+    if [ "$MODE" != "weekly" ]; then
+        echo "30 23 * * * root $ENV_LINE sh $SELF $LOG" >> /etc/cron.d/haramain-backup
+    fi
+    if [ "$MODE" != "daily" ]; then
+        echo "10 22 * * 6 root $ENV_LINE KIND=weekly sh $SELF $LOG" >> /etc/cron.d/haramain-backup
+    fi
     chmod 644 /etc/cron.d/haramain-backup
-    echo "جُدولت النسخة يوميًا 2:30 فجرًا بتوقيت الرياض. السجل: /var/log/haramain-backup.log"
+    case "$MODE" in
+      daily)  echo "جُدولت نسخةٌ يوميّةٌ 2:30 فجرًا بتوقيت الرياض." ;;
+      weekly) echo "جُدولت نسخةٌ أسبوعيّةٌ ليلةَ الأحد 1:10 فجرًا بتوقيت الرياض." ;;
+      *)      echo "جُدولت نسخةٌ يوميّةٌ 2:30 فجرًا، ونسخةُ الأحد الأسبوعيّةُ 1:10 فجرًا — بتوقيت الرياض." ;;
+    esac
+    echo "السجل: /var/log/haramain-backup.log"
     exit 0
 fi
 
@@ -62,9 +83,13 @@ docker exec -e PGPASSWORD="$PGPASS" supabase-db \
 tar -C "$PROJECT/volumes" -czf - storage \
   | openssl enc -aes-256-cbc -pbkdf2 -salt -pass file:"$KEYFILE" -out "$OUT/storage-$STAMP.tgz.enc"
 
+# النسخةُ الأسبوعيّةُ في مجلَّدٍ مستقلّ، فلا تُخلَط باليوميّات ولا يشملها
+#   تقليمُها (ملاحظة ٥٠٢)
+PREFIX="$(date -u +%Y/%m)"
+[ "${KIND:-daily}" = "weekly" ] && PREFIX="weekly/$(date -u +%Y)"
 for f in "$OUT/db-$STAMP.dump.enc" "$OUT/storage-$STAMP.tgz.enc"; do
     aws --profile "$PROFILE" --region "$REGION" --endpoint-url "$ENDPOINT" \
-        s3 cp "$f" "s3://$BUCKET/$(date -u +%Y/%m)/$(basename "$f")" --only-show-errors
+        s3 cp "$f" "s3://$BUCKET/$PREFIX/$(basename "$f")" --only-show-errors
 done
 
 find "$OUT" -name '*.enc' -mtime +$KEEP_LOCAL_DAYS -delete

@@ -18,9 +18,13 @@ const routes = [
   ['/verify-card', () => import('./views/cardverify.js'), false],
   // التحقّقُ من وثيقة إثبات التوقيع على الميثاق بباركودها (ملاحظة ٤٢٨)
   ['/verify-sign', () => import('./views/signverify.js'), false],
+  // دعوةُ البديل: صفحةٌ عامّةٌ يفتحها رمزُها السرِّيّ (ملاحظة ٥٠٢)
+  ['/sub', () => import('./views/subinvite.js'), false],
   // كشفُ التواقيع المطبوعُ يُفتَح بباركود رأسه، لإداريٍّ يملك مفتاحَه،
   //   ويُسجَّل فتحُه (ملاحظة ٤٩٨)
   ['/app/roster', () => import('./views/roster.js'), true, true],
+  // تنسيقُ نسخةٍ مؤرشفةٍ على الكليشة، بمفتاحٍ خاصّ (ملاحظة ٥٠٢)
+  ['/app/fix/:id', () => import('./views/fixtext.js'), true, true],
   ['/initiative', () => import('./views/about.js').then(m => ({ render: m.initiative })), false],
   ['/policy', () => import('./views/policy.js'), true],
   ['/mfa', () => import('./views/mfa.js'), true],
@@ -57,6 +61,8 @@ const routes = [
   ['/app/circulars', () => import('./views/circulars.js'), true],
   // بريدُ المشروع: رسالةٌ بهويّته إلى من يُختار (ملاحظة ٥٠١)
   ['/app/mail', () => import('./views/mail.js'), true, true],
+  // الإجازاتُ وتأمينُ البدلاء: يفتحها كلُّ عضوٍ لنفسه (ملاحظة ٥٠٢)
+  ['/app/leave', () => import('./views/leave.js'), true],
   ['/app/me', () => import('./views/me.js'), true],
   ['/app/audio-guide', () => import('./views/audioguide.js'), true],
   ['/app/bank-accounts', () => import('./views/staff.js'), true, true],
@@ -93,6 +99,7 @@ const PERM_OF = {
   '/app/cards': 'cards',
   '/app/roster': 'roster_view',
   '/app/mail': 'circulars',
+  '/app/fix': 'arch_fix',
   '/app/payroll': 'pay_view',
   '/app/bank-accounts': 'bank_view',
   '/app/shifts': 'sh_view', '/app/sites': 'sh_sites',
@@ -215,7 +222,10 @@ async function render() {
         : isAdmin() || supervisorMay;
       if (route.adminOnly && !mayView) return navigate('/app', { replace: true });
       // قائمة الصلاحيات: ما أُغلق على الحساب لا يُفتح ولو كُتب مساره (ملاحظة ١٧٢)
-      const need = PERM_OF[path] || (path.startsWith('/app/revise') ? 'mat_edit' : null);
+      const need = PERM_OF[path]
+        || (path.startsWith('/app/revise') ? 'mat_edit' : null)
+        // تنسيقُ نسخةٍ مؤرشفة: مفتاحُه خاصٌّ به (ملاحظة ٥٠٢)
+        || (path.startsWith('/app/fix/') ? 'arch_fix' : null);
       if (need && !can(need)) {
         toast('هذه الشاشة مغلقة على حسابك — راجع مدير المشروع.', 'bad');
         return navigate('/app', { replace: true });

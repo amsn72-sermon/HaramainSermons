@@ -27,7 +27,10 @@ export const FONT_FACE_CSS = () => {
     + `font-weight: 400; font-display: swap; }
 @font-face { font-family: 'Haramain Naskh'; `
     + `src: url('${o}/assets/naskh-bold.ttf') format('truetype'); `
-    + `font-weight: 700; font-display: swap; }`;
+    + `font-weight: 700; font-display: swap; }
+@font-face { font-family: 'Haramain Uthmani'; `
+    + `src: url('${o}/assets/uthmani.ttf') format('truetype'); `
+    + `font-weight: 400; font-display: swap; }`;
 };
 export const boxWidth  = () => PAGE.w - PAGE.side * 2;
 export const boxHeight = () => PAGE.h - PAGE.top - PAGE.bottom;

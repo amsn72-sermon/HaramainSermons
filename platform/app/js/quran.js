@@ -37,7 +37,7 @@ async function suras() {
 }
 
 // ـــ صورةُ الآية في المتن: فقرةٌ مغلقةٌ تحمل مرجعَها، وتحتها سطرُ ترجمتها
-export function ayaHtml(rows) {
+export function ayaHtml(rows, tr = '') {
   if (!rows.length) return '';
   const ref = rows.length > 1
     ? `${rows[0].sura}:${rows[0].aya}-${rows[rows.length - 1].aya}`
@@ -46,14 +46,23 @@ export function ayaHtml(rows) {
   const name = rows[0].sura_name || '';
   const nums = rows.length > 1
     ? `${AR(rows[0].aya)}-${AR(rows[rows.length - 1].aya)}` : AR(rows[0].aya);
-  return `<p class="aya" dir="rtl" data-aya="${esc(ref)}" contenteditable="false">`
+  // ـــ الآيةُ تُدرَج داخلَ السطر لا فقرةً مستقلّة (ملاحظتا ٨ و٩)
+  //
+  //   كانت تُدرَج فقرةً مغلقةً وتُتبَع بفقرةٍ فارغة، فكان المؤشِّرُ يقع
+  //   بعدها في سطرٍ جديدٍ ولا يُتِمُّ المترجمُ كلامَه في سطرها، وكانت
+  //   موسَّطةً قسرًا لا تقبل التيمين. فصارت قطعةً داخل السطر: يبقى
+  //   المؤشِّرُ بعدها حيث انتهت، وتتبع محاذاةَ فقرتها كسائر النصّ.
+  //   والإغلاقُ على نصِّ الآية وحدَه، فلا يُحرَّف ولا يُحرَّر.
+  return `<span class="aya" dir="rtl" data-aya="${esc(ref)}" contenteditable="false">`
     + `﴿${esc(text)}﴾`
-    + `<span class="aya-ref"> [${esc(name)}: ${esc(nums)}]</span></p>`
-    + '<p class="aya-tr"><br></p>';
+    + `<span class="aya-ref"> [${esc(name)}: ${esc(nums)}]</span></span>`
+    // ترجمةُ الآية المعتمَدةُ بعدها، وهي محرَّرةٌ يتصرَّف فيها المترجم
+    + (tr ? ` <span class="aya-tr">${esc(tr)}</span>` : '')
+    + '&nbsp;';
 }
 
 // ـــ نافذةُ الانتقاء
-export async function ayaPick() {
+export async function ayaPick(lang = '') {
   if (!(await quranReady())) {
     toast('لم يُحمَّل المصحفُ في الخادم بعد — راجعْ مديرَ المشروع.', 'warn');
     return '';
@@ -73,6 +82,22 @@ export async function ayaPick() {
   const chosen = new Set();
   let rows = [];
 
+  // بيانُ الترجمة المعتمَدة: اسمُها ومترجمُها، أو أنَّها لم تُحمَّل بعد
+  const trNote = h('p.small.muted');
+  (async () => {
+    if (!lang) { trNote.remove(); return; }
+    try {
+      const r = await db.rpc('quran_tr_ready');
+      const ed = (Array.isArray(r) ? r : []).find(x => x.lang === lang);
+      trNote.textContent = ed
+        ? `الترجمةُ المعتمَدةُ لهذه اللغة: ${ed.title}`
+          + (ed.translator ? ` — ${ed.translator}` : '')
+          + `، وتُدرَج بنصِّها.`
+        : 'لم تُحمَّلْ ترجمةٌ معتمَدةٌ لهذه اللغة بعد، فتُدرَج الآيةُ وحدَها '
+          + 'وتكتب ترجمتَها بنفسك.';
+    } catch { trNote.remove(); }
+  })();
+
   const paint = () => {
     fill(box, rows.length ? rows.map(r => {
       const key = `${r.sura}:${r.aya}`;
@@ -81,7 +106,9 @@ export async function ayaPick() {
       on.onchange = () => { on.checked ? chosen.add(key) : chosen.delete(key); };
       return h('label.check.pick-row', on,
         h('span', h('b.aya-pick', r.text_uthmani),
-          h('span.small.muted', ` [${r.sura_name || ''}: ${AR(r.aya)}]`)));
+          h('span.small.muted', ` [${r.sura_name || ''}: ${AR(r.aya)}]`),
+          // الترجمةُ المعتمَدةُ تُعرَض كما ستُدرَج، فلا يُدرِج المترجمُ ما لم يره
+          r.tr ? h('div.small.muted', r.tr) : null));
     }) : [h('p.small.muted', 'اختَرْ سورةً أو ابحثْ بكلمة.')]);
   };
 
@@ -92,7 +119,7 @@ export async function ayaPick() {
         p_sura: sura.value ? Number(sura.value) : null,
         p_from: from.value ? Number(from.value) : null,
         p_to: to.value ? Number(to.value) : null,
-        p_q: q.value.trim() || null, p_limit: 60
+        p_q: q.value.trim() || null, p_limit: 60, p_lang: lang || null
       });
       rows = Array.isArray(r) ? r : [];
       // وتبديلُ الانتقاء يُفرِّغ ما اختير، فلا تُدرَج آيةٌ من بحثٍ سابق
@@ -110,7 +137,9 @@ export async function ayaPick() {
     body: h('div.stack',
       h('p.small.muted', 'تُدرَج الآيةُ كما هي في المصحف، ولا تُحرَّر في المحرر، '
         + 'ويُحفَظ مرجعُها فتُقابَل بأصلها عند الحفظ. '
-        + 'ويُفتَح تحتها سطرٌ لترجمتها. والحديثُ يُكتَب في المتن كسائر الكلام.'),
+        + 'وتُدرَج معها ترجمتُها المعتمَدةُ بنصِّها إن كانت محمَّلةً للغة المسار، '
+        + 'ولك أن تتصرَّف فيها بعد إدراجها. والحديثُ يُكتَب في المتن كسائر الكلام.'),
+      trNote,
       h('div.row.wrap',
         h('label.field.tight', 'السورة', sura),
         h('label.field.tight', 'من', from),
@@ -125,10 +154,15 @@ export async function ayaPick() {
     ]
   });
   if (!res || !res.length) return '';
-  // والمتَّصلُ من سورةٍ واحدةٍ يُجمَع في فقرةٍ واحدة، وغيرُه فقرةً فقرة
+  // والمتَّصلُ من سورةٍ واحدةٍ يُجمَع في قطعةٍ واحدة، وغيرُه قطعةً قطعة.
+  //   وترجمتُه المعتمَدةُ تُجمَع معه على ترتيبه
   const one = res.every(r => r.sura === res[0].sura)
     && res.every((r, i) => i === 0 || r.aya === res[i - 1].aya + 1);
-  return one ? ayaHtml(res) : res.map(r => ayaHtml([r])).join('');
+  if (one) {
+    const tr = res.map(r => r.tr).filter(Boolean).join(' ');
+    return ayaHtml(res, res.every(r => r.tr) ? tr : '');
+  }
+  return res.map(r => ayaHtml([r], r.tr || '')).join('');
 }
 
 // ـــ مراجعةُ المحفوظ: الموسومُ يُقابَل بأصله، والمكتوبُ بالأيدي يُكشَف
