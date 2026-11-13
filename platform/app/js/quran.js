@@ -39,13 +39,21 @@ async function suras() {
 // ـــ صورةُ الآية في المتن: فقرةٌ مغلقةٌ تحمل مرجعَها، وتحتها سطرُ ترجمتها
 export function ayaHtml(rows, tr = '') {
   if (!rows.length) return '';
-  const ref = rows.length > 1
-    ? `${rows[0].sura}:${rows[0].aya}-${rows[rows.length - 1].aya}`
-    : `${rows[0].sura}:${rows[0].aya}`;
-  const text = rows.map(r => r.text_uthmani).join(' ');
-  const name = rows[0].sura_name || '';
-  const nums = rows.length > 1
-    ? `${AR(rows[0].aya)}-${AR(rows[rows.length - 1].aya)}` : AR(rows[0].aya);
+  // ـــ المرجعُ يُبنى مُدًى متَّصلةً: «٢:١-٣» للمتَّصل، وتُفصَل المدى
+  //   بفاصلةٍ إن جُمعت آياتٌ من مواضعَ شتّى — فيبقى لكلِّ حرفٍ مرجعُه
+  //   وتُقابَل في الخادم بأصلها (ملاحظة ٥٠٠)
+  const runs = [];
+  for (const r of rows) {
+    const last = runs[runs.length - 1];
+    if (last && last.sura === r.sura && r.aya === last.to + 1) { last.to = r.aya; continue; }
+    runs.push({ sura: r.sura, from: r.aya, to: r.aya, name: r.sura_name || '' });
+  }
+  const ref = runs.map(x => `${x.sura}:${x.from}${x.to > x.from ? `-${x.to}` : ''}`).join(',');
+  const label = [...new Set(runs.map(x => x.name).filter(Boolean))].join('، ');
+  // ـــ رقمُ الآية في علامته كما في المصحف: محرفُ «نهاية الآية» يليه
+  //   رقمُها، فيرسمه الخطُّ العثمانيُّ دارةً مزخرفةً فيها العدد
+  const AN = n => String(n ?? '').replace(/[0-9]/g, d => '٠١٢٣٤٥٦٧٨٩'[Number(d)]);
+  const text = rows.map(r => `${r.text_uthmani} \u06DD${AN(r.aya)}`).join(' ');
   // ـــ الآيةُ تُدرَج داخلَ السطر لا فقرةً مستقلّة (ملاحظتا ٨ و٩)
   //
   //   كانت تُدرَج فقرةً مغلقةً وتُتبَع بفقرةٍ فارغة، فكان المؤشِّرُ يقع
@@ -55,7 +63,7 @@ export function ayaHtml(rows, tr = '') {
   //   والإغلاقُ على نصِّ الآية وحدَه، فلا يُحرَّف ولا يُحرَّر.
   return `<span class="aya" dir="rtl" data-aya="${esc(ref)}" contenteditable="false">`
     + `﴿${esc(text)}﴾`
-    + `<span class="aya-ref"> [${esc(name)}: ${esc(nums)}]</span></span>`
+    + `<span class="aya-ref"> [${esc(label)}]</span></span>`
     // ترجمةُ الآية المعتمَدةُ بعدها، وهي محرَّرةٌ يتصرَّف فيها المترجم
     + (tr ? ` <span class="aya-tr">${esc(tr)}</span>` : '')
     + '&nbsp;';
@@ -84,6 +92,9 @@ export async function ayaPick(lang = '') {
 
   // بيانُ الترجمة المعتمَدة: اسمُها ومترجمُها، أو أنَّها لم تُحمَّل بعد
   const trNote = h('p.small.muted');
+  // ـــ المختارُ يُجمَع في قطعةٍ واحدةٍ أو يُفرَّق قطعةً قطعة
+  //   (ملاحظةُ «أحتاج ثلاثَ آياتٍ لا أريدها منفصلة»)
+  const joinBox = h('input', { type: 'checkbox', checked: true });
   (async () => {
     if (!lang) { trNote.remove(); return; }
     try {
@@ -145,7 +156,10 @@ export async function ayaPick(lang = '') {
         h('label.field.tight', 'من', from),
         h('label.field.tight', 'إلى', to)),
       h('label.field', 'بحثٌ في النص', q),
-      box),
+      box,
+      h('label.check', joinBox,
+        h('span', 'اجمعِ المختارَ في قطعةٍ واحدة',
+          h('span.small.muted', ' — وإلّا أُدرِجت كلُّ آيةٍ قطعةً مستقلّةً بمرجعها')))),
     buttons: [
       { label: 'أدرِجِ المختار', kind: 'primary',
         validate: () => (chosen.size ? true : 'اختَرْ آيةً واحدةً على الأقل'),
@@ -154,11 +168,9 @@ export async function ayaPick(lang = '') {
     ]
   });
   if (!res || !res.length) return '';
-  // والمتَّصلُ من سورةٍ واحدةٍ يُجمَع في قطعةٍ واحدة، وغيرُه قطعةً قطعة.
-  //   وترجمتُه المعتمَدةُ تُجمَع معه على ترتيبه
-  const one = res.every(r => r.sura === res[0].sura)
-    && res.every((r, i) => i === 0 || r.aya === res[i - 1].aya + 1);
-  if (one) {
+  // والجمعُ خيارُ المترجم: قطعةٌ واحدةٌ تحمل مرجعَ ما فيها كلِّه،
+  //   أو قطعةٌ لكلِّ آيةٍ بمرجعها. وترجمتُها المعتمَدةُ تتبعها على ترتيبها
+  if (joinBox.checked) {
     const tr = res.map(r => r.tr).filter(Boolean).join(' ');
     return ayaHtml(res, res.every(r => r.tr) ? tr : '');
   }

@@ -245,7 +245,7 @@ html, body { margin: 0; background: #fff !important; color: #111 !important; -we
 .print-body { --pt: 1pt; font-size: 14pt; line-height: 1.9; }
 .print-body h2 { font-size: 15pt; line-height: 1.4; }
 .print-body h3 { font-size: 15pt; line-height: 1.4; font-weight: 600; }
-.print-body .aya { display: inline; unicode-bidi: isolate; font-size: 15pt; line-height: 2;
+.print-body .aya { display: inline; unicode-bidi: isolate; font-size: 15pt; line-height: 2; font-style: normal;
   font-family: 'Haramain Uthmani', 'KFGQPC DOORI Uthmanic Script',
   'KFGQPC HAFS Uthmanic Script', 'Amiri Quran', 'Haramain Naskh',
   'Traditional Arabic', serif; }

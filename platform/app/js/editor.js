@@ -209,6 +209,52 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
     changed();
   }
 
+  // ـــ أزرارُ التنسيق تتحكَّم في الآية المدرَجة كما تتحكَّم في سائر
+  //   النصّ (ملاحظة ٩ المستأنَفة)
+  //
+  //   الآيةُ قطعةٌ مغلقةٌ عن التحرير حفظًا لحروفها، وأوامرُ المتصفِّح
+  //   لا تنفذ إليها، فكان الزرُّ يُضغَط ولا يقع أثرُه. فصارت هيئتُها
+  //   تُكتَب عليها هنا مباشرة: الغلظُ والميلُ والتسطيرُ والشطبُ واللونُ
+  //   والتظليل. ونصُّها لا يُمَسُّ بحال، فالمقابلةُ في الخادم باقيةٌ
+  //   على أصله.
+  const ayasInSelection = () => {
+    const all = [...area.querySelectorAll('.aya')];
+    if (!all.length) return [];
+    const sel = getSelection();
+    const r = (sel && sel.rangeCount && area.contains(sel.anchorNode))
+      ? sel.getRangeAt(0)
+      : (lastRange && area.contains(lastRange.startContainer) ? lastRange : null);
+    if (!r) return [];
+    if (!r.collapsed) return all.filter(el => { try { return r.intersectsNode(el); } catch { return false; } });
+    // والمؤشِّرُ الملاصقُ لآيةٍ يُعَدُّ اختيارًا لها: فالنقرُ عليها يضعه بعدها
+    const n = r.startContainer;
+    const prev = n.nodeType === 3
+      ? (r.startOffset === 0 ? n.previousSibling
+         : (/^[\s\u00A0]*$/.test(n.nodeValue.slice(0, r.startOffset)) ? n.previousSibling : null))
+      : n.childNodes[r.startOffset - 1];
+    const el = prev && prev.nodeType === 1 && prev.classList && prev.classList.contains('aya')
+      ? prev : null;
+    return el ? [el] : [];
+  };
+
+  // يُبدَّل بين قيمتين، ويُرَدُّ هل وقع الأثرُ على آية
+  const styleAya = (prop, on, off) => {
+    const list = ayasInSelection();
+    if (!list.length) return false;
+    const cur = list[0].style[prop];
+    const next = (cur === on) ? off : on;
+    list.forEach(el => { el.style[prop] = next; });
+    changed();
+    return true;
+  };
+  const setAya = (prop, v) => {
+    const list = ayasInSelection();
+    if (!list.length) return false;
+    list.forEach(el => { el.style[prop] = v; });
+    changed();
+    return true;
+  };
+
   function insertTable(spec) {
     const [r, c] = spec.split('x').map(Number);
     const row = tag => `<tr>${Array.from({ length: c }, () => `<${tag}><br></${tag}>`).join('')}</tr>`;
@@ -265,15 +311,15 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
     // ـــ إدراجُ الآية بالرسم العثمانيِّ من مصحف المنصة (ملاحظة ٥٠٠)
     btn('﴿آية﴾', 'إدراجُ آيةٍ بالرسم العثماني', () => insertAya()),
     sep(),
-    btn('B', 'عريض (Ctrl+B)', () => cmd('bold'), 'b'),
-    btn('I', 'مائل (Ctrl+I)', () => cmd('italic'), 'i'),
-    btn('U', 'تسطير (Ctrl+U)', () => cmd('underline'), 'u'),
-    btn('S', 'شطب', () => cmd('strikeThrough'), 's'),
+    btn('B', 'عريض (Ctrl+B)', () => { if (!styleAya('fontWeight', '700', '400')) cmd('bold'); }, 'b'),
+    btn('I', 'مائل (Ctrl+I)', () => { if (!styleAya('fontStyle', 'italic', 'normal')) cmd('italic'); }, 'i'),
+    btn('U', 'تسطير (Ctrl+U)', () => { if (!styleAya('textDecoration', 'underline', 'none')) cmd('underline'); }, 'u'),
+    btn('S', 'شطب', () => { if (!styleAya('textDecoration', 'line-through', 'none')) cmd('strikeThrough'); }, 's'),
     btn('x²', 'نص علوي', () => cmd('superscript')),
     btn('x₂', 'نص سفلي', () => cmd('subscript')),
-    color('لون النص', '#bc9661', v => cmd('foreColor', v)),
-    color('تظليل', '#fff3b0', v => cmd('hiliteColor', v)),
-    btn('⌧', 'إزالة التظليل', () => clearHighlight()),
+    color('لون النص', '#bc9661', v => { if (!setAya('color', v)) cmd('foreColor', v); }),
+    color('تظليل', '#fff3b0', v => { if (!setAya('backgroundColor', v)) cmd('hiliteColor', v); }),
+    btn('⌧', 'إزالة التظليل', () => { if (!setAya('backgroundColor', 'transparent')) clearHighlight(); }),
     sep(),
     btn('⇥', 'محاذاة لليمين', () => align('right')),
     btn('≡', 'توسيط', () => align('center')),
@@ -288,7 +334,12 @@ export function createEditor({ html = '', dir = 'rtl', placeholder = 'اكتب �
     sep(),
     btn('↶', 'تراجع (Ctrl+Z)', () => cmd('undo')),
     btn('↷', 'إعادة (Ctrl+Y)', () => cmd('redo')),
-    btn('⌫', 'مسح التنسيق', () => cmd('removeFormat')),
+    btn('⌫', 'مسح التنسيق', () => {
+      // ومسحُ التنسيق عن الآية يُعيدها إلى هيئتها المقرَّرة في الكليشة
+      const list = ayasInSelection();
+      if (list.length) { list.forEach(el => el.removeAttribute('style')); changed(); }
+      else cmd('removeFormat');
+    }),
     btn(dir === 'rtl' ? 'ع←' : '→A', 'تبديل اتجاه الفقرة', e => {
       const blocks = selectedBlocks();
       const target = blocks.length ? blocks : [area];

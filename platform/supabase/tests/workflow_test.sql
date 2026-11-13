@@ -10432,3 +10432,46 @@ commit;
 
 do $$ begin raise notice
   'PASS: الإجازةُ والبديل: القبولان، والرمزُ السرِّيُّ لا يُستعمل مرّتين'; end $$;
+
+-- =====================================================================
+-- ٥١٢ — آياتٌ مجموعةٌ في قطعةٍ واحدة: المرجعُ مُدًى، والمقابلةُ عليها
+-- =====================================================================
+begin; set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$
+declare v jsonb;
+begin
+  -- آيتان مجموعتان بمرجعٍ واحدٍ متَّصل، ومعهما علاماتُ أرقام الآي
+  v := public.check_ayat(jsonb_build_array(jsonb_build_object(
+         'ref', '112:1-2',
+         'text', '﴿قُلْ هُوَ ٱللَّهُ أَحَدٌ ۝١ ٱللَّهُ ٱلصَّمَدُ ۝٢﴾')), null);
+  if jsonb_array_length(v -> 'bad') <> 0 then
+    raise exception 'FAIL: قطعةٌ صحيحةٌ بمُدًى متَّصلةٍ رُدَّت: %', v;
+  end if;
+
+  -- ومُدًى متفرِّقةٌ تفصلها فاصلة
+  v := public.check_ayat(jsonb_build_array(jsonb_build_object(
+         'ref', '112:2,112:1',
+         'text', 'ٱللَّهُ ٱلصَّمَدُ ۝٢ قُلْ هُوَ ٱللَّهُ أَحَدٌ ۝١')), null);
+  if jsonb_array_length(v -> 'bad') <> 0 then
+    raise exception 'FAIL: قطعةٌ بمُدًى متفرِّقةٍ على ترتيبها رُدَّت: %', v;
+  end if;
+
+  -- وما خولف فيه حرفٌ يُرَدُّ ولو جُمع
+  v := public.check_ayat(jsonb_build_array(jsonb_build_object(
+         'ref', '112:1-2', 'text', 'قل هو الله احد الله الصمد الصمد')), null);
+  if jsonb_array_length(v -> 'bad') <> 1 then
+    raise exception 'FAIL: قطعةٌ مجموعةٌ خولفت فلم تُرَدَّ: %', v;
+  end if;
+
+  -- ومرجعٌ لا وجودَ له
+  v := public.check_ayat(jsonb_build_array(jsonb_build_object(
+         'ref', '112:1,99:200', 'text', 'نصّ')), null);
+  if jsonb_array_length(v -> 'bad') <> 1 then
+    raise exception 'FAIL: مرجعٌ لا وجودَ له لم يُرَدَّ: %', v;
+  end if;
+end $$;
+commit;
+
+do $$ begin raise notice
+  'PASS: الآياتُ المجموعةُ في قطعةٍ واحدة تُقابَل بأصلها على مُداها'; end $$;

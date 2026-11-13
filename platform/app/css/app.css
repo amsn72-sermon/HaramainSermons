@@ -264,7 +264,9 @@ td .sub { display: block; color: var(--muted); font-size: .82rem; }
 /* الآيةُ المدرَجةُ بالرسم العثماني: قطعةٌ مغلقةٌ داخلَ السطر لا فقرةٌ
    مستقلّة، فتتبع محاذاةَ فقرتها ويُتِمُّ المترجمُ كلامَه بعدها في سطرها
    (ملاحظات ٥٠٠ و٨ و٩ من الدفعة التالية) */
-.aya { display: inline; unicode-bidi: isolate;
+/* ولا تَرِث الآيةُ ميلًا من فقرةٍ مائلة: هيئتُها من الكليشة، وللمترجم
+   أن يُميلها بزرِّها إن أراد */
+.aya { display: inline; unicode-bidi: isolate; font-style: normal;
   font-family: 'Haramain Uthmani', 'KFGQPC DOORI Uthmanic Script',
   'KFGQPC HAFS Uthmanic Script', 'KFGQPC Uthmanic Script HAFS',
   'Amiri Quran', 'Haramain Naskh', 'Traditional Arabic', serif; }

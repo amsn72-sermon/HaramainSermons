@@ -56,7 +56,8 @@ function walk(node) {
         else child.removeAttribute('class');
       }
       // ومرجعُ الآية يُحفَظ معها ليُراجَع في الخادم: «سورة:آية» أو مداها
-      else if (n === 'data-aya' && /^\d{1,3}:\d{1,3}(-\d{1,3})?$/.test(attr.value)) continue;
+      else if (n === 'data-aya'
+        && /^\d{1,3}:\d{1,3}(-\d{1,3})?(,\d{1,3}:\d{1,3}(-\d{1,3})?)*$/.test(attr.value)) continue;
       else if (n === 'align' && /^(right|left|center|justify)$/i.test(attr.value)) continue;
       // ووسمُ FONT: يبقى لونُه وحدَه، ويسقط مقاسُه ووجهُه (ملاحظة ٤٩٩)
       else if (child.tagName === 'FONT' && n === 'color' && SAFE_VALUE.test(attr.value) && !PAPER.test(attr.value.trim())) continue;
